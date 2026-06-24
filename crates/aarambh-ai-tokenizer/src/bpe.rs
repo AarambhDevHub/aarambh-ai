@@ -18,8 +18,7 @@ impl BpeTokenizer {
         use tokenizers::models::bpe::{BPE, BpeTrainer};
         use tokenizers::tokenizer::{Tokenizer as HfTokenizer, Trainer};
 
-        let content =
-            std::fs::read_to_string(corpus_path.as_ref()).map_err(|e| AarambhError::Io(e))?;
+        let content = std::fs::read_to_string(corpus_path.as_ref()).map_err(AarambhError::Io)?;
 
         let words: Vec<String> = content.split_whitespace().map(String::from).collect();
 
@@ -45,8 +44,7 @@ impl BpeTokenizer {
 
     pub fn from_pretrained(path: impl AsRef<Path>) -> Result<Self> {
         let content = std::fs::read_to_string(path.as_ref())?;
-        let json: serde_json::Value =
-            serde_json::from_str(&content).map_err(|e| AarambhError::Json(e))?;
+        let json: serde_json::Value = serde_json::from_str(&content).map_err(AarambhError::Json)?;
 
         let vocab_obj = json["model"]["vocab"].as_object().ok_or_else(|| {
             AarambhError::Tokenizer("missing model.vocab in tokenizer.json".into())
@@ -115,11 +113,11 @@ impl BpeTokenizer {
 
             for i in 0..symbols.len() - 1 {
                 let pair = (symbols[i].clone(), symbols[i + 1].clone());
-                if let Some(rank) = self.merge_rank.get(&pair) {
-                    if *rank < best_rank {
-                        best_rank = *rank;
-                        best_idx = Some(i);
-                    }
+                if let Some(rank) = self.merge_rank.get(&pair)
+                    && *rank < best_rank
+                {
+                    best_rank = *rank;
+                    best_idx = Some(i);
                 }
             }
 
