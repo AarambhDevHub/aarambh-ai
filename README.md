@@ -16,6 +16,8 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 
 | Capability | Status |
 |---|---|
+| BPE tokeniser (train, encode, decode, special tokens) | Phase 1 ✅ |
+| Data pipeline (datasets, chunk & tokenize, DataLoader) | Phase 1 ✅ |
 | Decoder-only transformer (RMSNorm, RoPE, GQA, SwiGLU) | Phase 2 |
 | Four model scales: Tiny (25M) → Large (1.3B) | Phase 0 ✅ |
 | Thinking engine: Low / Medium / High reasoning budgets | Phase 7 |
@@ -214,9 +216,9 @@ aarambh-ai/
 ## Development Roadmap
 
 | Phase | What | Hardware | Status |
-|---|---|---|---|
+|---|---|---|---|---|
 | 0 | Workspace + core types | i3 | ✅ |
-| 1 | Tokeniser + data pipeline | i3 | ⬜ |
+| 1 | Tokeniser + data pipeline | i3 | ✅ |
 | 2 | Neural network primitives | i3 | ⬜ |
 | 3 | Full model forward pass | i3 | ⬜ |
 | 4 | Custom kernels (CPU SIMD + CUDA stubs) | i3 + GPU | ⬜ |

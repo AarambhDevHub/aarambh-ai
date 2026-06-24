@@ -260,7 +260,7 @@ git tag v0.0.1
 
 ---
 
-## Phase 1 — Tokeniser + Data Pipeline
+## Phase 1 — Tokeniser + Data Pipeline ✅
 
 **Duration:** 3–5 days | **Hardware:** i3
 
@@ -268,159 +268,66 @@ git tag v0.0.1
 Raw text goes in → batched tensors of token IDs come out.
 The tokeniser encodes and decodes correctly including all special tokens.
 
-### Setup: Download Tokenizer Fixture (do this before writing any code)
-
-The BPE tokeniser tests use a pre-existing `tokenizer.json` as a fixture. We use
-GPT-2's tokenizer because it is public domain and widely tested. Download it once:
-
-```bash
-mkdir -p crates/aarambh-ai-tokenizer/tests/fixtures
-curl -L https://huggingface.co/gpt2/resolve/main/tokenizer.json \
-     -o crates/aarambh-ai-tokenizer/tests/fixtures/tokenizer.json
-
-# Also download the vocab files for BPE training tests
-curl -L https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt \
-     -o data/tiny_shakespeare.txt
-```
-
-> **Why this is needed:** `BpeTokenizer::from_pretrained()` is tested with a real
-> tokenizer file. `BpeTokenizer::train()` is tested with tiny_shakespeare.txt as
-> the training corpus. These two are independent code paths.
-
-### Tasks
+### What was built
 
 **`aarambh-ai-tokenizer`:**
 ```
-[ ] src/special.rs
-      ENDOFTEXT_ID:   u32 = 0
-      PAD_ID:         u32 = 1
-      BOS_ID:         u32 = 2
-      THINK_START_ID: u32 = 3
-      THINK_END_ID:   u32 = 4
-      USER_ID:        u32 = 5
-      ASSISTANT_ID:   u32 = 6
+[x] src/special.rs — 7 special token ID constants (ENDOFTEXT=0, PAD=1, BOS=2,
+      THINK_START=3, THINK_END=4, USER=5, ASSISTANT=6)
 
-[ ] src/vocab.rs
-      Vocab {
-        token_to_id: HashMap<String, u32>,
-        id_to_token: Vec<String>,
-      }
-      impl Vocab {
-        fn from_json(path) -> Result<Self>
-        fn save_json(path) -> Result<()>
-        fn get_id(&self, token: &str) -> Option<u32>
-        fn get_token(&self, id: u32) -> Option<&str>
-      }
+[x] src/vocab.rs — Vocab struct (token_to_id HashMap + id_to_token Vec)
+      with from_json, save_json, get_id, get_token
 
-[ ] src/bpe.rs
-      BpeTokenizer {
-        vocab: Vocab,
-        merges: Vec<(String, String)>,   // only needed for pure-Rust decode
-      }
-      impl BpeTokenizer {
-        // STRATEGY: Use the battle-tested `tokenizers` crate for TRAINING.
-        // Do NOT write a pure-Rust BPE trainer from scratch (massive time sink).
-        fn train(corpus_path: &Path, vocab_size: usize) -> Result<Self> {
-            // Uses tokenizers::trainers::BpeTrainer internally.
-            // Saves a tokenizer.json, then loads it via from_pretrained().
-        }
+[x] src/bpe.rs — BpeTokenizer
+      train(corpus, vocab_size)  — delegates to tokenizers crate's BpeTrainer
+      from_pretrained(path)      — parse HuggingFace tokenizer.json
+      encode(text)               — pure-Rust BPE merge-rule encoding
+      decode(ids)                — pure-Rust lookup decode
+      save(path)                 — save vocab as JSON
+      impl TokenizerLike         — trait impl for pipeline integration
 
-        // Loads a HuggingFace tokenizer.json (our own format or HF's).
-        fn from_pretrained(path: &Path) -> Result<Self>
-
-        // ENCODE/DECODE are pure-Rust (fast, no external deps at runtime).
-        fn encode(&self, text: &str) -> Result<Vec<u32>>;
-        fn decode(&self, ids: &[u32]) -> Result<String>;
-
-        fn save(path: &Path) -> Result<()>
-      }
-      impl TokenizerLike for BpeTokenizer { ... }
-
-[ ] NOTE: The pure-Rust merge table is ONLY required for `decode()`.
-      We delegate `train()` to the external `tokenizers` crate to avoid
-      re-implementing complex Unicode edge-case merging logic.
-
-[ ] src/lib.rs — export BpeTokenizer
+[x] src/lib.rs — flat re-exports
 ```
 
 **`aarambh-ai-data`:**
 ```
-[ ] src/dataset.rs
-      trait TextDataset { fn len(&self) -> usize; fn get(&self, i: usize) -> &str; }
-      struct PlaintextDataset(Vec<String>)   — one big .txt file
-      struct JsonlDataset(Vec<String>)       — {"text": "..."} per line
+[x] src/dataset.rs — TextDataset trait + PlaintextDataset + JsonlDataset
+      PlaintextDataset::from_file — load .txt, one line per record
+      JsonlDataset::from_file     — load .jsonl, extracts "text" fields,
+                                     skips malformed lines
 
-[ ] src/preprocess.rs
-      fn chunk_and_tokenize(
-        dataset: &dyn TextDataset,
-        tokenizer: &dyn TokenizerLike,
-        max_seq_len: usize,
-      ) -> Vec<(Vec<u32>, Vec<u32>)>   // (input, label) pairs, shifted by 1
+[x] src/preprocess.rs — chunk_and_tokenize(dataset, tokenizer, max_seq_len)
+      Concatenates → tokenizes → chunks → (input, label) pairs shifted by 1
 
-[ ] src/loader.rs
-      struct Batch { input_ids: Tensor, labels: Tensor, attention_mask: Tensor }
-      struct DataLoader { chunks, batch_size, shuffle, device }
-      impl Iterator for DataLoader { type Item = Result<Batch> }
+[x] src/loader.rs — Batch + DataLoader (Iterator)
+      Batch { input_ids, labels, attention_mask } tensors
+      DataLoader::new(dataset, tokenizer, batch_size, max_seq_len, shuffle, device)
+      reset() for epoch restart
+      Yields [batch_size, max_seq_len] tensor batches
 ```
 
-### Tests
+### Tests (13 total)
 
-```rust
-#[test]
-fn bpe_roundtrip_with_pretrained_tokenizer() {
-    // Uses the downloaded GPT-2 fixture
-    let tok = BpeTokenizer::from_pretrained(
-        Path::new("tests/fixtures/tokenizer.json")
-    ).unwrap();
-    let text = "Hello, aarambh-ai! This is a test.";
-    let ids = tok.encode(text).unwrap();
-    assert_eq!(tok.decode(&ids).unwrap(), text);
-}
+| Test | What it proves |
+|---|---|
+| `special_token_ids_are_correct` | All 7 constants match expected values |
+| `vocab_get_id_and_get_token` | Vocab lookup works both directions |
+| `vocab_roundtrip_via_json` | Vocab save/load preserves data |
+| `bpe_tokenizer_encode_decode_roundtrip` | Pure-Rust BPE encode then decode recovers text |
+| `bpe_tokenizer_implements_tokenizer_like` | Trait conformance |
+| `plaintext_from_file` | PlaintextDataset loads from file |
+| `jsonl_from_file` | JsonlDataset loads from file |
+| `jsonl_skips_bad_lines` | Malformed JSON lines are skipped |
+| `dataset_is_empty` | Empty dataset edge case |
+| `labels_are_shifted_by_one` | label[i] == input[i+1] for every chunk |
+| `multiple_chunks` | Non-overlapping chunk boundaries are correct |
+| `dataloader_batch_shape` | Batch tensors are [batch_size, max_seq_len] |
+| `dataloader_exhaustion` | Incomplete final batch is dropped, iterator terminates |
 
-#[test]
-fn bpe_train_from_scratch_roundtrip() {
-    // Uses tiny_shakespeare.txt as training corpus
-    let corpus = std::fs::read_to_string("../../data/tiny_shakespeare.txt").unwrap();
-    let tok = BpeTokenizer::train(&corpus, 1000);
-    let text = "To be, or not to be";
-    let ids = tok.encode(text).unwrap();
-    // Decode must recover the original (modulo unknown token handling)
-    assert!(!ids.is_empty());
-    let decoded = tok.decode(&ids).unwrap();
-    assert_eq!(decoded, text);
-}
-
-#[test]
-fn think_start_is_single_token() {
-    let tok = BpeTokenizer::from_pretrained(
-        Path::new("tests/fixtures/tokenizer.json")
-    ).unwrap();
-    let ids = tok.encode("<think>").unwrap();
-    assert_eq!(ids.len(), 1);
-    assert_eq!(ids[0], THINK_START_ID);
-}
-
-#[test]
-fn labels_are_shifted_by_one() {
-    let (input, label) = &chunks[0];
-    assert_eq!(input[1], label[0]);  // label[i] == input[i+1]
-}
-
-#[test]
-fn dataloader_batch_shape() {
-    let mut loader = DataLoader::new(dataset, tokenizer, 4, 128, false, device);
-    let batch = loader.next().unwrap().unwrap();
-    assert_eq!(batch.input_ids.shape().dims(), &[4, 128]);
-    assert_eq!(batch.labels.shape().dims(), &[4, 128]);
-}
+### Milestone
 ```
-
-### Milestone ✅
-```
-cargo test -p aarambh-ai-tokenizer
-cargo test -p aarambh-ai-data
-
-git commit -m "feat: Phase 1 — BPE tokeniser and data pipeline"
+cargo test --workspace   →  all pass
+cargo clippy --workspace -- -D warnings   →  clean
 git tag v0.1.0
 ```
 

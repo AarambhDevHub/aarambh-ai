@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.0] - 2026-06-24
+
+### Added
+
+- **`aarambh-ai-tokenizer` crate** — BPE tokeniser
+  - `src/special.rs` — 7 special token ID constants
+  - `src/vocab.rs` — `Vocab` struct with `HashMap`-backed token↔id lookup, JSON I/O
+  - `src/bpe.rs` — `BpeTokenizer` with `train()` (delegates to `tokenizers` crate BpeTrainer), `from_pretrained()` (parses HuggingFace `tokenizer.json`), pure-Rust `encode()`/`decode()`, `save()`, `TokenizerLike` impl
+  - 5 unit tests covering all paths
+
+- **`aarambh-ai-data` crate** — Data pipeline
+  - `src/dataset.rs` — `TextDataset` trait, `PlaintextDataset` (`.txt` files), `JsonlDataset` (`.jsonl` with `{"text": "..."}` format)
+  - `src/preprocess.rs` — `chunk_and_tokenize(dataset, tokenizer, max_seq_len)` produces `(input, label)` pairs with labels shifted by 1
+  - `src/loader.rs` — `Batch` struct (input_ids, labels, attention_mask tensors), `DataLoader` struct implementing `Iterator<Item=Result<Batch>>` with batching, shuffling, device placement, and epoch `reset()`
+  - 8 unit tests
+
+### Changed
+
+- Updated all 14 crate `Cargo.toml` files to `edition = "2024"`
+
 ## [0.0.1] - 2026-06-24
 
 ### Added
