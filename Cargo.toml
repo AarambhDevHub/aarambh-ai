@@ -20,7 +20,7 @@ resolver = "2"
 [workspace.dependencies]
 candle-core        = { version = "0.10" }
 candle-nn          = { version = "0.10" }
-tokenizers         = "0.21"
+tokenizers         = "0.23"
 anyhow             = "1"
 thiserror          = "2"
 serde              = { version = "1", features = ["derive"] }
