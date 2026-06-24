@@ -1,0 +1,37 @@
+[workspace]
+members = [
+    "crates/aarambh-ai-core",
+    "crates/aarambh-ai-tokenizer",
+    "crates/aarambh-ai-data",
+    "crates/aarambh-ai-nn",
+    "crates/aarambh-ai-kernel",
+    "crates/aarambh-ai-model",
+    "crates/aarambh-ai-weights",
+    "crates/aarambh-ai-quant",
+    "crates/aarambh-ai-train",
+    "crates/aarambh-ai-finetune",
+    "crates/aarambh-ai-inference",
+    "crates/aarambh-ai-safety",
+    "crates/aarambh-ai-selflearn",
+    "aarambh-ai",
+]
+resolver = "2"
+
+[workspace.dependencies]
+candle-core        = { version = "0.10" }
+candle-nn          = { version = "0.10" }
+tokenizers         = "0.21"
+anyhow             = "1"
+thiserror          = "2"
+serde              = { version = "1", features = ["derive"] }
+serde_json         = "1"
+tokio              = { version = "1", features = ["full"] }
+clap               = { version = "4", features = ["derive"] }
+tracing            = "0.1"
+tracing-subscriber = "0.3"
+safetensors        = "0.4"
+rayon              = "1"
+cc                 = "1"
+which              = "6"
+
+

@@ -1,0 +1,4 @@
+[package]
+name = "aarambh-ai-weights"
+version = "0.1.0"
+edition = "2021"
