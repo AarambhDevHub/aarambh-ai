@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0] - 2026-06-25
+
+### Added
+
+- **`aarambh-ai-nn` crate** — Neural network primitives (Phase 2)
+  - `src/norm.rs` — `RMSNorm` wrapping `candle_nn::ops::rms_norm` with learnable weight
+  - `src/rope.rs` — `RopeCache` precomputing cos/sin tables for up to `max_seq_len`, applying rotary position embeddings to Q/K
+  - `src/kvcache.rs` — `KVCache` with `update()` (catches K/V along seq dim), `clear()`, `seq_len()`
+  - `src/attention.rs` — `GroupedQueryAttention` with Q/K/V projections, RoPE, K/V head expansion for GQA, causal masking, `softmax_last_dim`, output projection
+  - `src/ffn.rs` — `SwiGluFfn` with gate/up/down projections and SiLU-gated activation
+  - `src/block.rs` — `TransformerBlock` with pre-norm residual connections
+  - 5 integration tests covering RMSNorm shape, RoPE magnitude, SwiGLU shape, GQA output, and full block output
+  - `src/lib.rs` — flat re-exports of all modules
+
 ## [0.1.0] - 2026-06-24
 
 ### Added

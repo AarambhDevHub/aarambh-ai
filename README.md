@@ -18,7 +18,7 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 |---|---|
 | BPE tokeniser (train, encode, decode, special tokens) | Phase 1 ✅ |
 | Data pipeline (datasets, chunk & tokenize, DataLoader) | Phase 1 ✅ |
-| Decoder-only transformer (RMSNorm, RoPE, GQA, SwiGLU) | Phase 2 |
+| Decoder-only transformer (RMSNorm, RoPE, GQA, SwiGLU) | Phase 2 ✅ |
 | Four model scales: Tiny (25M) → Large (1.3B) | Phase 0 ✅ |
 | Thinking engine: Low / Medium / High reasoning budgets | Phase 7 |
 | Full training pipeline with AdamW, cosine schedule, checkpointing | Phase 5 |
