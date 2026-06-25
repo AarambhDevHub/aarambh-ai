@@ -68,10 +68,24 @@ mod tests {
         let rope = RopeCache::new(512, 64, 10000.0, &device).unwrap();
         let q = Tensor::randn(0f32, 1f32, (1, 4, 8, 64), &device).unwrap();
         let (q_rot, _) = rope.apply(&q, &q, 0).unwrap();
-        let norm_before: f32 = q.sqr().unwrap().sum_all().unwrap().sqrt().unwrap()
-            .to_scalar::<f32>().unwrap();
-        let norm_after: f32 = q_rot.sqr().unwrap().sum_all().unwrap().sqrt().unwrap()
-            .to_scalar::<f32>().unwrap();
+        let norm_before: f32 = q
+            .sqr()
+            .unwrap()
+            .sum_all()
+            .unwrap()
+            .sqrt()
+            .unwrap()
+            .to_scalar::<f32>()
+            .unwrap();
+        let norm_after: f32 = q_rot
+            .sqr()
+            .unwrap()
+            .sum_all()
+            .unwrap()
+            .sqrt()
+            .unwrap()
+            .to_scalar::<f32>()
+            .unwrap();
         assert!(
             (norm_before - norm_after).abs() < 1e-4,
             "RoPE changed magnitude: {norm_before} → {norm_after}",

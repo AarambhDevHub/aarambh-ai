@@ -15,7 +15,12 @@ pub struct TransformerBlock {
 }
 
 impl TransformerBlock {
-    pub fn new(norm1: RMSNorm, attn: GroupedQueryAttention, norm2: RMSNorm, ffn: SwiGluFfn) -> Self {
+    pub fn new(
+        norm1: RMSNorm,
+        attn: GroupedQueryAttention,
+        norm2: RMSNorm,
+        ffn: SwiGluFfn,
+    ) -> Self {
         Self {
             norm1,
             attn,
