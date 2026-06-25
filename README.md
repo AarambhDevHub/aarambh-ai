@@ -216,10 +216,10 @@ aarambh-ai/
 ## Development Roadmap
 
 | Phase | What | Hardware | Status |
-|---|---|---|---|---|
+|---|---|---|---|
 | 0 | Workspace + core types | i3 | ✅ |
 | 1 | Tokeniser + data pipeline | i3 | ✅ |
-| 2 | Neural network primitives | i3 | ⬜ |
+| 2 | Neural network primitives | i3 | ✅ |
 | 3 | Full model forward pass | i3 | ⬜ |
 | 4 | Custom kernels (CPU SIMD + CUDA stubs) | i3 + GPU | ⬜ |
 | 5 | Training loop — Tiny trains! | i3 | ⬜ |
