@@ -2,3 +2,13 @@
 name = "aarambh-ai-nn"
 version = "0.1.0"
 edition = "2024"
+
+[dependencies]
+aarambh-ai-core = { path = "../aarambh-ai-core" }
+candle-core      = { workspace = true }
+candle-nn        = { workspace = true }
+
+[dev-dependencies]
+aarambh-ai-core = { path = "../aarambh-ai-core" }
+candle-core      = { workspace = true }
+candle-nn        = { workspace = true }

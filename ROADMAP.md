@@ -335,7 +335,7 @@ git tag v0.1.0
 
 ---
 
-## Phase 2 — Neural Network Primitives
+## Phase 2 — Neural Network Primitives ✅
 
 **Duration:** 5–7 days | **Hardware:** i3
 
@@ -343,23 +343,36 @@ git tag v0.1.0
 Every neural network building block works and is unit-tested individually.
 No full model yet — just the pieces.
 
+### What was built
+
+**`aarambh-ai-nn`:**
+```
+[x] src/norm.rs       — RMSNorm (learnable weight, epsilon)
+[x] src/rope.rs       — RopeCache (precomputed cos/sin, magnitude-preserving)
+[x] src/kvcache.rs    — KVCache (concat K/V, clear, seq_len)
+[x] src/attention.rs  — GroupedQueryAttention (Q/K/V projections, RoPE, GQA expand, causal mask)
+[x] src/ffn.rs        — SwiGluFfn (gate/up/down projections, SiLU activation)
+[x] src/block.rs      — TransformerBlock (pre-norm residuals, attn + ffn)
+[x] src/lib.rs        — flat re-exports of all modules
+```
+
 ### Tasks
 
 **`aarambh-ai-nn`:**
 ```
-[ ] src/norm.rs — RMSNorm
+[x] src/norm.rs — RMSNorm
       weight: Tensor  [hidden_dim]
       fn forward(&self, x: &Tensor) -> Result<Tensor>
       // x / sqrt(mean(x^2) + eps) * weight
 
-[ ] src/rope.rs — RopeCache
+[x] src/rope.rs — RopeCache
       cos: Tensor  [max_seq_len, head_dim/2]
       sin: Tensor  [max_seq_len, head_dim/2]
       fn new(cfg: &ModelConfig, device) -> Self
       fn apply(&self, q: &Tensor, k: &Tensor, seqlen_offset: usize) -> (Tensor, Tensor)
       // rotates Q and K using precomputed cos/sin
 
-[ ] src/attention.rs — GroupedQueryAttention
+[x] src/attention.rs — GroupedQueryAttention
       wq: Linear  [hidden_dim, n_heads × head_dim]
       wk: Linear  [hidden_dim, n_kv_heads × head_dim]
       wv: Linear  [hidden_dim, n_kv_heads × head_dim]
@@ -367,14 +380,14 @@ No full model yet — just the pieces.
       fn forward(&self, x, rope, mask, kv_cache: Option<&mut KvCache>) -> Result<Tensor>
       // project Q/K/V → apply RoPE → expand KV for GQA → attention → project output
 
-[ ] src/ffn.rs — SwiGluFfn
+[x] src/ffn.rs — SwiGluFfn
       w_gate: Linear  [hidden_dim, ffn_dim]
       w_up:   Linear  [hidden_dim, ffn_dim]
       w_down: Linear  [ffn_dim, hidden_dim]
       fn forward(&self, x: &Tensor) -> Result<Tensor>
       // (swish(x @ w_gate) * (x @ w_up)) @ w_down
 
-[ ] src/block.rs — TransformerBlock
+[x] src/block.rs — TransformerBlock
       norm1: RMSNorm
       attn:  GroupedQueryAttention
       norm2: RMSNorm
@@ -429,9 +442,20 @@ fn transformer_block_output_shape() {
 }
 ```
 
+### Tests (5 integration tests)
+
+| Test | What it proves |
+|---|---|
+| `rmsnorm_output_shape_unchanged` | RMSNorm preserves input shape |
+| `rope_preserves_vector_magnitude` | RoPE rotation does not change ‖Q‖ |
+| `gqa_output_shape` | GQA produces [batch, seq, hidden_dim] |
+| `swiglu_ffn_shape_unchanged` | SwiGLU preserves input shape |
+| `transformer_block_output_shape` | Full block produces [batch, seq, hidden_dim] |
+
 ### Milestone ✅
 ```
 cargo test -p aarambh-ai-nn   → all tests pass
+cargo clippy -p aarambh-ai-nn -- -D warnings   → clean
 
 git commit -m "feat: Phase 2 — RMSNorm, RoPE, GQA, SwiGLU, TransformerBlock"
 git tag v0.2.0
