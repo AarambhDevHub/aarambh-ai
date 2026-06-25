@@ -21,10 +21,10 @@ impl ModelConfig {
     pub fn tiny() -> Self {
         Self {
             vocab_size: 32000,
-            hidden_dim: 256,
+            hidden_dim: 384,
             ffn_dim: 1024,
-            n_layers: 6,
-            n_heads: 4,
+            n_layers: 8,
+            n_heads: 6,
             n_kv_heads: 2,
             max_seq_len: 512,
             rope_theta: 10000.0,
@@ -37,7 +37,7 @@ impl ModelConfig {
         Self {
             vocab_size: 32000,
             hidden_dim: 768,
-            ffn_dim: 3072,
+            ffn_dim: 2688,
             n_layers: 12,
             n_heads: 12,
             n_kv_heads: 4,
@@ -52,7 +52,7 @@ impl ModelConfig {
         Self {
             vocab_size: 32000,
             hidden_dim: 1024,
-            ffn_dim: 4096,
+            ffn_dim: 3392,
             n_layers: 24,
             n_heads: 16,
             n_kv_heads: 8,
@@ -67,7 +67,7 @@ impl ModelConfig {
         Self {
             vocab_size: 32000,
             hidden_dim: 2048,
-            ffn_dim: 8192,
+            ffn_dim: 6656,
             n_layers: 24,
             n_heads: 32,
             n_kv_heads: 8,

@@ -76,7 +76,7 @@ tokio              = { version = "1", features = ["full"] }
 clap               = { version = "4", features = ["derive"] }
 tracing            = "0.1"
 tracing-subscriber = "0.3"
-safetensors        = "0.4"
+safetensors        = "0.8"
 rayon              = "1"
 cc                 = "1"
 which              = "6"
@@ -87,6 +87,8 @@ simd         = ["crates/aarambh-ai-kernel/simd"]
 ```
 
 > **Note on `tokenizers` vs custom BPE:** The `tokenizers` crate is used for **both** loading AND training. Our pure-Rust `BpeTokenizer` implements `encode`/`decode` from the merge rules. The heavy BPE training logic is delegated to the external crate to avoid re‑implementing complex Unicode edge‑cases.
+
+> **Per-crate Cargo.toml:** When you `cargo new` each crate, add `[dependencies]` using `workspace = true`. See ARCHITECTURE.md Section 4 for the exact dependency list per crate.
 
 ---
 
@@ -129,11 +131,11 @@ exist as stubs with empty public modules.
         norm_eps, tie_embeddings
       }
       impl ModelConfig {
-        fn tiny() -> Self      // 25M  — use for all local dev
-        fn small() -> Self     // 117M
-        fn medium() -> Self    // 360M
-        fn large() -> Self     // 1.3B
-        fn head_dim(&self) -> usize  // hidden_dim / n_heads
+        fn tiny() -> Self      // 25M  — d_model=384, n_layers=8, n_heads=6, n_kv_heads=2, d_ffn=1024
+        fn small() -> Self     // 117M — d_model=768, n_layers=12, n_heads=12, n_kv_heads=4, d_ffn=2688
+        fn medium() -> Self    // 360M — d_model=1024, n_layers=24, n_heads=16, n_kv_heads=8, d_ffn=3392
+        fn large() -> Self     // 1.3B — d_model=2048, n_layers=24, n_heads=32, n_kv_heads=8, d_ffn=6656
+        fn head_dim(&self) -> usize  // hidden_dim / n_heads  (always 64 for all scales)
         fn from_json(path) -> Result<Self>
       }
       TrainConfig {
@@ -209,7 +211,7 @@ exist as stubs with empty public modules.
 #[test]
 fn tiny_config_head_dim_is_correct() {
     let cfg = ModelConfig::tiny();
-    assert_eq!(cfg.head_dim(), 64);  // 256 / 4
+    assert_eq!(cfg.head_dim(), 64);  // 384 / 6
 }
 
 #[test]
@@ -387,8 +389,8 @@ No full model yet — just the pieces.
 ```rust
 #[test]
 fn rmsnorm_output_shape_unchanged() {
-    let norm = RMSNorm::new(256, 1e-5, device, vb).unwrap();
-    let x = Tensor::randn(0f32, 1f32, (2, 16, 256), device).unwrap();
+    let norm = RMSNorm::new(384, 1e-5, device, vb).unwrap();
+    let x = Tensor::randn(0f32, 1f32, (2, 16, 384), device).unwrap();
     let out = norm.forward(&x).unwrap();
     assert_eq!(out.shape(), x.shape());
 }
@@ -411,7 +413,7 @@ fn rope_preserves_vector_magnitude() {
 fn gqa_output_shape() {
     let cfg = ModelConfig::tiny();
     let out = attn.forward(&x, &rope, &mask, None).unwrap();
-    assert_eq!(out.shape().dims(), &[1, 16, 256]);
+    assert_eq!(out.shape().dims(), &[1, 16, 384]);
 }
 
 #[test]
@@ -423,7 +425,7 @@ fn swiglu_ffn_shape_unchanged() {
 #[test]
 fn transformer_block_output_shape() {
     let out = block.forward(&x, &rope, &mask, None).unwrap();
-    assert_eq!(out.shape().dims(), &[2, 16, 256]);
+    assert_eq!(out.shape().dims(), &[2, 16, 384]);
 }
 ```
 
@@ -625,8 +627,8 @@ works on stable Rust 1.80+. See `src/cpu/simd_norm.rs` comment header.
 ```rust
 #[test]
 fn simd_norm_matches_candle_reference() {
-    let x = Tensor::randn(0f32, 1f32, (4, 512, 256), &CandleDevice::Cpu).unwrap();
-    let w = Tensor::ones((256,), DType::F32, &CandleDevice::Cpu).unwrap();
+    let x = Tensor::randn(0f32, 1f32, (4, 512, 384), &CandleDevice::Cpu).unwrap();
+    let w = Tensor::ones((384,), DType::F32, &CandleDevice::Cpu).unwrap();
     let out_simd   = cpu_rms_norm_simd(&x, &w, 1e-5).unwrap();
     let out_candle = candle_rms_norm_reference(&x, &w, 1e-5).unwrap();
     let max_diff = (out_simd - out_candle).unwrap().abs().unwrap()
@@ -1993,6 +1995,19 @@ git tag v0.12.0
 ### Goal
 Small model trains on Kaggle T4. Medium on P100. Large on A100.
 BF16 training enabled. Tokens/second benchmarked for each scale × device.
+
+### Data Setup (run once before training)
+
+```bash
+# WikiText-103 plain-text (free, public domain, ~500 MB)
+mkdir -p data/wikitext103
+curl -L "https://s3.amazonaws.com/research.metamind.io/wikitext/wikitext-103-raw-v1.zip" \
+     -o data/wikitext103.zip
+unzip data/wikitext103.zip -d data/
+# Produces: data/wikitext-103-raw/wiki.train.raw  (~103M tokens)
+#           data/wikitext-103-raw/wiki.valid.raw
+#           data/wikitext-103-raw/wiki.test.raw
+```
 
 ### Tasks
 

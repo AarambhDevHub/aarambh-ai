@@ -151,13 +151,14 @@ no separate training job.
 ```
 Step 1: Generate N completions (N=2 CPU, N=8 GPU)
         prompt = "What is 2+2?"
-        completions = ["4", "four", "5"]
+        completions = ["4", "5"]       ← N=2 on CPU
 
 Step 2: Score using a **Task Verifier** (Math/Code, not SelfCritique)
-        scores = [1.0, 1.0, 0.0]   // exact match
+        scores = [1.0, 0.0]           // exact match against ground truth "4"
 
 Step 3: Compute advantages (normalise within group)
-        advantages = [+0.7, +0.7, -1.4]
+        mean = 0.5,  std = 0.5
+        advantages = [+1.0, -1.0]
 
 Step 4: Compute GRPO loss (only if we have ground truth or deterministic verifier)
         L = -mean(policy_log_probs × advantages) + kl_coeff × KL(...)
@@ -342,13 +343,13 @@ aarambh-ai infer --self-learn cpu    # or gpu / disabled
 
 ```
 Tiny model weights (F32):   ~100 MB
-KV cache (512 tokens):        ~6 MB
+KV cache (512 tokens):        ~4 MB
 LoRA adapters (rank=8):      ~12 MB
 LoRA gradients:             ~150 MB
 N=2 completions overhead:    ~50 MB
 Critique inference:          ~10 MB
 ─────────────────────────────────────
-Total peak:                 ~328 MB   ← well within 8 GB
+Total peak:                 ~326 MB   ← well within 8 GB
 ```
 
 ---

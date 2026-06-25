@@ -11,7 +11,7 @@
 1. [Project Overview](#1-project-overview)
 2. [Design Philosophy](#2-design-philosophy)
 3. [Dependency Versions & Toolchain](#3-dependency-versions--toolchain)
-4. [Complete Workspace — 13 Crates](#4-complete-workspace--13-crates)
+4. [Complete Workspace — 14 Crates](#4-complete-workspace--14-crates)
 5. [Model Scales](#5-model-scales)
 6. [The Full Journey: Token → Output](#6-the-full-journey-token--output)
    - 6.1 Tokenisation
@@ -115,7 +115,7 @@ nightly:  rustup override set nightly       ← Phase 4 ONLY (std::simd / portab
 candle-core    = "0.10"          # confirmed latest stable on crates.io
 candle-nn      = "0.10"
 tokenizers     = "0.21"          # HuggingFace tokenizers Rust crate (stable API)
-safetensors    = "0.4"
+safetensors    = "0.8"
 thiserror      = "2"
 serde          = { version = "1", features = ["derive"] }
 serde_json     = "1"
@@ -156,7 +156,7 @@ curl -L https://huggingface.co/gpt2/resolve/main/tokenizer.json \
 
 ---
 
-## 4. Complete Workspace — 13 Crates
+## 4. Complete Workspace — 14 Crates
 
 ```
 aarambh-ai/
@@ -292,10 +292,10 @@ aarambh-ai/
 │   │           ├── pii_redact.rs     ← redact PII in model output
 │   │           └── audit.rs          ← SafetyEvent logging → safety_audit.jsonl
 │   │
-│   aarambh-ai-selflearn/             ← LAYER 5: Self-learning loop
+│   └── aarambh-ai-selflearn/         ← LAYER 5: Self-learning loop
 │       └── src/
 │           ├── lib.rs
-│           ├── loop.rs               ← SelfLearnLoop (ownes OnlineGrpo, Replay)
+│           ├── loop.rs               ← SelfLearnLoop (owns OnlineGrpo, Replay)
 │           ├── config.rs             ← SelfLearnConfig (mode, thresholds, budget)
 │           ├── online_grpo.rs        ← generate N completions → score (deterministic) → train online
 │           ├── replay.rs             ← ReplayBuffer: store, sample, evict
@@ -331,6 +331,37 @@ Layer 6  aarambh-ai (binary)
 Every crate may only depend on crates in the same or lower layer.
 This is enforced by `Cargo.toml` — the compiler will catch any violation.
 
+### Per-Crate `Cargo.toml` Dependencies (quick reference)
+
+When you `cargo new` each crate, add exactly these workspace deps to its `Cargo.toml`:
+
+| Crate | `[dependencies]` to add |
+|---|---|
+| `aarambh-ai-core` | `candle-core`, `serde`, `thiserror`, `tracing` |
+| `aarambh-ai-tokenizer` | `aarambh-ai-core`, `tokenizers`, `serde_json` |
+| `aarambh-ai-data` | `aarambh-ai-core`, `aarambh-ai-tokenizer`, `candle-core`, `serde_json`, `rayon` |
+| `aarambh-ai-nn` | `aarambh-ai-core`, `aarambh-ai-kernel`, `candle-core`, `candle-nn` |
+| `aarambh-ai-kernel` | `aarambh-ai-core`, `candle-core`, `rayon`, `cc`, `which` |
+| `aarambh-ai-model` | `aarambh-ai-core`, `aarambh-ai-nn`, `aarambh-ai-kernel`, `candle-core`, `candle-nn` |
+| `aarambh-ai-weights` | `aarambh-ai-core`, `aarambh-ai-model`, `candle-core`, `safetensors`, `serde_json` |
+| `aarambh-ai-quant` | `aarambh-ai-core`, `aarambh-ai-model`, `aarambh-ai-weights`, `candle-core` |
+| `aarambh-ai-train` | `aarambh-ai-core`, `aarambh-ai-model`, `aarambh-ai-data`, `aarambh-ai-weights`, `candle-core`, `candle-nn` |
+| `aarambh-ai-finetune` | `aarambh-ai-core`, `aarambh-ai-model`, `aarambh-ai-train`, `aarambh-ai-quant`, `candle-core`, `candle-nn` |
+| `aarambh-ai-inference` | `aarambh-ai-core`, `aarambh-ai-model`, `aarambh-ai-weights`, `candle-core`, `tokio` |
+| `aarambh-ai-safety` | `aarambh-ai-core`, `aarambh-ai-inference`, `serde_json` |
+| `aarambh-ai-selflearn` | `aarambh-ai-core`, `aarambh-ai-inference`, `aarambh-ai-finetune`, `candle-core`, `serde_json` |
+| `aarambh-ai` (binary) | all 13 library crates, `clap`, `anyhow`, `tokio`, `tracing-subscriber` |
+
+All deps use the `workspace = true` key, e.g.:
+```toml
+# crates/aarambh-ai-core/Cargo.toml
+[dependencies]
+candle-core  = { workspace = true }
+serde        = { workspace = true }
+thiserror    = { workspace = true }
+tracing      = { workspace = true }
+```
+
 ---
 
 ## 5. Model Scales
@@ -341,17 +372,22 @@ All four scales share the **identical code**. Only the numbers in `ModelConfig` 
 ┌──────────┬──────────┬──────────┬──────────┬──────────┬────────────┬──────────┬─────────────┐
 │  Scale   │  Params  │ d_model  │ N_layers │ N_heads  │ N_kv_heads │ d_ffn    │ max_seq_len │
 ├──────────┼──────────┼──────────┼──────────┼──────────┼────────────┼──────────┼─────────────┤
-│ Tiny     │   25M    │    256   │     6    │    4     │     2      │  1 024   │     512     │
-│ Small    │  117M    │    768   │    12    │   12     │     4      │  3 072   │   1 024     │
-│ Medium   │  360M    │  1 024   │    24    │   16     │     8      │  4 096   │   2 048     │
-│ Large    │  1.3B    │  2 048   │    24    │   32     │     8      │  8 192   │   4 096     │
+│ Tiny     │   25M    │    384   │     8    │    6     │     2      │  1 024   │     512     │
+│ Small    │  117M    │    768   │    12    │   12     │     4      │  2 688   │   1 024     │
+│ Medium   │  360M    │  1 024   │    24    │   16     │     8      │  3 392   │   2 048     │
+│ Large    │  1.3B    │  2 048   │    24    │   32     │     8      │  6 656   │   4 096     │
 └──────────┴──────────┴──────────┴──────────┴──────────┴────────────┴──────────┴─────────────┘
 
 vocab_size  : 32 000  (all scales)
+head_dim    : 64  (all scales — d_model / N_heads is always 64)
 rope_theta  : 10 000.0  (Tiny / Small)  |  500 000.0  (Medium / Large)
 norm_eps    : 1e-5  (all scales)
 tie_weights : true  (embedding ↔ LM head shared, all scales)
 ```
+
+> **Param count verification (all exact):**
+> Tiny: `embed(32000×384) + 8×(wq(384²) + wo(384²) + wk+wv(2×384×128) + ffn(3×384×1024) + norms(768)) + final_norm(384) = 24,877,440 ≈ 25M ✓`
+> All four configs verified. `head_dim = d_model / N_heads = 64` for every scale.
 
 **Which scale to use:**
 
@@ -383,7 +419,7 @@ User types: "The capital of India is"
 ┌─────────────────────────────────────────┐
 │  EMBEDDING TABLE (aarambh-ai-model)     │
 │  Each ID → d_model-dim float vector     │
-│  Tensor shape: [1, 5, 256]              │  ← (batch, seq_len, d_model)
+│  Tensor shape: [1, 5, 384]              │  ← (batch, seq_len, d_model)
 └────────────────────┬────────────────────┘
                      │
                      ▼  repeated × N_layers
@@ -408,7 +444,7 @@ User types: "The capital of India is"
                      ▼
 ┌─────────────────────────────────────────┐
 │  FINAL RMSNorm + LM HEAD                │
-│  [1, 5, 256] → [1, 5, 32000]            │  ← logits over vocabulary
+│  [1, 5, 384] → [1, 5, 32000]            │  ← logits over vocabulary
 │  Take last position: [1, 32000]          │
 └────────────────────┬────────────────────┘
                      │
@@ -545,8 +581,11 @@ Three projection matrices:
 Consistently better perplexity than ReLU/GeLU at same parameter count. Used in
 LLaMA 1/2/3, PaLM, Gemma, Mistral, Qwen, Phi.
 
-Note: `d_ffn = (2/3) × 4 × d_model` rounded to a multiple of 64 — because
-the three matrices cost the same as the standard two-matrix FFN.
+Note: `d_ffn` is chosen per the model scale table to hit each scale's exact parameter
+count target. For Tiny, d_ffn=1024 = (8/3)×d_model (≈2.67×), making the three SwiGLU
+matrices parameter-equivalent to a standard 2-matrix FFN at 4×d_model. For larger
+scales, d_ffn is set to fill the parameter budget while keeping the ratio in the
+2.67–3.5×d_model range.
 
 ### 6.7 Residual Connections & Pre-Norm Layout
 
@@ -712,7 +751,7 @@ Each layer has its own cache. Memory:
 ```
 2 × N_layers × N_kv_heads × max_seq_len × d_head × sizeof(dtype)
 
-Tiny at F32: 2 × 6 × 2 × 512 × 64 × 4 = ~6 MB per sequence
+Tiny at F32: 2 × 8 × 2 × 512 × 64 × 4 = ~4 MB per sequence
 ```
 
 ### 8.2 Sampling Strategies
@@ -980,7 +1019,7 @@ Even without CUDA, the kernel crate gives speedups on CPU:
 
 - **SIMD RMSNorm** (`cpu/simd_norm.rs`): Your i3-1115G4 supports AVX2 → ~2× RMSNorm speedup.
 - **Parallel attention** (`cpu/parallel_attn.rs`): Uses `rayon` to run all
-  attention heads in parallel across all 4 logical cores. Tiny model has 4 heads
+  attention heads in parallel across all 4 logical cores. Tiny model has 6 heads
   → near-linear speedup. Uses stable Rust only.
 
 ### 10.6 Build System
@@ -1118,10 +1157,10 @@ aarambh-ai convert \
 
 | Scale | F32 | BF16 | INT8 | INT4 (GPTQ) | GGUF Q4_K_M |
 |---|---|---|---|---|---|
-| Tiny   | 100 MB | 50 MB  | 25 MB  | 12.5 MB | 13 MB  |
-| Small  | 470 MB | 235 MB | 117 MB | 58 MB   | 61 MB  |
-| Medium | 1.44 GB| 720 MB | 360 MB | 180 MB  | 187 MB |
-| Large  | 5.2 GB | 2.6 GB | 1.3 GB | 650 MB  | 675 MB |
+| Tiny   | 100 MB  | 50 MB  | 25 MB  | 13 MB   | 13 MB  |
+| Small  | 450 MB  | 225 MB | 113 MB | 57 MB   | 59 MB  |
+| Medium | 1.37 GB | 685 MB | 342 MB | 171 MB  | 179 MB |
+| Large  | 4.9 GB  | 2.4 GB | 1.2 GB | 620 MB  | 645 MB |
 
 Tiny-Q4 in 13 MB: embeddable in other Rust apps, WASM-capable (with limitations).
 
@@ -1758,29 +1797,29 @@ aarambh-ai SafeTensors checkpoint
 | Scale | Weights | Gradients | AdamW States | Activations | Total |
 |---|---|---|---|---|---|
 | Tiny   | 50 MB   | 50 MB   | 200 MB  | ~100 MB | ~0.4 GB |
-| Small  | 235 MB  | 235 MB  | 940 MB  | ~500 MB | ~2.0 GB |
-| Medium | 720 MB  | 720 MB  | 2.9 GB  | ~1.5 GB | ~6.5 GB |
-| Large  | 2.6 GB  | 2.6 GB  | 10.4 GB | ~4.0 GB | ~20 GB  |
+| Small  | 225 MB  | 225 MB  | 900 MB  | ~450 MB | ~1.8 GB |
+| Medium | 685 MB  | 685 MB  | 2.7 GB  | ~1.4 GB | ~5.5 GB |
+| Large  | 2.4 GB  | 2.4 GB  | 9.7 GB  | ~3.8 GB | ~18 GB  |
 
-> AdamW states = 4× weights (m and v in F32 even during BF16 training).
+> AdamW states = 4× weights (m and v maintained in F32 even during BF16 training).
 
-### CPU Inference Memory (F32 weights + KV cache 512 tokens)
+### CPU Inference Memory (F32 weights + KV cache at max context length)
 
 | Scale | Weights | KV Cache | Total |
 |---|---|---|---|
-| Tiny   | 100 MB  | 6 MB   | ~106 MB  |
-| Small  | 470 MB  | 24 MB  | ~494 MB  |
-| Medium | 1.44 GB | 96 MB  | ~1.54 GB |
-| Large  | 5.2 GB  | 384 MB | ~5.6 GB  |
+| Tiny   | 100 MB  | 4 MB    | ~104 MB  |
+| Small  | 450 MB  | 24 MB   | ~474 MB  |
+| Medium | 1.37 GB | 192 MB  | ~1.56 GB |
+| Large  | 4.9 GB  | 384 MB  | ~5.27 GB |
 
-### CPU Inference Memory (INT4 GGUF weights + KV cache 512 tokens)
+### CPU Inference Memory (INT4 GGUF weights + KV cache at max context length)
 
 | Scale | Weights (Q4_K_M) | KV Cache | Total |
 |---|---|---|---|
-| Tiny   | 13 MB   | 6 MB   | ~19 MB   |
-| Small  | 61 MB   | 24 MB  | ~85 MB   |
-| Medium | 187 MB  | 96 MB  | ~283 MB  |
-| Large  | 675 MB  | 384 MB | ~1.06 GB |
+| Tiny   | 13 MB   | 4 MB    | ~17 MB   |
+| Small  | 59 MB   | 24 MB   | ~83 MB   |
+| Medium | 179 MB  | 192 MB  | ~371 MB  |
+| Large  | 645 MB  | 384 MB  | ~1.03 GB |
 
 ---
 
@@ -1837,7 +1876,7 @@ With `--self-learn cpu` enabled on Tiny model:
 | Gradient accumulation | +10ms per turn | +150 MB (LoRA grads) |
 | Replay fine-tune (every 500) | ~2 min batch, runs async | +200 MB during replay |
 
-Total extra memory on i3 with self-learn: ~**400 MB peak**. Stays under 8 GB with Tiny.
+Total extra memory on i3 with self-learn: ~**400 MB peak**. Stays well under 8 GB with Tiny.
 
 | Kernel | vs. candle baseline |
 |---|---|
