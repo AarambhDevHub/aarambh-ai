@@ -1,1 +1,7 @@
-//! Coming in Phase 3 — embedding, LM head, full model forward pass.
+pub mod embedding;
+pub mod head;
+pub mod model;
+
+pub use embedding::TokenEmbedding;
+pub use head::LmHead;
+pub use model::AarambhModel;

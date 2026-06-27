@@ -47,4 +47,20 @@ impl TransformerBlock {
         let x = self.ffn.forward(&x)?;
         residual + x
     }
+
+    pub fn norm1(&self) -> &RMSNorm {
+        &self.norm1
+    }
+
+    pub fn attn(&self) -> &GroupedQueryAttention {
+        &self.attn
+    }
+
+    pub fn norm2(&self) -> &RMSNorm {
+        &self.norm2
+    }
+
+    pub fn ffn(&self) -> &SwiGluFfn {
+        &self.ffn
+    }
 }

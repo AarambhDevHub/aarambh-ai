@@ -20,6 +20,8 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 | Data pipeline (datasets, chunk & tokenize, DataLoader) | Phase 1 ✅ |
 | Decoder-only transformer (RMSNorm, RoPE, GQA, SwiGLU) | Phase 2 ✅ |
 | Four model scales: Tiny (25M) → Large (1.3B) | Phase 0 ✅ |
+| Full model forward pass (embedding, blocks, LM head, KV cache path) | Phase 3 ✅ |
+| SafeTensors model save/load | Phase 3 ✅ |
 | Thinking engine: Low / Medium / High reasoning budgets | Phase 7 |
 | Full training pipeline with AdamW, cosine schedule, checkpointing | Phase 5 |
 | Quantisation: INT8, GPTQ INT4, AWQ INT4, GGUF, QAT | Phase 8 |
@@ -71,7 +73,7 @@ aarambh-ai/
 ├── aarambh-ai-nn/            ← RMSNorm, RoPE, GQA, SwiGLU, TransformerBlock
 ├── aarambh-ai-kernel/        ← Custom CUDA + CPU SIMD kernels
 ├── aarambh-ai-model/         ← Embedding, LM head, full model forward pass
-├── aarambh-ai-weights/       ← SafeTensors I/O, GGUF, HuggingFace conversion
+├── aarambh-ai-weights/       ← SafeTensors I/O (GGUF + HuggingFace conversion planned)
 ├── aarambh-ai-quant/         ← INT8, GPTQ, AWQ, GGUF, KV cache quant
 ├── aarambh-ai-train/         ← Training loop, AdamW, cosine schedule, checkpointing
 ├── aarambh-ai-finetune/      ← LoRA, QLoRA, SFT, GRPO, verifiers
@@ -101,10 +103,10 @@ Every crate depends only on crates in the same or lower layer. This is enforced 
 
 | Scale | Params | d_model | Layers | Heads | KV Heads | d_ffn | Max seq | rope_theta |
 |---|---|---|---:|---:|---:|---:|---:|---:|
-| Tiny | 25M | 256 | 6 | 4 | 2 | 1,024 | 512 | 10,000 |
-| Small | 117M | 768 | 12 | 12 | 4 | 3,072 | 1,024 | 10,000 |
-| Medium | 360M | 1,024 | 24 | 16 | 8 | 4,096 | 2,048 | 500,000 |
-| Large | 1.3B | 2,048 | 24 | 32 | 8 | 8,192 | 4,096 | 500,000 |
+| Tiny | 25M | 384 | 8 | 6 | 2 | 1,024 | 512 | 10,000 |
+| Small | 117M | 768 | 12 | 12 | 4 | 2,688 | 1,024 | 10,000 |
+| Medium | 360M | 1,024 | 24 | 16 | 8 | 3,392 | 2,048 | 500,000 |
+| Large | 1.3B | 2,048 | 24 | 32 | 8 | 6,656 | 4,096 | 500,000 |
 
 All scales share `vocab_size=32000`, `norm_eps=1e-5`, and weight-tied embeddings.
 
@@ -220,7 +222,7 @@ aarambh-ai/
 | 0 | Workspace + core types | i3 | ✅ |
 | 1 | Tokeniser + data pipeline | i3 | ✅ |
 | 2 | Neural network primitives | i3 | ✅ |
-| 3 | Full model forward pass | i3 | ⬜ |
+| 3 | Full model forward pass | i3 | ✅ |
 | 4 | Custom kernels (CPU SIMD + CUDA stubs) | i3 + GPU | ⬜ |
 | 5 | Training loop — Tiny trains! | i3 | ⬜ |
 | 6 | Inference engine + CLI | i3 | ⬜ |

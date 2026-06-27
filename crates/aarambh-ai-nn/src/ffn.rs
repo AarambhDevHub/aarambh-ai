@@ -23,4 +23,16 @@ impl SwiGluFfn {
         let hidden = (gate * up)?;
         self.w_down.forward(&hidden)
     }
+
+    pub fn w_gate_weight(&self) -> &Tensor {
+        self.w_gate.weight()
+    }
+
+    pub fn w_up_weight(&self) -> &Tensor {
+        self.w_up.weight()
+    }
+
+    pub fn w_down_weight(&self) -> &Tensor {
+        self.w_down.weight()
+    }
 }
