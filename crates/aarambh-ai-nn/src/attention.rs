@@ -91,6 +91,22 @@ impl GroupedQueryAttention {
 
         self.wo.forward(&out)
     }
+
+    pub fn wq_weight(&self) -> &Tensor {
+        self.wq.weight()
+    }
+
+    pub fn wk_weight(&self) -> &Tensor {
+        self.wk.weight()
+    }
+
+    pub fn wv_weight(&self) -> &Tensor {
+        self.wv.weight()
+    }
+
+    pub fn wo_weight(&self) -> &Tensor {
+        self.wo.weight()
+    }
 }
 
 fn repeat_heads(x: &Tensor, n_repeats: usize) -> Result<Tensor> {

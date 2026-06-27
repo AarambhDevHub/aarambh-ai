@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.3.0] - 2026-06-27
+
+### Added
+
+- **`aarambh-ai-model` crate** — Full model forward pass (Phase 3)
+  - `src/embedding.rs` — `TokenEmbedding` wrapping Candle embedding lookup with weight access for tied LM head
+  - `src/head.rs` — `LmHead` supporting tied embedding weights and untied no-bias output projection
+  - `src/model.rs` — `AarambhModel` with config validation, embedding, N transformer blocks, final RMSNorm, LM head, precomputed RoPE, precomputed causal mask, full-sequence `forward()`, cached `forward_with_cache()`, `empty_kv_cache()`, `named_tensors()`, and `get_weight()`
+  - Implements `Configurable` and `Forward`
+  - 8 active integration tests covering scale config validation, Tiny forward shape, finite logits, cached-vs-full forward equivalence, tied/untied LM head behavior, invalid config rejection, and README scale consistency
+  - 1 ignored heavy test for full Tiny/Small/Medium/Large construction
+
+- **`aarambh-ai-weights` crate** — SafeTensors I/O (Phase 3)
+  - `save_model()` serializes `AarambhModel::named_tensors()` with `candle_core::safetensors::save`
+  - `load_model()` loads SafeTensors through `VarBuilder::from_mmaped_safetensors`
+  - `convert_hf()` is present as a Phase 8 `Unsupported` stub
+  - 2 integration tests covering SafeTensors weight/logit roundtrip and the Phase 8 conversion stub
+
+### Changed
+
+- **`aarambh-ai-nn` crate**
+  - Added read-only weight accessors on `GroupedQueryAttention`, `SwiGluFfn`, and `TransformerBlock` so higher layers can enumerate model tensors without making fields public
+
+- **Documentation**
+  - Updated README model scale table to match `ModelConfig`, `ARCHITECTURE.md`, and `ROADMAP.md`
+  - Marked Phase 3 complete in README and ROADMAP
+
 ## [0.2.0] - 2026-06-25
 
 ### Added

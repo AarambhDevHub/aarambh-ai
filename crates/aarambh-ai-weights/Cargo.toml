@@ -2,3 +2,9 @@
 name = "aarambh-ai-weights"
 version = "0.1.0"
 edition = "2024"
+
+[dependencies]
+aarambh-ai-core  = { path = "../aarambh-ai-core" }
+aarambh-ai-model = { path = "../aarambh-ai-model" }
+candle-core      = { workspace = true }
+candle-nn        = { workspace = true }
