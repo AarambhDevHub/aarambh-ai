@@ -65,6 +65,7 @@ fn mini_forward_produces_correct_shape_and_finite_logits() {
         .to_scalar::<f32>()
         .unwrap();
     assert!(max.is_finite());
+    assert!(max < 10.0, "initial logits are too large: {max}");
 }
 
 #[test]

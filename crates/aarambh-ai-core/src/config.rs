@@ -91,12 +91,15 @@ impl ModelConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TrainConfig {
     pub lr: f64,
     pub batch_size: usize,
     pub grad_accum_steps: usize,
     pub max_epochs: usize,
+    pub max_steps: usize,
     pub warmup_steps: usize,
+    pub min_lr_ratio: f64,
     pub weight_decay: f64,
     pub beta1: f64,
     pub beta2: f64,
@@ -105,6 +108,7 @@ pub struct TrainConfig {
     pub save_every_n_steps: usize,
     pub log_every_n_steps: usize,
     pub eval_steps: usize,
+    pub seed: u64,
     pub checkpoint_dir: std::path::PathBuf,
 }
 
@@ -115,7 +119,9 @@ impl Default for TrainConfig {
             batch_size: 2,
             grad_accum_steps: 16,
             max_epochs: 1,
+            max_steps: 5000,
             warmup_steps: 200,
+            min_lr_ratio: 0.1,
             weight_decay: 0.1,
             beta1: 0.9,
             beta2: 0.95,
@@ -124,6 +130,7 @@ impl Default for TrainConfig {
             save_every_n_steps: 1000,
             log_every_n_steps: 10,
             eval_steps: 500,
+            seed: 42,
             checkpoint_dir: std::path::PathBuf::from("checkpoints"),
         }
     }

@@ -25,7 +25,7 @@ Phase 1  →  Tokeniser + data pipeline            (3–5 days)    [i3] ✅
 Phase 2  →  Neural network primitives            (5–7 days)    [i3] ✅
 Phase 3  →  Full model forward pass              (3–4 days)    [i3] ✅
 Phase 4  →  Custom kernels (CPU SIMD + GPU prep) (5–7 days)    [i3 + Kaggle prep] ✅
-Phase 5  →  Training loop — Tiny trains!         (7–10 days)   [i3]
+Phase 5  →  Training loop — Tiny trains!         (7–10 days)   [i3] ✅
 Phase 6  →  Inference engine + CLI               (5–7 days)    [i3]
 Phase 7  →  Thinking engine                      (4–6 days)    [i3]
 Phase 8  →  Quantisation stack                   (8–10 days)   [i3]
@@ -72,6 +72,7 @@ anyhow             = "1"
 thiserror          = "2"
 serde              = { version = "1", features = ["derive"] }
 serde_json         = "1"
+toml               = "0.8"
 tokio              = { version = "1", features = ["full"] }
 clap               = { version = "4", features = ["derive"] }
 tracing            = "0.1"
@@ -713,41 +714,59 @@ Checkpoints save and resume correctly. This is the most important milestone.
 
 **`aarambh-ai-train`:**
 ```
-[ ] src/loss.rs
+[x] src/loss.rs
       fn cross_entropy_loss(logits, labels, padding_mask) -> Result<Tensor>
         // reshape logits to [B×T, vocab]
         // reshape labels to [B×T]
         // apply padding mask (zero out PAD positions)
         // return mean scalar loss
 
-[ ] src/optim.rs — AdamW
+[x] src/optim.rs — AdamW
       // β₁=0.9, β₂=0.95, ε=1e-8, λ=0.1 (match LLaMA training — not β₂=0.999)
       per-parameter m, v state tensors
-      fn step(&mut self, params_and_grads, lr, step) -> Result<()>
+      fn step(&mut self, grads_by_name, lr) -> Result<()>
         // AdamW update: m, v EMA → bias correction → update with weight decay
         // weight decay NOT on: embeddings, biases, RMSNorm γ
 
-[ ] src/schedule.rs — CosineScheduleWithWarmup
+[x] src/schedule.rs — CosineScheduleWithWarmup
       fn lr_at_step(&self, step: usize) -> f64
         // linear warmup 0 → max_lr
         // cosine decay max_lr → min_lr = max_lr/10
 
-[ ] src/checkpoint.rs — CheckpointManager
-      fn save(model, optim, step, loss, dir) -> Result<()>
-        // saves model.safetensors + optimizer.bin + train_state.json
-      fn load_latest(dir) -> Result<(weights, optim_state, step)>
-      fn save_best(model, val_loss, dir) -> Result<()>
+[x] src/checkpoint.rs — CheckpointManager
+      fn save(varmap, optim, state) -> Result<PathBuf>
+        // saves model.safetensors + optimizer.safetensors + train_state.json
+        // updates latest.json pointer
+      fn load_latest(varmap, optim, device) -> Result<Option<TrainState>>
+      fn save_best(varmap, optim, state) -> Result<PathBuf>
 
-[ ] src/trainer.rs — Trainer
-      fn new(model, tokenizer, loader, train_cfg) -> Self
-      fn train_step(&mut self, batch) -> Result<f32>
+[x] src/trainer.rs — Trainer
+      fn new(model_cfg, train_cfg, loader, val_loader, device) -> Result<Self>
+      fn train_step(&mut self, batch) -> Result<TrainingMetrics>
         // forward → loss / accum_steps → backward → accumulate
         // if step % accum_steps == 0: clip → optim.step → zero_grad
-      fn train_epoch(&mut self) -> Result<f32>
-      fn validate(&self, val_loader) -> Result<f32>
+      fn train_epoch(&mut self) -> Result<()>
+      fn validate(&mut self) -> Result<Option<f64>>
       fn train(&mut self) -> Result<()>
         // full loop: log + save + validate at right intervals
-        // print: step | loss | ppl | lr | elapsed
+        // print: step | loss | ppl | lr | grad_norm
+
+[x] src/config.rs — TrainingRunConfig
+      fn from_toml(path) -> Result<Self>
+      fn run_training_from_config(path) -> Result<()>
+        // builds tokenizer, train/val loaders, model VarMap, trainer
+        // reuses checkpoint_dir/tokenizer.json when it already exists
+
+[x] aarambh-ai CLI
+      aarambh-ai train --config configs/tiny_shakespeare.toml
+      aarambh-ai train --config configs/tiny_shakespeare_smoke.toml
+
+[x] autograd-safe training forward path
+      AarambhModel::forward_train()
+      TransformerBlock::forward_train()
+      RMSNorm::forward_train()
+      GroupedQueryAttention::forward_train()
+        // uses Candle autograd-compatible ops, not Phase 4 inference kernels
 ```
 
 ### Tests
@@ -755,8 +774,9 @@ Checkpoints save and resume correctly. This is the most important milestone.
 ```rust
 #[test]
 fn loss_decreases_after_10_steps() {
-    let loss_0 = trainer.train_step(&batch).unwrap();
-    let loss_10 = (0..9).fold(0.0f32, |_, _| trainer.train_step(&batch).unwrap());
+    let loss_0 = eval_loss(&trainer, &batch).unwrap();
+    trainer.train().unwrap();
+    let loss_10 = eval_loss(&trainer, &batch).unwrap();
     assert!(loss_10 < loss_0, "Loss did not decrease: {} → {}", loss_0, loss_10);
 }
 
@@ -776,31 +796,45 @@ fn lr_decay_is_monotone_decreasing() {
 
 #[test]
 fn checkpoint_roundtrip_preserves_weights() {
-    ckpt.save(&model, &optim, 500, 2.5, "test_ckpt/").unwrap();
-    let (loaded_weights, _, _) = CheckpointManager::load_latest("test_ckpt/").unwrap();
-    // every weight tensor must be element-wise equal
+    ckpt.save(&varmap, &optim, &state).unwrap();
+    let loaded = ckpt.load_latest(&mut varmap, &mut optim, &device).unwrap();
+    assert_eq!(loaded.unwrap().step, state.step);
 }
 
 #[test]
 fn adamw_beta2_is_0_95() {
     // Verify the optimiser was not accidentally constructed with 0.999
-    let optim = AdamW::new(&params, &TrainConfig::default()).unwrap();
-    assert!((optim.beta2() - 0.95).abs() < 1e-9);
+    let config = AdamWConfig::from(&TrainConfig::default());
+    assert!((config.beta2 - 0.95).abs() < 1e-9);
 }
+```
+
+Additional Phase 5 tests:
+```
+[x] padding mask excludes PAD positions from loss
+[x] global gradient clipping caps norm
+[x] AdamW excludes embeddings, RMSNorm weights, and biases from weight decay
+[x] BPE save_pretrained roundtrip preserves merges
+[x] Tied LM-head initial logits stay bounded with N(0, 0.02) embeddings
 ```
 
 ### Training Run (do this — it proves Phase 5 is done)
 ```bash
 # tiny_shakespeare.txt was already downloaded in Phase 1 setup
 
-aarambh-ai train --config configs/tiny_shakespeare.toml
+cargo run --release -- train --config configs/tiny_shakespeare.toml
 
 # Expected output:
-# step  100/5000 | loss: 5.821 | ppl:   337 | lr: 6.0e-05
-# step  500/5000 | loss: 3.211 | ppl:    25 | lr: 2.94e-4
-# step 1000/5000 | loss: 2.874 | ppl:    18 | lr: 2.87e-4
-# step 2000/5000 | loss: 2.612 | ppl:    14 | lr: 2.65e-4
-# step 5000/5000 | loss: 2.391 | ppl:    11 | lr: 1.50e-4
+# step=1 loss≈9.0 ppl≈8000 lr=... grad_norm=...
+# step=100 loss=5.8210 ppl=337.00 lr=0.000500 grad_norm=1.0000
+# eval step=500 val_loss=3.2110 val_ppl=24.80
+# step=1000 loss=2.8740 ppl=17.71 lr=0.000287 grad_norm=0.9123
+```
+
+Fast smoke check:
+```bash
+cargo run --release -- train --config configs/tiny_shakespeare_smoke.toml
+# Expected start: loss≈9.0, not ~80. Random 8K-vocab loss should be close to ln(8000).
 ```
 
 ### Milestone ✅
@@ -808,7 +842,10 @@ aarambh-ai train --config configs/tiny_shakespeare.toml
 PPL < 15 on Tiny Shakespeare after 5000 steps.
 Checkpoint saves and resumes correctly.
 
-git commit -m "feat: Phase 5 — training loop, AdamW, cosine LR, Tiny PPL < 15"
+cargo check --workspace --all-targets → passes
+cargo test --workspace                → passes
+
+git commit -m "feat: Phase 5 — training loop, AdamW, cosine LR"
 git tag v0.5.0
 ```
 

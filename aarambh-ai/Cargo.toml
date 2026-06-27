@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+aarambh-ai-core  = { path = "../crates/aarambh-ai-core" }
+aarambh-ai-train = { path = "../crates/aarambh-ai-train" }
+anyhow           = { workspace = true }
+clap             = { workspace = true }

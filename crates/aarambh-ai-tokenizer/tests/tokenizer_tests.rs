@@ -150,3 +150,30 @@ fn bpe_tokenizer_implements_tokenizer_like() {
     assert_eq!(tokenizer.eos_token_id(), 0);
     assert_eq!(tokenizer.bos_token_id(), Some(2));
 }
+
+#[test]
+fn bpe_save_pretrained_roundtrip_preserves_merges() {
+    let token_to_id = HashMap::from([("a".into(), 0u32), ("b".into(), 1u32), ("ab".into(), 2u32)]);
+    let id_to_token = vec!["a".into(), "b".into(), "ab".into()];
+    let merges = vec![("a".into(), "b".into())];
+    let merge_rank = HashMap::from([(("a".into(), "b".into()), 0usize)]);
+    let tokenizer = BpeTokenizer {
+        vocab: Vocab {
+            token_to_id,
+            id_to_token,
+        },
+        merges,
+        merge_rank,
+    };
+    let path = std::env::temp_dir().join(format!(
+        "aarambh_tokenizer_roundtrip_{}.json",
+        std::process::id()
+    ));
+
+    tokenizer.save_pretrained(&path).unwrap();
+    let loaded = BpeTokenizer::from_pretrained(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+
+    assert_eq!(loaded.encode("ab").unwrap(), vec![2]);
+    assert_eq!(loaded.decode(&[2]).unwrap(), "ab");
+}

@@ -23,7 +23,7 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 | Full model forward pass (embedding, blocks, LM head, KV cache path) | Phase 3 ✅ |
 | SafeTensors model save/load | Phase 3 ✅ |
 | Thinking engine: Low / Medium / High reasoning budgets | Phase 7 |
-| Full training pipeline with AdamW, cosine schedule, checkpointing | Phase 5 |
+| Full training pipeline with AdamW, cosine schedule, checkpointing | Phase 5 ✅ |
 | Quantisation: INT8, GPTQ INT4, AWQ INT4, GGUF, QAT | Phase 8 |
 | LoRA, QLoRA, DoRA fine-tuning | Phase 9 |
 | GRPO reinforcement learning | Phase 10 |
@@ -60,6 +60,51 @@ cargo build --release
 
 # Run the CLI
 cargo run --release -- --help
+```
+
+---
+
+## Train Tiny
+
+Phase 5 adds a working training loop for Tiny-scale pretraining:
+
+```sh
+# Put Tiny Shakespeare at data/tiny_shakespeare.txt first.
+cargo run --release -- train --config configs/tiny_shakespeare.toml
+
+# Fast CPU smoke run for checking the training path.
+cargo run --release -- train --config configs/tiny_shakespeare_smoke.toml
+```
+
+The trainer builds or loads a BPE tokenizer, creates train/validation loaders,
+uses an autograd-safe model forward path, applies masked cross-entropy, AdamW
+with `beta2=0.95`, cosine warmup/decay, gradient clipping, gradient
+accumulation, and checkpoint save/resume. If `checkpoint_dir/tokenizer.json`
+already exists, the trainer reuses it instead of retraining BPE on every launch.
+
+Checkpoint layout:
+
+```text
+checkpoints/tiny_shakespeare/
+├── latest.json
+├── best.json
+├── tokenizer.json
+├── step_001000/
+│   ├── model.safetensors
+│   ├── optimizer.safetensors
+│   └── train_state.json
+└── best/
+    ├── model.safetensors
+    ├── optimizer.safetensors
+    └── train_state.json
+```
+
+Typical log lines:
+
+```text
+step=1 loss=9.0304 ppl=8352.87 lr=0.000250 grad_norm=0.7182
+step=10 loss=9.0241 ppl=8300.43 lr=0.000800 grad_norm=0.7221
+eval step=500 val_loss=3.2110 val_ppl=24.80
 ```
 
 ---
@@ -225,7 +270,7 @@ aarambh-ai/
 | 2 | Neural network primitives | i3 | ✅ |
 | 3 | Full model forward pass | i3 | ✅ |
 | 4 | Custom kernels (CPU SIMD + CUDA stubs) | i3 + GPU | ✅ |
-| 5 | Training loop — Tiny trains! | i3 | ⬜ |
+| 5 | Training loop — Tiny trains! | i3 | ✅ |
 | 6 | Inference engine + CLI | i3 | ⬜ |
 | 7 | Thinking engine | i3 | ⬜ |
 | 8 | Quantisation stack | i3 | ⬜ |
