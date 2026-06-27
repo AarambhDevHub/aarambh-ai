@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 aarambh-ai-core = { path = "../aarambh-ai-core" }
+aarambh-ai-kernel = { path = "../aarambh-ai-kernel" }
 candle-core      = { workspace = true }
 candle-nn        = { workspace = true }
 

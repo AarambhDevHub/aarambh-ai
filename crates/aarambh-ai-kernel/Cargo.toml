@@ -2,3 +2,23 @@
 name = "aarambh-ai-kernel"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
+
+[dependencies]
+aarambh-ai-core = { path = "../aarambh-ai-core" }
+candle-core     = { workspace = true }
+candle-nn       = { workspace = true }
+rayon           = { workspace = true }
+
+[build-dependencies]
+cc    = { workspace = true }
+which = { workspace = true }
+
+[dev-dependencies]
+criterion   = { workspace = true }
+candle-core = { workspace = true }
+candle-nn   = { workspace = true }
+
+[[bench]]
+name = "kernel_bench"
+harness = false

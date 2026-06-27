@@ -96,18 +96,17 @@ safety guard — all in one workspace, all in Rust, all explained in this docume
 
 > **Pin these versions.** Candle's public API has changed across minor releases.
 > Using a different version from what is listed here may break compilation.
-> Run `rustup update stable` before starting, and `cargo +nightly` only for Phase 4 SIMD.
+> Run `rustup update stable` before starting. Phase 4 SIMD uses stable intrinsics.
 
 ### Rust Toolchain
 
 ```
 stable:   rustup override set stable        ← default for all phases
-nightly:  rustup override set nightly       ← Phase 4 ONLY (std::simd / portable_simd)
 ```
 
-> **Phase 4 note:** `std::simd` (portable SIMD) is a nightly-only feature as of Rust
-> 1.80. Either use `rustup override set nightly` for the `aarambh-ai-kernel` crate, or
-> replace it with stable-compatible `target_feature` intrinsics (see Phase 4 roadmap).
+> **Phase 4 note:** `aarambh-ai-kernel` uses stable `std::arch` intrinsics with
+> cached AVX2/FMA, AVX512, AVX2, and scalar dispatch. No nightly toolchain is
+> required.
 
 ### Verified Dependency Versions
 
@@ -127,6 +126,7 @@ rayon          = "1"
 cc             = "1"
 which          = "6"
 anyhow         = "1"
+criterion      = "0.5"
 ```
 
 ### Tokenizer Strategy (important)
@@ -214,7 +214,7 @@ aarambh-ai/
 │   │       ├── fused_rope.rs         ← Rust FFI for rope_apply.cu
 │   │       ├── fused_ffn.rs          ← Rust FFI for swiglu_fused.cu
 │   │       └── cpu/
-│   │           ├── simd_norm.rs      ← AVX2 SIMD RMSNorm (nightly: std::simd)
+│   │           ├── simd_norm.rs      ← Stable AVX2/FMA + AVX512 SIMD RMSNorm
 │   │           └── parallel_attn.rs  ← rayon parallel attention heads (stable)
 │   │
 │   ├── aarambh-ai-model/             ← LAYER 3: Full model assembly
@@ -341,7 +341,7 @@ When you `cargo new` each crate, add exactly these workspace deps to its `Cargo.
 | `aarambh-ai-tokenizer` | `aarambh-ai-core`, `tokenizers`, `serde_json` |
 | `aarambh-ai-data` | `aarambh-ai-core`, `aarambh-ai-tokenizer`, `candle-core`, `serde_json`, `rayon` |
 | `aarambh-ai-nn` | `aarambh-ai-core`, `aarambh-ai-kernel`, `candle-core`, `candle-nn` |
-| `aarambh-ai-kernel` | `aarambh-ai-core`, `candle-core`, `rayon`, `cc`, `which` |
+| `aarambh-ai-kernel` | `aarambh-ai-core`, `candle-core`, `candle-nn`, `rayon`, `cc`, `which`, `criterion` |
 | `aarambh-ai-model` | `aarambh-ai-core`, `aarambh-ai-nn`, `aarambh-ai-kernel`, `candle-core`, `candle-nn` |
 | `aarambh-ai-weights` | `aarambh-ai-core`, `aarambh-ai-model`, `candle-core`, `safetensors`, `serde_json` |
 | `aarambh-ai-quant` | `aarambh-ai-core`, `aarambh-ai-model`, `aarambh-ai-weights`, `candle-core` |
@@ -957,18 +957,11 @@ first, then drop in the kernel for speed without touching higher-level code.
 
 ### 10.2 Toolchain Requirements for SIMD
 
-The CPU SIMD kernel (`cpu/simd_norm.rs`) uses `std::simd` (portable SIMD), which is
-a **nightly-only** feature. Two options:
-
-**Option A (recommended for development):** Use nightly for the kernel crate only:
-```bash
-# In crates/aarambh-ai-kernel/
-rustup override set nightly
-```
-
-**Option B (stable-only):** Replace `std::simd` with stable `target_feature` intrinsics
-from the `std::arch::x86_64` module. More verbose but no nightly required.
-The ROADMAP Phase 4 section uses Option A; switch to Option B if you need stable.
+The CPU SIMD kernel (`cpu/simd_norm.rs`) uses stable `std::arch` intrinsics with
+cached runtime dispatch. No nightly override is required. On x86/x86_64, the
+kernel prefers AVX2/FMA by default on this class of CPU, supports AVX512 when
+forced with `AARAMBH_SIMD_FORCE=avx512`, and falls back to AVX2 or scalar. Non-x86
+targets use the scalar path.
 
 ### 10.3 Flash Attention v2
 
@@ -994,14 +987,11 @@ Memory: O(n) instead of O(n²). For n=4096: ~16× less HBM access on GPU.
 **Integration with aarambh-ai-nn:**
 ```rust
 // attention.rs — dispatch based on device at runtime
-#[cfg(feature = "cuda-kernels")]
-let output = flash_attn::forward(&q, &k, &v, causal_mask)?;
-
-#[cfg(not(feature = "cuda-kernels"))]
-let output = candle_nn::ops::scaled_dot_product_attention(&q, &k, &v, mask)?;
+let output = aarambh_ai_kernel::dispatch::attention_forward(&q, &k, &v, mask, scale)?;
 ```
 
-On your i3 (no CUDA), the candle fallback is used automatically. Zero code change.
+On CPU F32 tensors, Phase 4 uses the Rayon attention kernel. CUDA execution stays
+as a stub until Phase 14, so CUDA devices keep using the Candle fallback.
 
 ### 10.4 Fused Kernels (GPU)
 
@@ -1017,21 +1007,21 @@ Each fused kernel eliminates one or more intermediate tensor allocations:
 
 Even without CUDA, the kernel crate gives speedups on CPU:
 
-- **SIMD RMSNorm** (`cpu/simd_norm.rs`): Your i3-1115G4 supports AVX2 → ~2× RMSNorm speedup.
+- **SIMD RMSNorm** (`cpu/simd_norm.rs`): Cached AVX2/FMA, AVX512, AVX2, and scalar dispatch for F32 CPU tensors.
 - **Parallel attention** (`cpu/parallel_attn.rs`): Uses `rayon` to run all
   attention heads in parallel across all 4 logical cores. Tiny model has 6 heads
   → near-linear speedup. Uses stable Rust only.
 
 ### 10.6 Build System
 
-`build.rs` detects NVCC at build time. If not found, CUDA kernels are silently
-skipped — the crate still compiles and the dispatch layer falls back to candle:
+`build.rs` detects NVCC at build time. If not found, CUDA stubs are skipped — the
+crate still compiles and the dispatch layer falls back to Candle where needed:
 
 ```rust
 // build.rs
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(aarambh_cuda_stubs)");
     if which::which("nvcc").is_ok() {
-        println!("cargo:rustc-cfg=feature=\"cuda-kernels\"");
         cc::Build::new()
             .cuda(true)
             .file("kernels/flash_attention.cu")
@@ -1039,14 +1029,16 @@ fn main() {
             .file("kernels/rms_norm_fused.cu")
             .file("kernels/rope_apply.cu")
             .file("kernels/swiglu_fused.cu")
-            .compile("aarambh_kernels");
+            .compile("aarambh_cuda_stubs");
+        println!("cargo:rustc-cfg=aarambh_cuda_stubs");
     } else {
-        println!("cargo:warning=NVCC not found. Using candle + SIMD fallback.");
+        println!("cargo:warning=nvcc not found; CUDA kernel stubs are disabled");
     }
 }
 ```
 
-Your i3 always builds cleanly. On Kaggle with CUDA, the fast kernels are used.
+CPU-only machines always build cleanly. On CUDA machines, Phase 4 validates the
+CUDA build plumbing; real GPU kernels are implemented later.
 
 ---
 
