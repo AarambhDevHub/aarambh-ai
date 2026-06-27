@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.4.0] - 2026-06-27
+
+### Added
+
+- **`aarambh-ai-kernel` crate** — Custom kernels (Phase 4)
+  - Runtime dispatch API for RMSNorm and attention
+  - Stable CPU SIMD RMSNorm with cached AVX2/FMA, AVX512, AVX2, and scalar fallback paths
+  - Rayon parallel scaled dot-product attention for CPU F32 tensors
+  - Candle fallback for unsupported devices, dtypes, shapes, and CUDA runtime paths
+  - `build.rs` NVCC detection with graceful no-CUDA builds
+  - CUDA placeholder kernels and FFI wrapper modules for Flash Attention, fused RMSNorm, fused RoPE, and fused SwiGLU
+  - Criterion benchmark target for RMSNorm and attention kernels
+  - 6 kernel tests covering dispatch, RMSNorm reference parity, parallel attention parity, masks, and CUDA stubs
+  - Local benchmark: RMSNorm SIMD ~1.43x faster than Candle; parallel attention ~2.94x faster than sequential
+
+### Changed
+
+- **`aarambh-ai-nn` crate**
+  - `RMSNorm::forward()` now calls kernel dispatch
+  - `GroupedQueryAttention::forward()` now calls kernel attention dispatch after Q/K/V preparation
+
+- **Documentation**
+  - Marked Phase 4 complete in README and ROADMAP
+  - Updated ARCHITECTURE to match stable SIMD intrinsics and CUDA stub behavior
+
 ## [0.3.0] - 2026-06-27
 
 ### Added

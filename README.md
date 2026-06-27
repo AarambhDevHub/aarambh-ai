@@ -30,7 +30,8 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 | Safety guardrails: input/output, PII, prompt injection | Phase 11 |
 | Self-learning loop: online GRPO, replay buffer, critique | Phase 12 |
 | Custom CUDA kernels: Flash Attention v2, fused RMSNorm, RoPE, SwiGLU | Phase 14 |
-| CPU SIMD kernels: AVX2 RMSNorm, parallel attention via rayon | Phase 4 |
+| CPU SIMD kernels: AVX2/FMA RMSNorm, AVX512 override, parallel attention via rayon | Phase 4 ✅ |
+| CUDA kernel build prep and FFI stubs | Phase 4 ✅ |
 | CLI binary with predict-view, streaming, thinking modes | Phase 6 |
 
 ---
@@ -223,7 +224,7 @@ aarambh-ai/
 | 1 | Tokeniser + data pipeline | i3 | ✅ |
 | 2 | Neural network primitives | i3 | ✅ |
 | 3 | Full model forward pass | i3 | ✅ |
-| 4 | Custom kernels (CPU SIMD + CUDA stubs) | i3 + GPU | ⬜ |
+| 4 | Custom kernels (CPU SIMD + CUDA stubs) | i3 + GPU | ✅ |
 | 5 | Training loop — Tiny trains! | i3 | ⬜ |
 | 6 | Inference engine + CLI | i3 | ⬜ |
 | 7 | Thinking engine | i3 | ⬜ |
@@ -249,6 +250,18 @@ cargo clippy --workspace -- -D warnings
 cargo fmt --check
 cargo doc --workspace --no-deps
 ```
+
+### Kernel Benchmarks
+
+```sh
+cargo bench -p aarambh-ai-kernel
+```
+
+Phase 4 uses stable CPU intrinsics with cached AVX2/FMA, AVX512, and scalar
+dispatch. The default prefers AVX2/FMA on this CPU; set `AARAMBH_SIMD_FORCE=avx512`
+to force AVX512 when it wins on another machine. CUDA files are compiled only
+when `nvcc` is installed; otherwise the build emits a warning and keeps the
+Candle fallback path.
 
 ---
 

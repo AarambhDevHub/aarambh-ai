@@ -75,16 +75,7 @@ impl GroupedQueryAttention {
         let k = k.transpose(1, 2)?.contiguous()?;
         let v = v.transpose(1, 2)?.contiguous()?;
 
-        let attn_weights = (q.matmul(&k.transpose(2, 3)?.contiguous()?)? * self.scale)?;
-
-        let attn_weights = match mask {
-            Some(m) => attn_weights.broadcast_add(m)?,
-            None => attn_weights,
-        };
-
-        let attn_weights = candle_nn::ops::softmax_last_dim(&attn_weights)?;
-
-        let out = attn_weights.matmul(&v)?;
+        let out = aarambh_ai_kernel::dispatch::attention_forward(&q, &k, &v, mask, self.scale)?;
 
         let out = out.transpose(1, 2)?;
         let out = out.reshape((b, seq_len, self.n_heads * self.head_dim))?;
