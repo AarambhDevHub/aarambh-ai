@@ -61,15 +61,7 @@ impl BpeTokenizer {
                 AarambhError::Tokenizer("missing model.merges in tokenizer.json".into())
             })?
             .iter()
-            .filter_map(|v| {
-                let s = v.as_str()?;
-                let parts: Vec<&str> = s.splitn(2, ' ').collect();
-                if parts.len() == 2 {
-                    Some((parts[0].to_string(), parts[1].to_string()))
-                } else {
-                    None
-                }
-            })
+            .filter_map(parse_merge)
             .collect();
 
         let max_id = token_to_id.values().copied().max().unwrap_or(0);
@@ -98,6 +90,35 @@ impl BpeTokenizer {
 
     pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
         self.vocab.save_json(path)
+    }
+
+    pub fn save_pretrained(&self, path: impl AsRef<Path>) -> Result<()> {
+        let vocab = self
+            .vocab
+            .token_to_id
+            .iter()
+            .map(|(token, id)| (token.clone(), serde_json::Value::from(*id)))
+            .collect::<serde_json::Map<_, _>>();
+        let merges = self
+            .merges
+            .iter()
+            .map(|(left, right)| {
+                serde_json::Value::Array(vec![
+                    serde_json::Value::from(left.clone()),
+                    serde_json::Value::from(right.clone()),
+                ])
+            })
+            .collect::<Vec<_>>();
+        let json = serde_json::json!({
+            "model": {
+                "type": "BPE",
+                "vocab": vocab,
+                "merges": merges,
+            }
+        });
+        let content = serde_json::to_string_pretty(&json).map_err(AarambhError::Json)?;
+        std::fs::write(path.as_ref(), content).map_err(AarambhError::Io)?;
+        Ok(())
     }
 
     fn encode_word(&self, word: &str) -> Vec<u32> {
@@ -136,6 +157,22 @@ impl BpeTokenizer {
             .filter_map(|s| self.vocab.token_to_id.get(&s).copied())
             .collect()
     }
+}
+
+fn parse_merge(value: &serde_json::Value) -> Option<(String, String)> {
+    if let Some(s) = value.as_str() {
+        let parts = s.split_once(' ')?;
+        return Some((parts.0.to_string(), parts.1.to_string()));
+    }
+
+    let array = value.as_array()?;
+    if array.len() != 2 {
+        return None;
+    }
+    Some((
+        array[0].as_str()?.to_string(),
+        array[1].as_str()?.to_string(),
+    ))
 }
 
 impl TokenizerLike for BpeTokenizer {

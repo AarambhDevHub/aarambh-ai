@@ -15,6 +15,10 @@ impl RMSNorm {
         aarambh_ai_kernel::dispatch::rms_norm(x, &self.weight, self.eps)
     }
 
+    pub fn forward_train(&self, x: &Tensor) -> Result<Tensor> {
+        candle_nn::ops::rms_norm(x, &self.weight, self.eps)
+    }
+
     pub fn weight(&self) -> &Tensor {
         &self.weight
     }

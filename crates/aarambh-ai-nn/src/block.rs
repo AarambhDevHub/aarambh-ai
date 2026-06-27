@@ -48,6 +48,24 @@ impl TransformerBlock {
         residual + x
     }
 
+    pub fn forward_train(
+        &self,
+        x: &Tensor,
+        rope: &RopeCache,
+        mask: Option<&Tensor>,
+        seqlen_offset: usize,
+    ) -> Result<Tensor> {
+        let residual = x;
+        let x = self.norm1.forward_train(x)?;
+        let x = self.attn.forward_train(&x, rope, mask, seqlen_offset)?;
+        let x = (residual + x)?;
+
+        let residual = x.clone();
+        let x = self.norm2.forward_train(&x)?;
+        let x = self.ffn.forward(&x)?;
+        residual + x
+    }
+
     pub fn norm1(&self) -> &RMSNorm {
         &self.norm1
     }

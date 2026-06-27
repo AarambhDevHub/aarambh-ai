@@ -848,6 +848,15 @@ token_ids: [batch, seq_len]          ← u32 integer IDs
 [batch, seq_len, vocab_size]         ← logits (raw scores)
 ```
 
+Training uses `AarambhModel::forward_train()`. This path deliberately calls
+Candle autograd-compatible RMSNorm and attention operations. The Phase 4 CPU
+SIMD and parallel-attention kernels remain inference dispatch paths until custom
+backward kernels are implemented.
+
+Token embeddings are initialized with `N(0, 0.02)`. This matters because the
+Tiny config ties embeddings to the LM head; unit-scale embeddings would produce
+oversized logits and random-model losses around `80` instead of `ln(vocab)`.
+
 ### 9.3 Cross-Entropy Loss
 
 For each position in the sequence:
@@ -865,7 +874,8 @@ Final loss = `mean(loss)` across all non-padding positions.
 ### 9.4 Backward Pass & Optimiser (AdamW)
 
 Candle's autograd computes gradients automatically after `loss.backward()`.
-Every parameter receives a `.grad()` tensor.
+The trainer collects each returned `GradStore` into a named gradient map keyed
+by the model `VarMap` parameter names, then applies AdamW to the mutable Vars.
 
 AdamW update per parameter (with corrected defaults):
 ```
@@ -904,11 +914,12 @@ effective_batch = batch_size × grad_accum_steps
 
 for each micro_batch (batch_size=2):
     loss = forward(micro_batch) / grad_accum_steps
-    loss.backward()   ← accumulate gradients
+    loss.backward()   ← returns this micro-batch's GradStore
+    add GradStore into named gradient accumulator
     if step % grad_accum_steps == 0:
         clip_gradients()
         optimiser.step()
-        optimiser.zero_grad()
+        clear accumulator
 ```
 
 With `grad_accum_steps=16` and `batch_size=2`: effective batch = 32.
@@ -929,20 +940,27 @@ Steps warmup_steps → max_steps:
 ### 9.7 Training Output
 
 ```
-$ aarambh-ai train --config configs/tiny_shakespeare.toml
+$ cargo run --release -- train --config configs/tiny_shakespeare.toml
 
-[aarambh-ai] Starting training: Tiny | 5000 steps | batch=2 | accum=16
-
-step    10/5000 | loss: 10.421 | ppl: 33594 | lr: 6.0e-06 | 00:00:30
-step   100/5000 | loss:  5.821 | ppl:   337 | lr: 6.0e-05 | 00:05:00
-step   500/5000 | loss:  3.211 | ppl:    25 | lr: 2.94e-4 | 00:25:00
-step  1000/5000 | loss:  2.874 | ppl:    18 | lr: 2.87e-4 | 00:50:00
-step  2000/5000 | loss:  2.612 | ppl:    14 | lr: 2.65e-4 | 01:40:00
-step  5000/5000 | loss:  2.391 | ppl:    11 | lr: 1.50e-4 | 04:10:00
-
-Saved best checkpoint: checkpoints/best/model.safetensors
-Training complete.
+step=1 loss=9.0304 ppl=8352.87 lr=0.000250 grad_norm=0.7182
+step=10 loss=9.0241 ppl=8300.43 lr=0.000800 grad_norm=0.7221
+eval step=500 val_loss=3.2110 val_ppl=24.80
+step=1000 loss=2.8740 ppl=17.71 lr=0.000287 grad_norm=0.9123
 ```
+
+For a quick CPU validation, use:
+```
+$ cargo run --release -- train --config configs/tiny_shakespeare_smoke.toml
+```
+
+Checkpoint directories contain:
+```
+model.safetensors       ← model VarMap tensors
+optimizer.safetensors   ← AdamW m/v moment tensors
+train_state.json        ← step, epoch, micro-step, train/val/best losses
+```
+
+`latest.json` and `best.json` point to the active checkpoint directories.
 
 ---
 

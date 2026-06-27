@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.5.0] - 2026-06-27
+
+### Added
+
+- **`aarambh-ai-train` crate** — Training loop (Phase 5)
+  - Masked cross-entropy over `[batch, seq, vocab]` logits with padding masks
+  - Project-owned AdamW with `beta1=0.9`, `beta2=0.95`, `eps=1e-8`, decoupled weight decay, and no-decay exclusions for embeddings, biases, and RMSNorm weights
+  - Explicit gradient accumulation by parameter name, global norm clipping, cosine schedule with linear warmup, validation, logging, and full train loop
+  - SafeTensors checkpointing for model weights and optimizer moments plus JSON train state, `latest.json`, and `best.json`
+  - TOML run config loader, `configs/tiny_shakespeare.toml`, and `configs/tiny_shakespeare_smoke.toml`
+  - 11 train tests covering loss masking, LR warmup/decay, AdamW defaults, weight decay policy, gradient clipping, checkpoint roundtrip, and synthetic tiny-model loss decrease
+
+- **CLI**
+  - Added `aarambh-ai train --config <path>` for Phase 5 training runs
+
+- **Tokenizer**
+  - Added `BpeTokenizer::save_pretrained()` to persist vocab and BPE merges in a reloadable tokenizer JSON
+  - Supports both legacy string merges and modern array merges from HuggingFace `tokenizers`
+
+### Changed
+
+- **`aarambh-ai-core` crate**
+  - Extended `TrainConfig` with `max_steps`, `min_lr_ratio`, and `seed`
+  - Added serde defaults for backward-compatible config loading
+
+- **`aarambh-ai-nn` and `aarambh-ai-model` crates**
+  - Added `forward_train()` paths that use Candle autograd-compatible RMSNorm and attention instead of Phase 4 inference kernels
+  - Changed token embedding initialization to `N(0, 0.02)` so tied LM heads start with sane logits and random-model loss near `ln(vocab)`
+
+- **Training config**
+  - Reuses an existing tokenizer JSON in the checkpoint directory instead of retraining BPE on every launch
+
+### Verified
+
+- `cargo check --workspace --all-targets`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace`
+- `cargo run --release -p aarambh-ai -- train --config configs/tiny_shakespeare_smoke.toml`
+
 ## [0.4.0] - 2026-06-27
 
 ### Added

@@ -2,3 +2,19 @@
 name = "aarambh-ai-train"
 version = "0.1.0"
 edition = "2024"
+
+[dependencies]
+aarambh-ai-core      = { path = "../aarambh-ai-core" }
+aarambh-ai-data      = { path = "../aarambh-ai-data" }
+aarambh-ai-model     = { path = "../aarambh-ai-model" }
+aarambh-ai-tokenizer = { path = "../aarambh-ai-tokenizer" }
+candle-core          = { workspace = true }
+candle-nn            = { workspace = true }
+serde                = { workspace = true }
+serde_json           = { workspace = true }
+toml                 = { workspace = true }
+
+[dev-dependencies]
+aarambh-ai-core = { path = "../aarambh-ai-core" }
+candle-core     = { workspace = true }
+candle-nn       = { workspace = true }

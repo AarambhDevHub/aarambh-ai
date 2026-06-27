@@ -139,6 +139,19 @@ impl AarambhModel {
         Ok(self.lm_head.forward(&x)?)
     }
 
+    pub fn forward_train(&self, token_ids: &Tensor) -> Result<Tensor> {
+        let (_, seq_len) = self.check_token_ids(token_ids, 0)?;
+        let mask = self.causal_mask(seq_len, 0)?;
+        let mut x = self.embedding.forward(token_ids)?;
+
+        for block in &self.blocks {
+            x = block.forward_train(&x, &self.rope_cache, Some(&mask), 0)?;
+        }
+
+        let x = self.final_norm.forward_train(&x)?;
+        Ok(self.lm_head.forward(&x)?)
+    }
+
     pub fn forward_with_cache(
         &self,
         token_ids: &Tensor,

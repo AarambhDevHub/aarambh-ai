@@ -1,5 +1,5 @@
 use candle_core::{Result, Tensor};
-use candle_nn::{Embedding, Module, VarBuilder, embedding};
+use candle_nn::{Embedding, Init, Module, VarBuilder};
 
 #[derive(Debug, Clone)]
 pub struct TokenEmbedding {
@@ -8,7 +8,15 @@ pub struct TokenEmbedding {
 
 impl TokenEmbedding {
     pub fn new(vocab_size: usize, hidden_dim: usize, vb: VarBuilder<'_>) -> Result<Self> {
-        let inner = embedding(vocab_size, hidden_dim, vb)?;
+        let weight = vb.get_with_hints(
+            (vocab_size, hidden_dim),
+            "weight",
+            Init::Randn {
+                mean: 0.0,
+                stdev: 0.02,
+            },
+        )?;
+        let inner = Embedding::new(weight, hidden_dim);
         Ok(Self { inner })
     }
 

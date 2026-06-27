@@ -54,7 +54,7 @@ mod tests {
         }
 
         fn vocab_size(&self) -> usize {
-            self.vocab.len() as usize
+            self.vocab.len()
         }
 
         fn eos_token_id(&self) -> u32 {
