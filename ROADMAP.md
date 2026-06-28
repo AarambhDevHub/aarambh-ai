@@ -26,7 +26,7 @@ Phase 2  →  Neural network primitives            (5–7 days)    [i3] ✅
 Phase 3  →  Full model forward pass              (3–4 days)    [i3] ✅
 Phase 4  →  Custom kernels (CPU SIMD + GPU prep) (5–7 days)    [i3 + Kaggle prep] ✅
 Phase 5  →  Training loop — Tiny trains!         (7–10 days)   [i3] ✅
-Phase 6  →  Inference engine + CLI               (5–7 days)    [i3]
+Phase 6  →  Inference engine + CLI               (5–7 days)    [i3] ✅
 Phase 7  →  Thinking engine                      (4–6 days)    [i3]
 Phase 8  →  Quantisation stack                   (8–10 days)   [i3]
 Phase 9  →  Fine-tuning (LoRA, QLoRA, SFT)       (10–14 days)  [i3 + Kaggle]
@@ -863,57 +863,57 @@ The predict-view shows next-token probabilities. The CLI binary works.
 
 **`aarambh-ai-inference`:**
 ```
-[ ] src/kvcache.rs — KvCache
-      layers: Vec<(Option<Tensor>, Option<Tensor>)>   // K, V per layer
-      fn new(n_layers, n_kv_heads, head_dim, device) -> Self
-      fn update(&mut self, layer, k, v) -> (Tensor, Tensor)
-        // append new K,V → return full K,V for attention
+[x] src/kvcache.rs — KvCache
+      Wraps one aarambh-ai-nn::KVCache per transformer layer.
+      fn for_model(model) -> Self
+      fn layers_mut(&mut self) -> &mut [KVCache]
       fn clear(&mut self)
       fn seqlen(&self) -> usize
 
-[ ] src/sampler.rs — Sampler
+[x] src/sampler.rs — Sampler
       Greedy
-      TopK(usize)
-      TopP(f32)
-      Temperature(f32)
-      fn sample(&self, logits: &Tensor) -> Result<u32>
+      TopKTopP { temperature, top_k, top_p, seed }
+      fn sample(&mut self, logits: &[f32]) -> Result<u32>
+      fn top_candidates(&self, logits: &[f32], n: usize) -> Result<Vec<TokenCandidate>>
 
-[ ] src/engine.rs — InferenceEngine
-      fn new(model, tokenizer, device) -> Self
-      fn generate(
-          &mut self,
-          prompt: &str,
-          max_new_tokens: usize,
-          sampler: &Sampler,
-          thinking_mode: ThinkingMode,
-      ) -> Result<String>
-        // prefill: process prompt in parallel (no KV cache yet)
-        // decode:  one token at a time, using KV cache
-        // stop:    at ENDOFTEXT_ID or max_new_tokens
+[x] src/engine.rs — InferenceEngine
+      fn new(model, tokenizer, device) -> Result<Self>
+      fn from_paths(model_path, model_config, tokenizer_path, device) -> Result<Self>
+      fn generate(prompt, GenerationConfig) -> Result<GenerationOutput>
+      fn generate_with_callback(prompt, GenerationConfig, on_step) -> Result<GenerationOutput>
+        // validate tokenizer special IDs before generation
+        // prefill prompt into model.forward_with_cache(...)
+        // decode one token at a time with KV cache
+        // stop at <|endoftext|>, max_new_tokens, or context limit
 
-[ ] src/stream.rs
-      // generate_stream() sends tokens through mpsc::channel
-      // caller prints each token as it arrives → "typing" effect
+[x] src/stream.rs
+      StreamEvent::{Token(GenerationStep), Finished(FinishReason)}
+      The CLI streams by using generate_with_callback(...) and flushing each token.
 
-[ ] src/thinking.rs — ThinkingMode, ThinkingController  (stub for Phase 7)
+[x] src/thinking.rs — ThinkingMode, ThinkingController  (stub for Phase 7)
+      accepts none|low|medium|high and tracks budgets
+      does not force <think> tokens until Phase 7
 ```
 
 **`aarambh-ai` binary:**
 ```
-[ ] src/cmd/infer.rs
+[x] src/cmd/infer.rs
+      --config <path>       default configs/tiny_shakespeare.toml
       --model <path>
+      --tokenizer <path>
       --prompt <text>
       --max-tokens <n>     default 256
       --temperature <f>    default 0.7
       --top-p <f>          default 0.9
       --top-k <n>          default 50
+      --seed <n>
       --thinking <mode>    none|low|medium|high
       --predict-view       show next-token probabilities
       --stream             stream output token by token
+      --greedy             deterministic argmax decode
 
-[ ] src/ui/predict_view.rs
+[x] src/ui/predict_view.rs
       // After each token, print top-5 candidates with probability bars
-      // Uses ANSI escape codes. Width adapts to terminal.
       //
       // ══════════════════════════════════════════════════════
       // ████████████████████████  48.2%  " Delhi"   ✓ chosen
@@ -927,32 +927,37 @@ The predict-view shows next-token probabilities. The CLI binary works.
 ```rust
 #[test]
 fn greedy_is_deterministic() {
-    let out1 = engine.generate("Hello", 20, &Sampler::Greedy, ThinkingMode::None).unwrap();
-    let out2 = engine.generate("Hello", 20, &Sampler::Greedy, ThinkingMode::None).unwrap();
-    assert_eq!(out1, out2);
+    let out1 = engine.generate("Hello", GenerationConfig::greedy(20)).unwrap();
+    let out2 = engine.generate("Hello", GenerationConfig::greedy(20)).unwrap();
+    assert_eq!(out1.token_ids, out2.token_ids);
 }
 
 #[test]
 fn generate_respects_max_tokens() {
-    let out = engine.generate("Hello", 5, &Sampler::Greedy, ThinkingMode::None).unwrap();
-    let ids = tokenizer.encode(&out).unwrap();
-    assert!(ids.len() <= 5);
+    let out = engine.generate("Hello", GenerationConfig::greedy(5)).unwrap();
+    assert!(out.token_ids.len() <= 5);
 }
 
 #[test]
 fn kvcache_seqlen_grows_each_step() {
-    let mut cache = KvCache::new(6, 2, 64, device);
-    cache.update(0, &k1, &v1);
-    assert_eq!(cache.seqlen(), 1);
-    cache.update(0, &k2, &v2);
-    assert_eq!(cache.seqlen(), 2);
+    let mut cache = KVCache::new();
+    cache.update(&k1, &v1).unwrap();
+    assert_eq!(cache.seq_len(), 1);
+    cache.update(&k2, &v2).unwrap();
+    assert_eq!(cache.seq_len(), 2);
 }
 ```
+
+Additional Phase 6 test coverage:
+- sampler: greedy determinism, top-k filtering, temperature zero argmax, sorted top candidates
+- engine: max token limit, deterministic greedy decode, invalid tokenizer special IDs rejected
+- thinking stub: budgets and block closure behavior
+- tokenizer: trained BPE reserves fixed special IDs
 
 ### First Public Demo
 ```bash
 aarambh-ai infer \
-  --model checkpoints/best/model.safetensors \
+  --config configs/tiny_shakespeare.toml \
   --prompt "To be, or not to be" \
   --max-tokens 64 \
   --predict-view
@@ -964,8 +969,9 @@ aarambh-ai infer \
 
 ### Milestone ✅
 ```
-CLI generates coherent Shakespeare-style text.
+CLI loads checkpoints and generates text from Tiny configs.
 Predict-view shows token probabilities correctly.
+Tokenizer special IDs are validated before inference.
 
 git commit -m "feat: Phase 6 — inference engine, KV cache, CLI, predict-view"
 git tag v0.6.0

@@ -133,7 +133,9 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
 
 fn prepare_tokenizer(config: &TrainingRunConfig) -> Result<BpeTokenizer> {
     if let Some(path) = &config.tokenizer_path {
-        return BpeTokenizer::from_pretrained(path);
+        let tokenizer = BpeTokenizer::from_pretrained(path)?;
+        tokenizer.validate_special_tokens()?;
+        return Ok(tokenizer);
     }
 
     fs::create_dir_all(&config.train.checkpoint_dir)?;
@@ -142,10 +144,14 @@ fn prepare_tokenizer(config: &TrainingRunConfig) -> Result<BpeTokenizer> {
         .clone()
         .unwrap_or_else(|| config.train.checkpoint_dir.join("tokenizer.json"));
     if save_path.exists() {
-        return BpeTokenizer::from_pretrained(save_path);
+        let tokenizer = BpeTokenizer::from_pretrained(&save_path)?;
+        if tokenizer.validate_special_tokens().is_ok() {
+            return Ok(tokenizer);
+        }
     }
 
     let tokenizer = BpeTokenizer::train(&config.dataset_path, config.vocab_size)?;
+    tokenizer.validate_special_tokens()?;
     tokenizer.save_pretrained(save_path)?;
     Ok(tokenizer)
 }

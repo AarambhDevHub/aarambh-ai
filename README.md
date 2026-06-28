@@ -32,7 +32,7 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 | Custom CUDA kernels: Flash Attention v2, fused RMSNorm, RoPE, SwiGLU | Phase 14 |
 | CPU SIMD kernels: AVX2/FMA RMSNorm, AVX512 override, parallel attention via rayon | Phase 4 ✅ |
 | CUDA kernel build prep and FFI stubs | Phase 4 ✅ |
-| CLI binary with predict-view, streaming, thinking modes | Phase 6 |
+| CLI binary with predict-view, streaming, thinking modes | Phase 6 ✅ |
 
 ---
 
@@ -79,8 +79,10 @@ cargo run --release -- train --config configs/tiny_shakespeare_smoke.toml
 The trainer builds or loads a BPE tokenizer, creates train/validation loaders,
 uses an autograd-safe model forward path, applies masked cross-entropy, AdamW
 with `beta2=0.95`, cosine warmup/decay, gradient clipping, gradient
-accumulation, and checkpoint save/resume. If `checkpoint_dir/tokenizer.json`
-already exists, the trainer reuses it instead of retraining BPE on every launch.
+accumulation, and checkpoint save/resume. If a configured tokenizer already
+exists and has the required reserved special-token IDs, the trainer reuses it
+instead of retraining BPE on every launch; stale Phase 5 tokenizers are
+regenerated automatically when the config owns the tokenizer path.
 
 Checkpoint layout:
 
@@ -106,6 +108,40 @@ step=1 loss=9.0304 ppl=8352.87 lr=0.000250 grad_norm=0.7182
 step=10 loss=9.0241 ppl=8300.43 lr=0.000800 grad_norm=0.7221
 eval step=500 val_loss=3.2110 val_ppl=24.80
 ```
+
+---
+
+## Infer Tiny
+
+Phase 6 adds a checkpoint-backed inference engine and `infer` CLI command:
+
+```sh
+# Use latest.json or best.json from the config checkpoint directory.
+cargo run --release -- infer \
+  --config configs/tiny_shakespeare_smoke.toml \
+  --prompt "To be, or not to be" \
+  --max-tokens 32 \
+  --greedy \
+  --predict-view
+
+# Stream sampled text from an explicit model/tokenizer pair.
+cargo run --release -- infer \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tiny_shakespeare/best/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --prompt "The king" \
+  --max-tokens 64 \
+  --temperature 0.7 \
+  --top-p 0.9 \
+  --top-k 50 \
+  --stream
+```
+
+The inference path validates tokenizer special IDs before loading the model,
+prefills the prompt, decodes one token at a time with the KV cache, supports
+greedy or top-k/top-p sampling, stops on `<|endoftext|>` or context limit, and
+can render a next-token predict-view for debugging. `--thinking none|low|medium|high`
+is accepted as a Phase 7-compatible stub; Phase 6 does not force `<think>` tokens.
 
 ---
 
@@ -271,7 +307,7 @@ aarambh-ai/
 | 3 | Full model forward pass | i3 | ✅ |
 | 4 | Custom kernels (CPU SIMD + CUDA stubs) | i3 + GPU | ✅ |
 | 5 | Training loop — Tiny trains! | i3 | ✅ |
-| 6 | Inference engine + CLI | i3 | ⬜ |
+| 6 | Inference engine + CLI | i3 | ✅ |
 | 7 | Thinking engine | i3 | ⬜ |
 | 8 | Quantisation stack | i3 | ⬜ |
 | 9 | Fine-tuning (LoRA, QLoRA, SFT) | i3 + GPU | ⬜ |

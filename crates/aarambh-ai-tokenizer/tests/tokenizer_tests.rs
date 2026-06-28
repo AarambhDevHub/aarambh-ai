@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use aarambh_ai_core::TokenizerLike;
 use aarambh_ai_tokenizer::{
     BpeTokenizer, Vocab,
-    special::{ASSISTANT_ID, BOS_ID, ENDOFTEXT_ID, PAD_ID, THINK_END_ID, THINK_START_ID, USER_ID},
+    special::{
+        ASSISTANT, ASSISTANT_ID, BOS, BOS_ID, ENDOFTEXT, ENDOFTEXT_ID, PAD, PAD_ID,
+        SPECIAL_TOKEN_COUNT, THINK_END, THINK_END_ID, THINK_START, THINK_START_ID, USER, USER_ID,
+    },
 };
 
 #[test]
@@ -15,6 +18,13 @@ fn special_token_ids_are_correct() {
     assert_eq!(THINK_END_ID, 4);
     assert_eq!(USER_ID, 5);
     assert_eq!(ASSISTANT_ID, 6);
+    assert_eq!(ENDOFTEXT, "<|endoftext|>");
+    assert_eq!(PAD, "<|pad|>");
+    assert_eq!(BOS, "<|bos|>");
+    assert_eq!(THINK_START, "<think>");
+    assert_eq!(THINK_END, "</think>");
+    assert_eq!(USER, "<|user|>");
+    assert_eq!(ASSISTANT, "<|assistant|>");
 }
 
 #[test]
@@ -176,4 +186,55 @@ fn bpe_save_pretrained_roundtrip_preserves_merges() {
 
     assert_eq!(loaded.encode("ab").unwrap(), vec![2]);
     assert_eq!(loaded.decode(&[2]).unwrap(), "ab");
+}
+
+#[test]
+fn trained_bpe_reserves_special_token_ids() {
+    let path = std::env::temp_dir().join(format!(
+        "aarambh_tokenizer_train_specials_{}.txt",
+        std::process::id()
+    ));
+    std::fs::write(
+        &path,
+        "the thou thee therefore there their thing think thinking",
+    )
+    .unwrap();
+
+    let tokenizer = BpeTokenizer::train(&path, 32).unwrap();
+    let _ = std::fs::remove_file(&path);
+
+    tokenizer.validate_special_tokens().unwrap();
+    assert!(tokenizer.vocab_size() >= SPECIAL_TOKEN_COUNT);
+    assert!(tokenizer.vocab_size() <= 32);
+    for (token, id) in &tokenizer.vocab.token_to_id {
+        if !token.starts_with('<') {
+            assert!((*id as usize) >= SPECIAL_TOKEN_COUNT);
+        }
+    }
+    assert_eq!(
+        tokenizer
+            .encode("<|user|>hello<|assistant|>")
+            .unwrap()
+            .first()
+            .copied(),
+        Some(USER_ID)
+    );
+    assert_eq!(tokenizer.decode(&[ENDOFTEXT_ID]).unwrap(), ENDOFTEXT);
+}
+
+#[test]
+fn validate_special_tokens_rejects_plain_character_ids() {
+    let token_to_id = HashMap::from([("!".into(), 0u32), ("$".into(), 1u32)]);
+    let id_to_token = vec!["!".into(), "$".into()];
+    let tokenizer = BpeTokenizer {
+        vocab: Vocab {
+            token_to_id,
+            id_to_token,
+        },
+        merges: vec![],
+        merge_rank: HashMap::new(),
+    };
+
+    let err = tokenizer.validate_special_tokens().unwrap_err();
+    assert!(err.to_string().contains("special token"));
 }

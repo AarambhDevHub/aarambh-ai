@@ -141,8 +141,16 @@ The two are complementary:
 - `BpeTokenizer::from_pretrained(path)` → uses `tokenizers` crate internally, loads
   a `tokenizer.json` produced by HuggingFace, OpenAI GPT-2, or similar
 - `BpeTokenizer::train(corpus_path, vocab_size)` → delegates to `tokenizers::trainers::BpeTrainer`,
-  then saves and loads the result via `from_pretrained()`
+  reserves IDs 0..6 for project special tokens, then saves and loads the result
+  via `from_pretrained()`
 - `encode()`/`decode()` are pure-Rust (no external deps at inference time)
+
+The first seven token IDs are architectural, not learned from the corpus:
+`<|endoftext|>` = 0, `<|pad|>` = 1, `<|bos|>` = 2, `<think>` = 3,
+`</think>` = 4, `<|user|>` = 5, and `<|assistant|>` = 6. Training reuses an
+existing tokenizer only if these IDs validate; inference rejects tokenizers that
+do not validate, because EOS stopping and Phase 7 thinking control depend on
+stable IDs.
 
 **For Phase 1 tests:** download GPT-2's `tokenizer.json` from HuggingFace and place it
 at `tests/fixtures/tokenizer.json`. This solves the chicken-and-egg problem — you
@@ -754,6 +762,17 @@ Each layer has its own cache. Memory:
 Tiny at F32: 2 × 8 × 2 × 512 × 64 × 4 = ~4 MB per sequence
 ```
 
+Phase 6 implements this in `aarambh-ai-inference`:
+- `KvCache` owns one `aarambh-ai-nn::KVCache` per transformer layer and exposes
+  mutable layer slices to `AarambhModel::forward_with_cache()`
+- `InferenceEngine::from_paths(...)` loads a SafeTensors checkpoint, validates
+  tokenizer special IDs, and adjusts the model vocab size to the tokenizer
+- `generate_with_callback(...)` prefills the prompt once, decodes one token at a
+  time with cache offsets, emits `GenerationStep` values, and stops at
+  `<|endoftext|>`, max tokens, or context limit
+- `ThinkingMode` is accepted and budget-tracked as a Phase 7 stub; Phase 6 does
+  not force `<think>` or `</think>` tokens
+
 ### 8.2 Sampling Strategies
 
 After the forward pass gives `logits ∈ ℝ^vocab_size`:
@@ -803,9 +822,10 @@ Generated so far: "The capital of India is New"
 ────────────────────────────────────────────────────────
 ```
 
-This is implemented in `aarambh-ai/src/ui/predict_view.rs` using ANSI escape codes.
-It is the most powerful tool for understanding and debugging your model — you can see
-exactly which tokens the model is considering and with what confidence.
+This is implemented in `aarambh-ai/src/ui/predict_view.rs` from the
+`GenerationStep.candidates` returned by the sampler. It is the most powerful
+tool for understanding and debugging your model — you can see exactly which
+tokens the model is considering and with what confidence.
 
 ---
 

@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-aarambh-ai-core  = { path = "../crates/aarambh-ai-core" }
-aarambh-ai-train = { path = "../crates/aarambh-ai-train" }
-anyhow           = { workspace = true }
-clap             = { workspace = true }
+aarambh-ai-core      = { path = "../crates/aarambh-ai-core" }
+aarambh-ai-inference = { path = "../crates/aarambh-ai-inference" }
+aarambh-ai-tokenizer = { path = "../crates/aarambh-ai-tokenizer" }
+aarambh-ai-train     = { path = "../crates/aarambh-ai-train" }
+anyhow               = { workspace = true }
+clap                 = { workspace = true }
+serde                = { workspace = true }
+serde_json           = { workspace = true }
