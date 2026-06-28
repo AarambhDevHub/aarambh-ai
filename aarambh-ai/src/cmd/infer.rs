@@ -2,12 +2,19 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use aarambh_ai_inference::{GenerationConfig, InferenceEngine, Sampler, ThinkingMode};
+use aarambh_ai_inference::{
+    GenerationConfig, GenerationOutput, GenerationPhase, GenerationStep, InferenceEngine, Sampler,
+    ThinkingMode,
+};
+use aarambh_ai_tokenizer::{ASSISTANT, THINK_END_ID, THINK_START_ID, USER};
 use aarambh_ai_train::TrainingRunConfig;
 use clap::Args;
 use serde::Deserialize;
 
 use crate::ui::predict_view;
+
+const ANSI_DIM: &str = "\x1b[2m";
+const ANSI_RESET: &str = "\x1b[0m";
 
 #[derive(Debug, Args)]
 pub struct InferArgs {
@@ -63,11 +70,6 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
         )?
     };
     let thinking_mode = parse_thinking_mode(&args.thinking)?;
-    if thinking_mode.is_enabled() {
-        eprintln!(
-            "thinking mode is accepted in Phase 6, but token forcing is implemented in Phase 7"
-        );
-    }
 
     let mut engine =
         InferenceEngine::from_paths(model_path, &run_config.model, tokenizer_path, device)?;
@@ -78,8 +80,12 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
         top_candidates: 5,
     };
 
+    let prompt = prompt_for_mode(&args.prompt, thinking_mode);
     let tokenizer_for_view = engine.tokenizer().clone();
-    let output = engine.generate_with_callback(&args.prompt, config, |step| {
+    let mut stream_dim_active = false;
+    let mut stream_header_printed = false;
+    let mut stream_thinking_tokens = 0usize;
+    let output = engine.generate_with_callback(&prompt, config, |step| {
         if args.predict_view {
             print!(
                 "{}",
@@ -87,7 +93,13 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
             );
         }
         if args.stream {
-            print!("{}", step.token_text);
+            stream_step(
+                step,
+                thinking_mode,
+                &mut stream_dim_active,
+                &mut stream_header_printed,
+                &mut stream_thinking_tokens,
+            )?;
         }
         if args.predict_view || args.stream {
             io::stdout().flush()?;
@@ -96,9 +108,13 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
     })?;
 
     if args.stream {
+        if stream_dim_active {
+            println!("{ANSI_RESET}");
+            println!("[thinking: {stream_thinking_tokens} tokens]");
+        }
         println!();
     } else {
-        println!("{}", output.text);
+        print_generation_output(&output, thinking_mode)?;
     }
     io::stdout().flush()?;
     eprintln!("finish_reason={:?}", output.finish_reason);
@@ -138,4 +154,69 @@ fn parse_thinking_mode(value: &str) -> anyhow::Result<ThinkingMode> {
             "invalid thinking mode '{other}', expected none|low|medium|high"
         )),
     }
+}
+
+fn prompt_for_mode(prompt: &str, thinking_mode: ThinkingMode) -> String {
+    if thinking_mode.is_enabled() {
+        format!("{USER}\n{prompt}\n{ASSISTANT}\n")
+    } else {
+        prompt.to_string()
+    }
+}
+
+fn stream_step(
+    step: &GenerationStep,
+    thinking_mode: ThinkingMode,
+    dim_active: &mut bool,
+    header_printed: &mut bool,
+    thinking_tokens: &mut usize,
+) -> io::Result<()> {
+    if !thinking_mode.is_enabled() {
+        print!("{}", step.token_text);
+        return Ok(());
+    }
+
+    match step.phase {
+        GenerationPhase::Thinking => {
+            if !*header_printed {
+                print!("[thinking]\n{ANSI_DIM}");
+                *header_printed = true;
+                *dim_active = true;
+            }
+            if !is_thinking_marker(step.token_id) {
+                *thinking_tokens += 1;
+                print!("{}", step.token_text);
+            }
+        }
+        GenerationPhase::Answer => {
+            if *dim_active {
+                println!("{ANSI_RESET}");
+                println!("[thinking: {thinking_tokens} tokens]");
+                *dim_active = false;
+            }
+            print!("{}", step.token_text);
+        }
+    }
+    Ok(())
+}
+
+fn print_generation_output(
+    output: &GenerationOutput,
+    thinking_mode: ThinkingMode,
+) -> io::Result<()> {
+    if !thinking_mode.is_enabled() {
+        println!("{}", output.text);
+        return Ok(());
+    }
+
+    println!("[thinking: {} tokens]", output.thinking_tokens);
+    if !output.thinking_text.is_empty() {
+        println!("{ANSI_DIM}{}{ANSI_RESET}", output.thinking_text);
+    }
+    println!("{}", output.text);
+    Ok(())
+}
+
+fn is_thinking_marker(token_id: u32) -> bool {
+    token_id == THINK_START_ID || token_id == THINK_END_ID
 }

@@ -5,7 +5,8 @@ pub mod stream;
 pub mod thinking;
 
 pub use engine::{
-    FinishReason, GenerationConfig, GenerationOutput, GenerationStep, InferenceEngine,
+    FinishReason, GenerationConfig, GenerationOutput, GenerationPhase, GenerationStep,
+    InferenceEngine,
 };
 pub use kvcache::KvCache;
 pub use sampler::{Sampler, TokenCandidate};

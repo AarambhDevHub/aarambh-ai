@@ -2,7 +2,7 @@ use std::path::Path;
 
 use aarambh_ai_core::{AarambhError, Configurable, Result, TokenizerLike};
 use aarambh_ai_model::AarambhModel;
-use aarambh_ai_tokenizer::BpeTokenizer;
+use aarambh_ai_tokenizer::{BpeTokenizer, THINK_END_ID, THINK_START_ID};
 use candle_core::Tensor;
 
 use crate::kvcache::KvCache;
@@ -14,6 +14,12 @@ pub enum FinishReason {
     MaxTokens,
     EosToken,
     ContextLimit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenerationPhase {
+    Thinking,
+    Answer,
 }
 
 #[derive(Debug, Clone)]
@@ -41,12 +47,20 @@ pub struct GenerationStep {
     pub token_id: u32,
     pub token_text: String,
     pub candidates: Vec<TokenCandidate>,
+    pub phase: GenerationPhase,
+    pub forced: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct GenerationOutput {
     pub text: String,
+    pub raw_text: String,
+    pub thinking_text: String,
+    pub answer_text: String,
     pub token_ids: Vec<u32>,
+    pub thinking_token_ids: Vec<u32>,
+    pub answer_token_ids: Vec<u32>,
+    pub thinking_tokens: usize,
     pub finish_reason: FinishReason,
     pub steps: Vec<GenerationStep>,
 }
@@ -129,7 +143,13 @@ impl InferenceEngine {
         if max_new_tokens == 0 {
             return Ok(GenerationOutput {
                 text: String::new(),
+                raw_text: String::new(),
+                thinking_text: String::new(),
+                answer_text: String::new(),
                 token_ids: Vec::new(),
+                thinking_token_ids: Vec::new(),
+                answer_token_ids: Vec::new(),
+                thinking_tokens: 0,
                 finish_reason: FinishReason::ContextLimit,
                 steps: Vec::new(),
             });
@@ -142,9 +162,13 @@ impl InferenceEngine {
             .forward_with_cache(&input, 0, cache.layers_mut())?;
         let mut next_logits = last_logits(&logits)?;
 
-        let mut thinking = ThinkingController::new(config.thinking_mode);
+        let mut thinking = ThinkingController::for_generation(config.thinking_mode, max_new_tokens);
         let mut generated_ids = Vec::with_capacity(max_new_tokens);
-        let mut text = String::new();
+        let mut raw_text = String::new();
+        let mut thinking_text = String::new();
+        let mut answer_text = String::new();
+        let mut thinking_token_ids = Vec::new();
+        let mut answer_token_ids = Vec::new();
         let mut steps = Vec::with_capacity(max_new_tokens);
         let mut finish_reason = FinishReason::MaxTokens;
 
@@ -153,25 +177,45 @@ impl InferenceEngine {
             let candidates = config
                 .sampler
                 .top_candidates(&logits_vec, config.top_candidates)?;
-            let token_id = config.sampler.sample(&logits_vec)?;
+            let forced_token = thinking.take_forced_token();
+            let mut forced = forced_token.is_some();
+            let mut token_id = match forced_token {
+                Some(force) => force.token_id(),
+                None => config.sampler.sample(&logits_vec)?,
+            };
 
             if token_id == self.tokenizer.eos_token_id() {
-                finish_reason = FinishReason::EosToken;
-                break;
+                if thinking.in_thinking_block() {
+                    token_id = THINK_END_ID;
+                    forced = true;
+                } else {
+                    finish_reason = FinishReason::EosToken;
+                    break;
+                }
             }
 
+            let phase = phase_for_token(&thinking, config.thinking_mode, token_id);
             let token_text = self.tokenizer.decode(&[token_id])?;
             let generation_step = GenerationStep {
                 step: step + 1,
                 token_id,
                 token_text: token_text.clone(),
                 candidates,
+                phase,
+                forced,
             };
             on_step(&generation_step)?;
-            thinking.on_token(token_id);
+            let _ = thinking.on_token(token_id);
 
             generated_ids.push(token_id);
-            text.push_str(&token_text);
+            raw_text.push_str(&token_text);
+            if phase == GenerationPhase::Thinking && !is_thinking_marker(token_id) {
+                thinking_text.push_str(&token_text);
+                thinking_token_ids.push(token_id);
+            } else if phase == GenerationPhase::Answer {
+                answer_text.push_str(&token_text);
+                answer_token_ids.push(token_id);
+            }
             steps.push(generation_step);
 
             if step + 1 == max_new_tokens {
@@ -190,12 +234,37 @@ impl InferenceEngine {
         }
 
         Ok(GenerationOutput {
-            text,
+            text: answer_text.clone(),
+            raw_text,
+            thinking_text,
+            answer_text,
             token_ids: generated_ids,
+            thinking_token_ids,
+            answer_token_ids,
+            thinking_tokens: thinking.tokens_used(),
             finish_reason,
             steps,
         })
     }
+}
+
+fn phase_for_token(
+    thinking: &ThinkingController,
+    thinking_mode: ThinkingMode,
+    token_id: u32,
+) -> GenerationPhase {
+    if !thinking_mode.is_enabled() {
+        return GenerationPhase::Answer;
+    }
+    if thinking.in_thinking_block() || (!thinking.has_started() && token_id == THINK_START_ID) {
+        GenerationPhase::Thinking
+    } else {
+        GenerationPhase::Answer
+    }
+}
+
+fn is_thinking_marker(token_id: u32) -> bool {
+    token_id == THINK_START_ID || token_id == THINK_END_ID
 }
 
 fn last_logits(logits: &Tensor) -> Result<Tensor> {
@@ -295,6 +364,40 @@ mod tests {
             .generate("Hello", GenerationConfig::greedy(5))
             .unwrap();
         assert!(out.token_ids.len() <= 5);
+    }
+
+    #[test]
+    fn thinking_mode_forces_start_and_close_tokens() {
+        let mut engine = test_engine();
+        let mut cfg = GenerationConfig::greedy(4);
+        cfg.thinking_mode = ThinkingMode::Low;
+        let out = engine.generate("Hello", cfg).unwrap();
+
+        assert!(out.token_ids.len() >= 2);
+        assert_eq!(&out.token_ids[..2], &[THINK_START_ID, THINK_END_ID]);
+        assert!(
+            out.raw_text
+                .starts_with(&format!("{THINK_START}{THINK_END}"))
+        );
+        assert_eq!(out.text, out.answer_text);
+        assert_eq!(out.thinking_text, "");
+        assert_eq!(out.thinking_tokens, 0);
+        assert_eq!(out.steps[0].phase, GenerationPhase::Thinking);
+        assert!(out.steps[0].forced);
+        assert_eq!(out.steps[1].phase, GenerationPhase::Thinking);
+        assert!(out.steps[1].forced);
+    }
+
+    #[test]
+    fn generation_output_text_is_answer_only() {
+        let mut engine = test_engine();
+        let mut cfg = GenerationConfig::greedy(4);
+        cfg.thinking_mode = ThinkingMode::Low;
+        let out = engine.generate("Hello", cfg).unwrap();
+
+        assert_eq!(out.text, out.answer_text);
+        assert!(out.raw_text.contains(THINK_START));
+        assert!(out.raw_text.contains(THINK_END));
     }
 
     #[test]

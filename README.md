@@ -22,7 +22,7 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 | Four model scales: Tiny (25M) → Large (1.3B) | Phase 0 ✅ |
 | Full model forward pass (embedding, blocks, LM head, KV cache path) | Phase 3 ✅ |
 | SafeTensors model save/load | Phase 3 ✅ |
-| Thinking engine: Low / Medium / High reasoning budgets | Phase 7 |
+| Thinking engine: Low / Medium / High reasoning budgets | Phase 7 ✅ |
 | Full training pipeline with AdamW, cosine schedule, checkpointing | Phase 5 ✅ |
 | Quantisation: INT8, GPTQ INT4, AWQ INT4, GGUF, QAT | Phase 8 |
 | LoRA, QLoRA, DoRA fine-tuning | Phase 9 |
@@ -135,13 +135,24 @@ cargo run --release -- infer \
   --top-p 0.9 \
   --top-k 50 \
   --stream
+
+# Force a budget-controlled thinking block before the visible answer.
+cargo run --release -- infer \
+  --config configs/tiny_shakespeare.toml \
+  --prompt "What is 15 x 27?" \
+  --max-tokens 96 \
+  --thinking low \
+  --greedy
 ```
 
 The inference path validates tokenizer special IDs before loading the model,
 prefills the prompt, decodes one token at a time with the KV cache, supports
 greedy or top-k/top-p sampling, stops on `<|endoftext|>` or context limit, and
-can render a next-token predict-view for debugging. `--thinking none|low|medium|high`
-is accepted as a Phase 7-compatible stub; Phase 6 does not force `<think>` tokens.
+can render a next-token predict-view for debugging. `--thinking low|medium|high`
+wraps the prompt with user/assistant markers, forces `<think>` as the first
+generated token, enforces the mode budget, force-closes with `</think>` when
+needed, and prints the final answer separately from the dimmed thinking block.
+Reasoning quality still depends on Phase 9/10 thinking SFT and GRPO training.
 
 ---
 
@@ -308,7 +319,7 @@ aarambh-ai/
 | 4 | Custom kernels (CPU SIMD + CUDA stubs) | i3 + GPU | ✅ |
 | 5 | Training loop — Tiny trains! | i3 | ✅ |
 | 6 | Inference engine + CLI | i3 | ✅ |
-| 7 | Thinking engine | i3 | ⬜ |
+| 7 | Thinking engine | i3 | ✅ |
 | 8 | Quantisation stack | i3 | ⬜ |
 | 9 | Fine-tuning (LoRA, QLoRA, SFT) | i3 + GPU | ⬜ |
 | 10 | GRPO reinforcement learning | GPU | ⬜ |
