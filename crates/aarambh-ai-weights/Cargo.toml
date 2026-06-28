@@ -6,5 +6,8 @@ edition = "2024"
 [dependencies]
 aarambh-ai-core  = { path = "../aarambh-ai-core" }
 aarambh-ai-model = { path = "../aarambh-ai-model" }
+aarambh-ai-quant = { path = "../aarambh-ai-quant" }
 candle-core      = { workspace = true }
 candle-nn        = { workspace = true }
+serde            = { workspace = true }
+serde_json       = { workspace = true }

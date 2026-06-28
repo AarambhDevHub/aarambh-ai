@@ -152,6 +152,29 @@ impl AarambhModel {
         Ok(self.lm_head.forward(&x)?)
     }
 
+    pub fn linear_inputs(&self, token_ids: &Tensor) -> Result<HashMap<String, Tensor>> {
+        let (_, seq_len) = self.check_token_ids(token_ids, 0)?;
+        let mask = self.causal_mask(seq_len, 0)?;
+        let mut capture = HashMap::new();
+        let mut x = self.embedding.forward(token_ids)?;
+
+        for (layer_idx, block) in self.blocks.iter().enumerate() {
+            x = block.forward_with_capture(
+                &x,
+                &self.rope_cache,
+                Some(&mask),
+                layer_idx,
+                &mut capture,
+            )?;
+        }
+
+        let x = self.final_norm.forward(&x)?;
+        if !self.lm_head.is_tied() {
+            capture.insert("lm_head.weight".to_string(), x);
+        }
+        Ok(capture)
+    }
+
     pub fn forward_with_cache(
         &self,
         token_ids: &Tensor,

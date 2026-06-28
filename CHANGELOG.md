@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.8.0] - 2026-06-28
+
+### Added
+
+- **`aarambh-ai-quant` crate implementation (Phase 8)**
+  - INT8 absmax quantisation and dequantisation
+  - Packed INT4 affine quantisation with per-group scales/zero-points
+  - AWQ activation-scale computation and layer quantisation
+  - GPTQ Hessian construction plus damped Cholesky inversion
+  - GGUF Q4_K_M block quant/dequant helpers
+  - QAT fake-quant nodes
+  - INT8 `QuantisedKvCache`
+  - Streaming calibration stats over real model linear inputs
+
+- **`aarambh-ai-weights`**
+  - Added GGUF save/load support for Q4_K_M, Q5_K_M, and Q8_0 formats
+  - Added `.gguf` model loading through `load_any_model()`
+  - Implemented HuggingFace safetensors conversion with standard key mapping and strict GQA K/V slicing
+
+- **CLI**
+  - Added `aarambh-ai quantise`
+  - Added `aarambh-ai convert`
+  - Added `aarambh-ai convert --gguf`
+  - `aarambh-ai infer --model <path.gguf>` now loads GGUF checkpoints
+
+### Changed
+
+- **`aarambh-ai-model` / `aarambh-ai-nn`**
+  - Added capture-aware forward methods for calibration inputs to attention and FFN linear layers
+
+### Verified
+
+- `cargo check -p aarambh-ai-quant`
+- `cargo check -p aarambh-ai-weights`
+- `cargo check -p aarambh-ai --all-targets`
+- `cargo test -p aarambh-ai-quant`
+- `cargo test -p aarambh-ai-weights`
+
 ## [0.7.0] - 2026-06-28
 
 ### Added

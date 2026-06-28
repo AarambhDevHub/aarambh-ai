@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use candle_core::{Result, Tensor};
 
 use crate::attention::GroupedQueryAttention;
@@ -63,6 +65,27 @@ impl TransformerBlock {
         let residual = x.clone();
         let x = self.norm2.forward_train(&x)?;
         let x = self.ffn.forward(&x)?;
+        residual + x
+    }
+
+    pub fn forward_with_capture(
+        &self,
+        x: &Tensor,
+        rope: &RopeCache,
+        mask: Option<&Tensor>,
+        layer_idx: usize,
+        capture: &mut HashMap<String, Tensor>,
+    ) -> Result<Tensor> {
+        let residual = x;
+        let x = self.norm1.forward(x)?;
+        let x = self
+            .attn
+            .forward_with_capture(&x, rope, mask, layer_idx, capture)?;
+        let x = (residual + x)?;
+
+        let residual = x.clone();
+        let x = self.norm2.forward(&x)?;
+        let x = self.ffn.forward_with_capture(&x, layer_idx, capture)?;
         residual + x
     }
 

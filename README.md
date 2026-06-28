@@ -24,7 +24,7 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 | SafeTensors model save/load | Phase 3 ✅ |
 | Thinking engine: Low / Medium / High reasoning budgets | Phase 7 ✅ |
 | Full training pipeline with AdamW, cosine schedule, checkpointing | Phase 5 ✅ |
-| Quantisation: INT8, GPTQ INT4, AWQ INT4, GGUF, QAT | Phase 8 |
+| Quantisation: INT8, GPTQ INT4, AWQ INT4, GGUF, QAT | Phase 8 ✅ |
 | LoRA, QLoRA, DoRA fine-tuning | Phase 9 |
 | GRPO reinforcement learning | Phase 10 |
 | Safety guardrails: input/output, PII, prompt injection | Phase 11 |
@@ -156,6 +156,54 @@ Reasoning quality still depends on Phase 9/10 thinking SFT and GRPO training.
 
 ---
 
+## Quantise And Convert
+
+Phase 8 adds CPU quantisation, GGUF save/load, HuggingFace checkpoint
+conversion, QAT primitives, and INT8 KV-cache storage:
+
+```sh
+# Export a SafeTensors checkpoint to INT8 GGUF.
+cargo run --release -- quantise \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tiny_shakespeare/best/model.safetensors \
+  --bits 8 \
+  --method int8 \
+  --output checkpoints/tiny-q8.gguf
+
+# Calibrate and export an INT4 GGUF checkpoint.
+cargo run --release -- quantise \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tiny_shakespeare/best/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --method gptq \
+  --bits 4 \
+  --calibration-data data/tiny_shakespeare.txt \
+  --samples 128 \
+  --output checkpoints/tiny-q4.gguf
+
+# Infer directly from GGUF.
+cargo run --release -- infer \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tiny-q4.gguf \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --prompt "To be, or not to be" \
+  --max-tokens 64 \
+  --greedy
+
+# Convert a HuggingFace safetensors directory into Aarambh SafeTensors.
+cargo run --release -- convert \
+  --config configs/tiny_shakespeare.toml \
+  --input /path/to/hf_model \
+  --output checkpoints/hf-aarambh.safetensors \
+  --arch llama3
+```
+
+The GGUF loader rebuilds an `AarambhModel` from dequantised tensors for full
+compatibility with the existing inference engine. The on-disk tensors stay
+quantised, so Q4 artifacts are much smaller than SafeTensors checkpoints.
+
+---
+
 ## Architecture
 
 ```
@@ -166,14 +214,14 @@ aarambh-ai/
 ├── aarambh-ai-nn/            ← RMSNorm, RoPE, GQA, SwiGLU, TransformerBlock
 ├── aarambh-ai-kernel/        ← Custom CUDA + CPU SIMD kernels
 ├── aarambh-ai-model/         ← Embedding, LM head, full model forward pass
-├── aarambh-ai-weights/       ← SafeTensors I/O (GGUF + HuggingFace conversion planned)
+├── aarambh-ai-weights/       ← SafeTensors I/O, GGUF save/load, HuggingFace conversion
 ├── aarambh-ai-quant/         ← INT8, GPTQ, AWQ, GGUF, KV cache quant
 ├── aarambh-ai-train/         ← Training loop, AdamW, cosine schedule, checkpointing
 ├── aarambh-ai-finetune/      ← LoRA, QLoRA, SFT, GRPO, verifiers
 ├── aarambh-ai-inference/     ← Inference engine, KV cache, sampler, streaming
 ├── aarambh-ai-safety/        ← Input/output guardrails, PII, audit
 ├── aarambh-ai-selflearn/     ← Self-learning loop, replay buffer, critique
-└── aarambh-ai/               ← CLI binary (train, infer, finetune, quant, eval)
+└── aarambh-ai/               ← CLI binary (train, infer, quantise, convert)
 ```
 
 ### Dependency Layers
@@ -320,7 +368,7 @@ aarambh-ai/
 | 5 | Training loop — Tiny trains! | i3 | ✅ |
 | 6 | Inference engine + CLI | i3 | ✅ |
 | 7 | Thinking engine | i3 | ✅ |
-| 8 | Quantisation stack | i3 | ⬜ |
+| 8 | Quantisation stack | i3 | ✅ |
 | 9 | Fine-tuning (LoRA, QLoRA, SFT) | i3 + GPU | ⬜ |
 | 10 | GRPO reinforcement learning | GPU | ⬜ |
 | 11 | Safety layer | i3 | ⬜ |

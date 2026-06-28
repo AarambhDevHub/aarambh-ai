@@ -5,10 +5,14 @@ edition = "2024"
 
 [dependencies]
 aarambh-ai-core      = { path = "../crates/aarambh-ai-core" }
+aarambh-ai-data      = { path = "../crates/aarambh-ai-data" }
 aarambh-ai-inference = { path = "../crates/aarambh-ai-inference" }
+aarambh-ai-quant     = { path = "../crates/aarambh-ai-quant" }
 aarambh-ai-tokenizer = { path = "../crates/aarambh-ai-tokenizer" }
 aarambh-ai-train     = { path = "../crates/aarambh-ai-train" }
+aarambh-ai-weights   = { path = "../crates/aarambh-ai-weights" }
 anyhow               = { workspace = true }
+candle-core          = { workspace = true }
 clap                 = { workspace = true }
 serde                = { workspace = true }
 serde_json           = { workspace = true }
