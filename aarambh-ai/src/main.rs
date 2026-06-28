@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+mod cmd;
+mod ui;
 
 use clap::{Parser, Subcommand};
 
@@ -12,18 +13,14 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Train {
-        #[arg(long)]
-        config: PathBuf,
-    },
+    Train(cmd::train::TrainArgs),
+    Infer(cmd::infer::InferArgs),
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Train { config } => {
-            aarambh_ai_train::run_training_from_config(config)?;
-        }
+        Command::Train(args) => cmd::train::run(args),
+        Command::Infer(args) => cmd::infer::run(args),
     }
-    Ok(())
 }

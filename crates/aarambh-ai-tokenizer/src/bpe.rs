@@ -18,11 +18,19 @@ impl BpeTokenizer {
         use tokenizers::models::bpe::{BPE, BpeTrainer};
         use tokenizers::tokenizer::{Tokenizer as HfTokenizer, Trainer};
 
+        if vocab_size <= special::SPECIAL_TOKEN_COUNT {
+            return Err(AarambhError::Tokenizer(format!(
+                "vocab_size must be greater than {} to reserve special tokens",
+                special::SPECIAL_TOKEN_COUNT
+            )));
+        }
+
         let content = std::fs::read_to_string(corpus_path.as_ref()).map_err(AarambhError::Io)?;
 
         let words: Vec<String> = content.split_whitespace().map(String::from).collect();
 
-        let mut trainer = BpeTrainer::new(2, vocab_size);
+        let learned_vocab_size = vocab_size - special::SPECIAL_TOKEN_COUNT;
+        let mut trainer = BpeTrainer::new(2, learned_vocab_size);
         trainer
             .feed(words.iter(), |s| Ok(vec![s.to_owned()]))
             .map_err(|e| AarambhError::Tokenizer(e.to_string()))?;
@@ -37,7 +45,9 @@ impl BpeTokenizer {
         hf.save(&tmp, false)
             .map_err(|e| AarambhError::Tokenizer(format!("Save failed: {e}")))?;
 
-        let result = Self::from_pretrained(&tmp);
+        let result = Self::from_pretrained(&tmp).and_then(|tokenizer| {
+            tokenizer.with_reserved_special_tokens(special::SPECIAL_TOKEN_COUNT as u32)
+        });
         let _ = std::fs::remove_file(&tmp);
         result
     }
@@ -121,6 +131,69 @@ impl BpeTokenizer {
         Ok(())
     }
 
+    pub fn validate_special_tokens(&self) -> Result<()> {
+        for (token, id) in special::SPECIAL_TOKENS {
+            if self.vocab.get_id(token) != Some(id) {
+                return Err(AarambhError::Tokenizer(format!(
+                    "special token {token:?} must have id {id}"
+                )));
+            }
+            if self.vocab.get_token(id) != Some(token) {
+                return Err(AarambhError::Tokenizer(format!(
+                    "special id {id} must decode to {token:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn with_reserved_special_tokens(self, offset: u32) -> Result<Self> {
+        let mut token_to_id =
+            HashMap::with_capacity(self.vocab.token_to_id.len() + offset as usize);
+        let mut max_id = 0u32;
+
+        for (token, id) in special::SPECIAL_TOKENS {
+            token_to_id.insert(token.to_string(), id);
+            max_id = max_id.max(id);
+        }
+
+        for (token, id) in self.vocab.token_to_id {
+            if special::SPECIAL_TOKENS
+                .iter()
+                .any(|(special_token, _)| *special_token == token)
+            {
+                continue;
+            }
+            let shifted = id + offset;
+            max_id = max_id.max(shifted);
+            token_to_id.insert(token, shifted);
+        }
+
+        let mut id_to_token = vec![String::new(); (max_id + 1) as usize];
+        for (token, id) in &token_to_id {
+            id_to_token[*id as usize] = token.clone();
+        }
+
+        let tokenizer = Self {
+            vocab: Vocab {
+                token_to_id,
+                id_to_token,
+            },
+            merges: self.merges,
+            merge_rank: self.merge_rank,
+        };
+        tokenizer.validate_special_tokens()?;
+        Ok(tokenizer)
+    }
+
+    fn encode_regular_text(&self, text: &str) -> Vec<u32> {
+        let mut ids = Vec::new();
+        for word in text.split_inclusive(|c: char| c.is_whitespace()) {
+            ids.extend(self.encode_word(word));
+        }
+        ids
+    }
+
     fn encode_word(&self, word: &str) -> Vec<u32> {
         let mut symbols: Vec<String> = word.chars().map(|c| c.to_string()).collect();
 
@@ -178,8 +251,28 @@ fn parse_merge(value: &serde_json::Value) -> Option<(String, String)> {
 impl TokenizerLike for BpeTokenizer {
     fn encode(&self, text: &str) -> Result<Vec<u32>> {
         let mut ids = Vec::new();
-        for word in text.split_inclusive(|c: char| c.is_whitespace()) {
-            ids.extend(self.encode_word(word));
+        let mut rest = text;
+
+        while !rest.is_empty() {
+            let next_special = special::SPECIAL_TOKENS
+                .iter()
+                .filter_map(|(token, id)| rest.find(token).map(|pos| (pos, *token, *id)))
+                .min_by_key(|(pos, _, _)| *pos);
+
+            match next_special {
+                Some((0, token, id)) => {
+                    ids.push(id);
+                    rest = &rest[token.len()..];
+                }
+                Some((pos, _, _)) => {
+                    ids.extend(self.encode_regular_text(&rest[..pos]));
+                    rest = &rest[pos..];
+                }
+                None => {
+                    ids.extend(self.encode_regular_text(rest));
+                    break;
+                }
+            }
         }
         Ok(ids)
     }

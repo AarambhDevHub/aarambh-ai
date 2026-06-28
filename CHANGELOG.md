@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.6.0] - 2026-06-28
+
+### Added
+
+- **`aarambh-ai-inference` crate** — Inference engine (Phase 6)
+  - `InferenceEngine` with checkpoint loading, tokenizer validation, prompt prefill, cached one-token decode, EOS/max-token/context-limit stopping, and callback-based generation
+  - `KvCache` wrapper over per-layer `aarambh-ai-nn::KVCache`
+  - `Sampler` with greedy decode plus temperature/top-k/top-p sampling and top-candidate reporting for predict-view
+  - `GenerationConfig`, `GenerationOutput`, `GenerationStep`, `FinishReason`, and `StreamEvent`
+  - `ThinkingMode` and `ThinkingController` stub for Phase 7 budget tracking without token forcing
+
+- **CLI**
+  - Added `aarambh-ai infer` with `--config`, `--model`, `--tokenizer`, `--prompt`, `--max-tokens`, `--temperature`, `--top-p`, `--top-k`, `--seed`, `--thinking`, `--predict-view`, `--stream`, and `--greedy`
+  - Defaults to `latest.json` or `best.json` from the configured checkpoint directory when `--model` is omitted
+  - Added terminal predict-view rendering for top next-token candidates
+
+- **Tokenizer**
+  - Trained BPE tokenizers now reserve fixed project special-token IDs 0..6
+  - Added special-token validation and special-aware encode support for `<|endoftext|>`, `<|pad|>`, `<|bos|>`, `<think>`, `</think>`, `<|user|>`, and `<|assistant|>`
+  - Training automatically regenerates an owned stale tokenizer whose reserved IDs are invalid
+
+### Changed
+
+- **Binary crate structure**
+  - Split CLI implementation into `cmd/train.rs`, `cmd/infer.rs`, and `ui/predict_view.rs`
+
+- **Documentation**
+  - Marked Phase 6 complete in README and ROADMAP
+  - Updated ARCHITECTURE with tokenizer special-ID invariants and the implemented inference flow
+
+### Verified
+
+- `cargo check --workspace --all-targets`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace`
+- `cargo run --release -p aarambh-ai -- train --config configs/tiny_shakespeare_smoke.toml`
+- `cargo run --release -p aarambh-ai -- infer --config configs/tiny_shakespeare_smoke.toml --prompt "To be" --max-tokens 8 --greedy --predict-view`
+
 ## [0.5.0] - 2026-06-27
 
 ### Added
