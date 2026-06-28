@@ -95,7 +95,7 @@ impl InferenceEngine {
         tokenizer.validate_special_tokens()?;
         let mut model_config = model_config.clone();
         model_config.vocab_size = tokenizer.vocab_size();
-        let model = aarambh_ai_weights::load_model(model_path, &model_config, &device)?;
+        let model = aarambh_ai_weights::load_any_model(model_path, &model_config, &device)?;
         Self::new(model, tokenizer, device)
     }
 

@@ -1135,7 +1135,9 @@ For each column j:
 
 **Simpler alternative for early implementation:** Use the diagonal Hessian approximation
 `H_inv ≈ diag(H)⁻¹` — much faster and easier to implement, slightly lower quality.
-Start with this, switch to full Cholesky when it's working.
+Phase 8 uses the full damped Cholesky path for the public `cholesky_invert()`
+API and returns an error if the matrix is still not positive definite after
+damping retries.
 
 ### 11.4 AWQ INT4
 
@@ -1164,19 +1166,26 @@ QAT typically recovers 1–2 PPL points vs post-training quantisation alone.
 
 ### 11.6 GGUF Q4_K_M
 
-Block-wise quantisation compatible with llama.cpp. Q4_K_M stores 256 weights
-per block with 2 scales (4.125 bits/weight effective):
+Block-wise quantisation for Aarambh GGUF artifacts. Q4_K_M stores 256 weights
+per block with a scale/min pair:
 ```
 Block layout: [scale_f16: 2 bytes][min_f16: 2 bytes][weights: 128 bytes]
               = 132 bytes for 256 weights
 ```
 
-Can load GGUF files from the llama.cpp ecosystem AND export aarambh-ai models to GGUF.
+Phase 8 writes an Aarambh GGUF container with `GGUF` magic, model metadata, and
+raw quantized tensor payloads. `load_gguf()` dequantises tensors back into an
+`AarambhModel` for compatibility with the existing Candle inference engine, while
+the on-disk model remains compact.
 
 ### 11.7 KV Cache Quantisation
 
 K and V can be stored as INT8 in the cache, dequantised to F32 only when needed
 for the attention dot product. Halves KV cache memory with no perceptible quality loss.
+
+Phase 8 provides `QuantisedKvCache`, which stores each layer's K/V tensors as
+INT8 absmax tensors between decode steps and returns F32 tensors to the
+attention kernel.
 
 ### 11.8 Weight Conversion (convert.rs)
 
@@ -1188,6 +1197,8 @@ and tensor layout:
 - **Pragmatic GQA handling:** If the source has more KV heads, we take the first `cfg.n_kv_heads` via strict slicing. If the source has fewer, we panic (unsupported). No complex redistributive reshaping.
 - Handles tied vs untied LM head (some HF models store them separately)
 - Converts dtype as needed (F16 → F32, BF16 → F32)
+- Reads both `model.safetensors.index.json` sharded checkpoints and single
+  `.safetensors` files.
 
 ```bash
 aarambh-ai convert \

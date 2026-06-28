@@ -2,7 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use aarambh_ai_core::ModelConfig;
 use aarambh_ai_model::AarambhModel;
-use aarambh_ai_weights::{convert_hf, load_model, save_model};
+use aarambh_ai_weights::{GgufFormat, load_gguf, load_model, save_gguf, save_model};
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{VarBuilder, VarMap};
 
@@ -28,6 +28,17 @@ fn temp_safetensors_path() -> std::path::PathBuf {
         .as_nanos();
     std::env::temp_dir().join(format!(
         "aarambh-ai-model-{}-{nanos}.safetensors",
+        std::process::id()
+    ))
+}
+
+fn temp_gguf_path() -> std::path::PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "aarambh-ai-model-{}-{nanos}.gguf",
         std::process::id()
     ))
 }
@@ -72,8 +83,27 @@ fn safetensors_roundtrip_preserves_weights_and_logits() {
 }
 
 #[test]
-fn convert_hf_is_phase_8_stub() {
+fn gguf_save_load_roundtrip_produces_logits() {
+    let device = Device::Cpu;
     let cfg = mini_config();
-    let err = convert_hf(std::path::Path::new("/tmp/no-hf-model"), &cfg).unwrap_err();
-    assert!(err.to_string().contains("Phase 8"));
+    let varmap = VarMap::new();
+    let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
+    let model = AarambhModel::new(&cfg, vb).unwrap();
+
+    let path = temp_gguf_path();
+    save_gguf(&model, GgufFormat::Q4KM, &path).unwrap();
+    let loaded = load_gguf(&path, &device).unwrap();
+    let _ = std::fs::remove_file(&path);
+
+    let ids = Tensor::from_vec(vec![1u32, 2, 3, 4], (1, 4), &device).unwrap();
+    let logits = loaded.forward(&ids).unwrap();
+    assert_eq!(logits.shape().dims(), &[1, 4, cfg.vocab_size]);
+    let max = logits
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    assert!(max.is_finite());
 }
