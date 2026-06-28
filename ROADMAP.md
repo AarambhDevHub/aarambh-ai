@@ -27,7 +27,7 @@ Phase 3  →  Full model forward pass              (3–4 days)    [i3] ✅
 Phase 4  →  Custom kernels (CPU SIMD + GPU prep) (5–7 days)    [i3 + Kaggle prep] ✅
 Phase 5  →  Training loop — Tiny trains!         (7–10 days)   [i3] ✅
 Phase 6  →  Inference engine + CLI               (5–7 days)    [i3] ✅
-Phase 7  →  Thinking engine                      (4–6 days)    [i3]
+Phase 7  →  Thinking engine                      (4–6 days)    [i3] ✅
 Phase 8  →  Quantisation stack                   (8–10 days)   [i3]
 Phase 9  →  Fine-tuning (LoRA, QLoRA, SFT)       (10–14 days)  [i3 + Kaggle]
 Phase 10 →  GRPO reinforcement learning          (7–10 days)   [Kaggle]
@@ -890,9 +890,9 @@ The predict-view shows next-token probabilities. The CLI binary works.
       StreamEvent::{Token(GenerationStep), Finished(FinishReason)}
       The CLI streams by using generate_with_callback(...) and flushing each token.
 
-[x] src/thinking.rs — ThinkingMode, ThinkingController  (stub for Phase 7)
+[x] src/thinking.rs — ThinkingMode, ThinkingController
       accepts none|low|medium|high and tracks budgets
-      does not force <think> tokens until Phase 7
+      Phase 7 completes forced <think> and </think> behavior
 ```
 
 **`aarambh-ai` binary:**
@@ -951,7 +951,7 @@ fn kvcache_seqlen_grows_each_step() {
 Additional Phase 6 test coverage:
 - sampler: greedy determinism, top-k filtering, temperature zero argmax, sorted top candidates
 - engine: max token limit, deterministic greedy decode, invalid tokenizer special IDs rejected
-- thinking stub: budgets and block closure behavior
+- thinking controller: budgets, block closure behavior, and Phase 7 force hooks
 - tokenizer: trained BPE reserves fixed special IDs
 
 ### First Public Demo
@@ -990,7 +990,7 @@ All three thinking modes work and budgets are enforced correctly.
 ### Tasks
 
 ```
-[ ] src/thinking.rs — complete implementation
+[x] src/thinking.rs — complete implementation
       ThinkingMode { None, Low, Medium, High }
       impl ThinkingMode { fn budget(&self) -> usize }
       //   None   →  0
@@ -1002,34 +1002,40 @@ All three thinking modes work and budgets are enforced correctly.
         mode:              ThinkingMode,
         in_thinking_block: bool,
         tokens_used:       usize,
+        started:           bool,
+        closed:            bool,
+        pending_force:     Option<ForceToken>,
       }
       impl ThinkingController {
         fn on_token(&mut self, token_id: u32) -> Option<ForceToken>
-          // if budget exceeded → return Some(ForceToken::ThinkEnd)
+          // if budget reached → queue Some(ForceToken::ThinkEnd)
           // if THINK_END_ID seen → set in_thinking_block = false
         fn should_force_think_start(&self) -> bool
           // true on very first token if mode != None
+        fn take_forced_token(&mut self) -> Option<ForceToken>
+          // returns queued ThinkEnd before first-token ThinkStart
       }
 
-[ ] Update src/engine.rs generate()
+[x] Update src/engine.rs generate()
       // Step 1: if mode != None and first token → emit THINK_START_ID
       // Step 2: on each token, call thinking_ctrl.on_token()
       // Step 3: if ForceToken::ThinkEnd → inject THINK_END_ID, continue
       // Step 4: track separately: thinking_tokens, answer_tokens
+      // GenerationOutput.text is answer-only; raw_text preserves all generated tokens
 
-[ ] Update src/cmd/infer.rs
+[x] Update src/cmd/infer.rs
       // Print thinking block dimmed/italic (ANSI)
       // Print "[thinking: N tokens]" header before answer
       // --thinking low|medium|high|none flag
 
-[ ] Prepare thinking fine-tune data format (for Phase 9):
-      ThinkingSftDataset {
+[x] Prepare thinking fine-tune data format (for Phase 9):
+      ThinkingSftExample {
         instruction: String,
         thinking:    String,
         response:    String,
       }
       // Format:
-      // <|user|>\n{instruction}\n<|assistant|>\n<think>\n{thinking}\n</think>\n{response}
+      // <|user|>\n{instruction}\n<|assistant|>\n<think>\n{thinking}\n</think>\n{response}<|endoftext|>
 ```
 
 ### Tests
@@ -1039,10 +1045,10 @@ All three thinking modes work and budgets are enforced correctly.
 fn thinking_low_budget_enforced() {
     let mut ctrl = ThinkingController::new(ThinkingMode::Low);  // budget=256
     ctrl.on_token(THINK_START_ID);
-    for _ in 0..256 {
+    for _ in 0..255 {
         ctrl.on_token(42);  // generic token
     }
-    let forced = ctrl.on_token(42);  // 257th token
+    let forced = ctrl.on_token(42);  // 256th content token
     assert_eq!(forced, Some(ForceToken::ThinkEnd));
 }
 
@@ -1070,11 +1076,11 @@ fn thinking_medium_allows_more_than_low() {
 
 ### Example Output
 ```bash
-aarambh-ai infer --prompt "What is 15 × 27?" --thinking medium
+aarambh-ai infer --prompt "What is 15 x 27?" --thinking medium
 
 [thinking: 43 tokens]
-  15 × 27
-  = 15 × 20 + 15 × 7
+  15 x 27
+  = 15 x 20 + 15 x 7
   = 300 + 105 = 405
 
 The answer is 405.
@@ -1085,6 +1091,7 @@ The answer is 405.
 ThinkingController enforces budgets correctly.
 All three modes produce thinking blocks.
 Thinking block shown dimmed, answer shown normally.
+Thinking SFT formatting is prepared for Phase 9.
 
 git commit -m "feat: Phase 7 — thinking engine, three modes, budget enforcement"
 git tag v0.7.0

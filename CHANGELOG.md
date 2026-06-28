@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.7.0] - 2026-06-28
+
+### Added
+
+- **Thinking engine (Phase 7)**
+  - `ThinkingController` now forces `<think>` once for `low`, `medium`, and `high` modes
+  - Enforces mode budgets and force-injects `</think>` when the active budget is reached
+  - Tracks started/closed state, effective generation budget, thinking-token count, and queued forced tokens
+  - Added `GenerationPhase::{Thinking, Answer}` plus `forced` and `phase` metadata on each generation step
+
+- **Inference output separation**
+  - `GenerationOutput.text` is now the visible answer text
+  - Added `raw_text`, `thinking_text`, `answer_text`, `thinking_token_ids`, `answer_token_ids`, and `thinking_tokens`
+  - Preserves all forced tokens in `token_ids` while hiding thinking markers from user-visible answer output
+
+- **CLI**
+  - `aarambh-ai infer --thinking low|medium|high` now wraps prompts with user/assistant markers, prints thinking dimmed, and prints the final answer normally
+  - Streaming output switches terminal styling between thinking and answer phases
+  - Predict-view now shows token phase and forced-token metadata
+
+- **`aarambh-ai-finetune`**
+  - Added `ThinkingSftExample` and `format_thinking_sft()` as the Phase 9-compatible thinking SFT data format stub
+
+### Changed
+
+- **Documentation**
+  - Marked Phase 7 complete in README and ROADMAP
+  - Updated ARCHITECTURE to describe the implemented thinking controller and separated inference output
+
+### Verified
+
+- `cargo fmt --all -- --check`
+- `cargo check --workspace --all-targets`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace`
+- `cargo run --release -p aarambh-ai -- infer --config configs/tiny_shakespeare_smoke.toml --prompt "What is 2 + 2?" --max-tokens 48 --thinking low --greedy`
+- `cargo run --release -p aarambh-ai -- infer --config configs/tiny_shakespeare_smoke.toml --prompt "What is 2 + 2?" --max-tokens 40 --thinking low --greedy --stream`
+- `cargo run --release -p aarambh-ai -- infer --config configs/tiny_shakespeare_smoke.toml --prompt "What is 2 + 2?" --max-tokens 6 --thinking low --greedy --predict-view`
+
 ## [0.6.0] - 2026-06-28
 
 ### Added

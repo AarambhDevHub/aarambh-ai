@@ -2,3 +2,7 @@
 name = "aarambh-ai-finetune"
 version = "0.1.0"
 edition = "2024"
+
+[dependencies]
+aarambh-ai-core      = { path = "../aarambh-ai-core" }
+aarambh-ai-tokenizer = { path = "../aarambh-ai-tokenizer" }

@@ -692,9 +692,17 @@ pub struct ThinkingController {
     mode:              ThinkingMode,    // None / Low(256) / Medium(1024) / High(4096)
     in_thinking_block: bool,
     tokens_used:       usize,
+    started:           bool,
+    closed:            bool,
+    pending_force:     Option<ForceToken>,
 }
 
-// Called on every generated token:
+// Called before sampling each generated token:
+pub fn take_forced_token(&mut self) -> Option<ForceToken> {
+    // queued ThinkEnd wins, otherwise force ThinkStart once when mode != None
+}
+
+// Called after every emitted token:
 pub fn on_token(
     &mut self,
     token_id: u32,
@@ -706,13 +714,18 @@ pub fn on_token(
         }
         self.tokens_used += 1;
         if self.tokens_used >= self.mode.budget() {
-            self.in_thinking_block = false;
-            return Some(ForceToken::ThinkEnd);   // force close the block
+            return Some(ForceToken::ThinkEnd);   // force close on next step
         }
     }
     None
 }
 ```
+
+`GenerationOutput.text` is the visible answer only. `raw_text` preserves the
+actual generated token stream including `<think>` and `</think>`, while
+`thinking_text` and `answer_text` are separated for CLI rendering and future
+safety/fine-tuning stages. `max_new_tokens` counts every emitted token including
+forced thinking markers.
 
 ### 7.5 Training the Thinking Engine
 
@@ -770,8 +783,8 @@ Phase 6 implements this in `aarambh-ai-inference`:
 - `generate_with_callback(...)` prefills the prompt once, decodes one token at a
   time with cache offsets, emits `GenerationStep` values, and stops at
   `<|endoftext|>`, max tokens, or context limit
-- `ThinkingMode` is accepted and budget-tracked as a Phase 7 stub; Phase 6 does
-  not force `<think>` or `</think>` tokens
+- `ThinkingMode` forces `<think>` once, budget-tracks thinking content, and
+  force-closes with `</think>` when the active budget is reached
 
 ### 8.2 Sampling Strategies
 
