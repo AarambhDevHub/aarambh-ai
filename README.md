@@ -28,7 +28,7 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 | LoRA, QLoRA, SFT fine-tuning | Phase 9 ✅ |
 | GRPO reinforcement learning | Phase 10 ✅ |
 | Safety guardrails: input/output, PII, prompt injection | Phase 11 ✅ |
-| Self-learning loop: online GRPO, replay buffer, critique | Phase 12 |
+| Self-learning loop: online GRPO, replay buffer, critique | Phase 12 ✅ |
 | Custom CUDA kernels: Flash Attention v2, fused RMSNorm, RoPE, SwiGLU | Phase 14 |
 | CPU SIMD kernels: AVX2/FMA RMSNorm, AVX512 override, parallel attention via rayon | Phase 4 ✅ |
 | CUDA kernel build prep and FFI stubs | Phase 4 ✅ |
@@ -178,6 +178,48 @@ cargo run --release -- infer \
   --prompt "The king" \
   --max-tokens 64 \
   --safety none
+```
+
+Phase 12 adds opt-in self-learning for inference. CPU mode keeps updates
+deferred in a persistent LoRA state directory; GPU mode can step inline. Safety
+still wraps the user-visible output, and self-learning commits replay/gradient
+state only after the safety layer allows the draft.
+
+```sh
+# CPU-safe self-learning with critique + replay.
+cargo run --release -- infer \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tiny_shakespeare/best/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --prompt "Explain recursion simply." \
+  --max-tokens 64 \
+  --self-learn cpu \
+  --replay-path data/replay.jsonl \
+  --self-learn-state-dir adapters/selflearn
+
+# Deterministic-verifier online GRPO when ground truth is available.
+cargo run --release -- infer \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tiny_shakespeare/best/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --prompt "What is 2 + 2?" \
+  --max-tokens 32 \
+  --self-learn cpu \
+  --self-learn-verifier math \
+  --self-learn-ground-truth "#### 4"
+
+# Manage persistent self-learning state.
+cargo run --release -- selflearn stats --replay-path data/replay.jsonl
+cargo run --release -- selflearn flush-gradients \
+  --config configs/tiny_shakespeare.toml \
+  --base checkpoints/tiny_shakespeare/best/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json
+cargo run --release -- selflearn replay \
+  --config configs/tiny_shakespeare.toml \
+  --base checkpoints/tiny_shakespeare/best/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --replay-path data/replay.jsonl \
+  --self-learn-state-dir adapters/selflearn
 ```
 
 ---
@@ -511,7 +553,7 @@ aarambh-ai/
 | 9 | Fine-tuning (LoRA, QLoRA, SFT) | i3 + GPU | ✅ |
 | 10 | GRPO reinforcement learning | GPU | ✅ |
 | 11 | Safety layer | i3 | ✅ |
-| 12 | Self-learning loop | i3 + GPU | ⬜ |
+| 12 | Self-learning loop | i3 + GPU | ✅ |
 | 13 | GPU scale-up (Small → Large) | GPU | ⬜ |
 | 14 | Flash Attention CUDA kernels | GPU | ⬜ |
 | 15 | Production release v1.0 | all | ⬜ |

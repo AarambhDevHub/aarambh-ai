@@ -2,3 +2,17 @@
 name = "aarambh-ai-selflearn"
 version = "0.1.0"
 edition = "2024"
+
+[dependencies]
+aarambh-ai-core      = { path = "../aarambh-ai-core" }
+aarambh-ai-finetune  = { path = "../aarambh-ai-finetune" }
+aarambh-ai-inference = { path = "../aarambh-ai-inference" }
+aarambh-ai-model     = { path = "../aarambh-ai-model" }
+aarambh-ai-tokenizer = { path = "../aarambh-ai-tokenizer" }
+aarambh-ai-train     = { path = "../aarambh-ai-train" }
+aarambh-ai-weights   = { path = "../aarambh-ai-weights" }
+candle-core          = { workspace = true }
+candle-nn            = { workspace = true }
+rand                 = "0.8"
+serde                = { workspace = true }
+serde_json           = { workspace = true }

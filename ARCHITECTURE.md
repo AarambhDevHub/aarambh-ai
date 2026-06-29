@@ -303,7 +303,7 @@ aarambh-ai/
 │   └── aarambh-ai-selflearn/         ← LAYER 5: Self-learning loop
 │       └── src/
 │           ├── lib.rs
-│           ├── loop.rs               ← SelfLearnLoop (owns OnlineGrpo, Replay)
+│           ├── learning_loop.rs      ← SelfLearnLoop (owns OnlineGrpo, Replay)
 │           ├── config.rs             ← SelfLearnConfig (mode, thresholds, budget)
 │           ├── online_grpo.rs        ← generate N completions → score (deterministic) → train online
 │           ├── replay.rs             ← ReplayBuffer: store, sample, evict
@@ -357,7 +357,7 @@ When you `cargo new` each crate, add exactly these workspace deps to its `Cargo.
 | `aarambh-ai-finetune` | `aarambh-ai-core`, `aarambh-ai-model`, `aarambh-ai-train`, `aarambh-ai-quant`, `candle-core`, `candle-nn` |
 | `aarambh-ai-inference` | `aarambh-ai-core`, `aarambh-ai-model`, `aarambh-ai-weights`, `candle-core`, `tokio` |
 | `aarambh-ai-safety` | `aarambh-ai-core`, `aarambh-ai-inference`, `serde_json` |
-| `aarambh-ai-selflearn` | `aarambh-ai-core`, `aarambh-ai-inference`, `aarambh-ai-finetune`, `candle-core`, `serde_json` |
+| `aarambh-ai-selflearn` | `aarambh-ai-core`, `aarambh-ai-tokenizer`, `aarambh-ai-model`, `aarambh-ai-weights`, `aarambh-ai-train`, `aarambh-ai-inference`, `aarambh-ai-finetune`, `candle-core`, `candle-nn`, `serde_json`, `rand` |
 | `aarambh-ai` (binary) | all 13 library crates, `clap`, `anyhow`, `tokio`, `tracing-subscriber` |
 
 All deps use the `workspace = true` key, e.g.:
@@ -1505,7 +1505,7 @@ Three mechanisms work together as one loop:
 │  ┌─────────────────────────────┐                        │
 │  │  Replay Buffer              │                        │
 │  │  Store if score ≥ threshold │                        │
-│  │  Every K steps: replay      │ ← periodic fine-tune  │
+│  │  Every K steps: replay SFT  │ ← periodic fine-tune  │
 │  │  Evict oldest low-quality   │                        │
 │  └─────────────────────────────┘                        │
 │                                                         │
@@ -1513,6 +1513,10 @@ Three mechanisms work together as one loop:
 │  Side effect: model slightly better than before         │
 └─────────────────────────────────────────────────────────┘
 ```
+
+Safety wraps this loop at the binary boundary. The CLI checks input before
+self-learning generation, then checks or redacts the draft before replay entries,
+pending gradients, adapter weights, or metrics are committed.
 
 **CPU-safe mode (i3):** N=2 completions instead of N=8, no gradient step during
 inference (gradient accumulates offline), replay fine-tunes only every 500 steps.
@@ -1530,10 +1534,11 @@ then takes one gradient step before returning the best answer.
 // online_grpo.rs
 
 pub struct OnlineGrpo {
-    engine:    InferenceEngine,
+    model:     LoraAarambhModel,
     ref_model: AarambhModel,     // frozen reference — prevents policy collapse
     optimizer: AdamW,
     config:    OnlineGrpoConfig,
+    pending_grads: GradMap,      // CPU mode: deferred gradients
 }
 
 pub struct OnlineGrpoConfig {
@@ -1614,17 +1619,17 @@ After generating a response (the best candidate from GRPO), the model reads it a
 assigns a quality score. This score drives **only the replay buffer**, never GRPO.
 
 **Implementation:** SelfCritique is a **stateless free function** to avoid Rust
-borrow-checker issues when borrowing the InferenceEngine mutably.
+borrow-checker issues when borrowing the generation owner mutably.
 
 ```rust
 // critique.rs — free function, not a struct
 
 pub fn critique_response(
-    engine: &mut InferenceEngine,
+    generator: &mut impl CritiqueGenerator,
     prompt: &str,
     response: &str,
     config: &CritiqueConfig,
-) -> Result<(String, f32)> {
+) -> Result<CritiqueResult> {
     // Builds critique prompt template
     // Calls engine.generate() for ~50 tokens
     // Parses JSON: {"score": 0.85, "reason": "..."}
@@ -1688,65 +1693,75 @@ session-by-session.
 ### 14.6 Full Loop Flow
 
 ```rust
-// loop.rs — SelfLearnLoop owns OnlineGrpo and ReplayBuffer.
+// learning_loop.rs — SelfLearnLoop owns OnlineGrpo and ReplayBuffer.
 // SelfCritique is a free function, not a field.
 
 pub struct SelfLearnLoop {
-    pub online_grpo: OnlineGrpo,   // owns InferenceEngine
+    pub online_grpo: OnlineGrpo,   // owns LoRA model + frozen reference
     pub replay: ReplayBuffer,
     pub config: SelfLearnConfig,
 }
 
 impl SelfLearnLoop {
-    pub fn generate_and_learn(
+    pub fn generate_draft(
         &mut self,
         prompt: &str,
         generate_cfg: &GenerateConfig,
-        verifier: &dyn Verifier,     // deterministic verifier for GRPO
-    ) -> Result<SelfLearnResponse> {
+        verifier: Option<&dyn Verifier>,  // deterministic verifier for GRPO
+        ground_truth: Option<&str>,
+    ) -> Result<&SelfLearnDraft> {
 
-        // 1. Safety check input (applied at binary level)
-        // 2. Online GRPO: generate N completions, score with deterministic verifier, mini-step
-        let (best_response, policy_log_probs) =
-            self.online_grpo.generate_and_step(prompt, generate_cfg, verifier)?;
-
-        // 3. Self-critique: free function borrows engine, scores and optionally rewrites
-        let (final_response, score) = critique_response(
-            &mut self.online_grpo.engine(),  // explicit borrow
+        // 1. Online GRPO if verifier + ground truth exist; otherwise LoRA inference.
+        let update = self.online_grpo.generate_update(
             prompt,
-            &best_response,
+            generate_cfg,
+            verifier,
+            ground_truth,
+        )?;
+
+        // 2. Self-critique scores and optionally rewrites the draft.
+        let critique = critique_response(
+            &mut self.online_grpo,
+            prompt,
+            &update.output.text,
             &self.config.critique,
         )?;
 
-        // 4. Store in replay buffer if score is good enough
-        if score >= self.config.replay.min_score {
-            self.replay.push(ReplayEntry {
-                prompt:    prompt.to_string(),
-                response:  final_response.clone(),
-                score,
-                timestamp: now_unix(),
-                topic:     infer_topic(prompt),
-            });
-        }
+        // 3. Store draft in memory. Nothing is persisted yet.
+        Ok(self.last_draft.as_ref().unwrap())
+    }
 
-        // 5. Periodic replay fine-tune
-        if self.replay.should_replay(self.online_grpo.step_count()) {
-            self.replay_finetune()?;
-        }
+    pub fn commit_last_draft(
+        &mut self,
+        safe_response: Option<String>,
+    ) -> Result<SelfLearnResponse> {
+        // Called only after SafetyGuard allows the output.
+        // 1. Store replay JSONL if critique score is high enough.
+        // 2. Commit online GRPO gradients: GPU inline, CPU pending.
+        // 3. Persist adapter, optimizer, pending gradients, and metrics.
+        // 4. Manual/periodic replay SFT uses replay_finetune().
+    }
 
-        // 6. Track metrics
-        self.metrics.record(score, prompt);
-
-        Ok(SelfLearnResponse {
-            response: final_response,
-            score,
-            stored_in_replay: score >= self.config.replay.min_score,
-        })
+    pub fn replay_finetune(&mut self) -> Result<Option<f64>> {
+        // sample replay batch -> masked SFT over current LoRA adapter
+        // returns replay grad_norm if an optimizer step ran
     }
 }
 ```
 
-### 14.7 SelfLearnConfig
+### 14.7 Persistent State
+
+The self-learning state directory stores:
+
+- `adapter.safetensors` and `adapter_config.json` for the live LoRA adapter
+- `optimizer.safetensors` for online/replay AdamW state
+- `pending_grads.safetensors` for deferred CPU-mode online GRPO gradients
+- `selflearn_state.json` for step counters and pending-gradient contribution count
+- `metrics.jsonl` for replay-quality trend history
+
+The replay buffer itself is a configurable JSONL file, usually `data/replay.jsonl`.
+
+### 14.8 SelfLearnConfig
 
 ```rust
 pub struct SelfLearnConfig {
@@ -1765,11 +1780,14 @@ pub struct SelfLearnConfig {
     pub replay_every_n_steps: usize, // 500 (CPU) or 50 (GPU)
     pub replay_batch_size: usize,  // 32 (CPU) or 128 (GPU)
     pub replay_path: PathBuf,      // persists buffer to disk
+    pub state_dir: PathBuf,        // adapter/optimizer/metrics state
 
     // Self-critique
     pub critique_enabled: bool,    // true
     pub rewrite_threshold: f32,    // 0.7 — rewrite if score < this
     pub max_rewrites: usize,       // 1 (CPU) or 3 (GPU)
+    pub max_tokens: usize,         // critique JSON budget
+    pub rewrite_max_tokens: usize, // rewrite budget, clamped by --max-tokens
 }
 
 impl SelfLearnConfig {
@@ -1785,12 +1803,15 @@ impl SelfLearnConfig {
 aarambh-ai infer --model checkpoints/tiny_sft.safetensors \
                  --self-learn cpu \
                  --replay-path data/replay_buffer.jsonl \
+                 --self-learn-state-dir adapters/selflearn \
                  --prompt "What is recursion?"
 
 # Flush accumulated gradients manually (CPU mode)
 aarambh-ai selflearn flush-gradients \
-                 --model checkpoints/tiny_sft.safetensors \
-                 --replay-path data/replay_buffer.jsonl
+                 --base checkpoints/tiny_sft.safetensors \
+                 --tokenizer checkpoints/tokenizer.json \
+                 --replay-path data/replay_buffer.jsonl \
+                 --self-learn-state-dir adapters/selflearn
 ```
 
 ---
@@ -1811,7 +1832,7 @@ aarambh-ai selflearn flush-gradients \
 | `aarambh-ai-finetune` | 4 | `LoraLayer`, `inject_lora()`, `merge_lora()`, `SftTrainer`, `GrpoTrainer` (deterministic verifier) | `core`, `model`, `train`, `quant` |
 | `aarambh-ai-inference` | 5 | `InferenceEngine`, `KvCache`, `Sampler`, `ThinkingController` | `core`, `model`, `weights` |
 | `aarambh-ai-safety` | 5 | `SafetyGuard`, `SafetyPolicy`, `SafetyVerdict` | `core`, `inference` |
-| `aarambh-ai-selflearn` | 5 | `SelfLearnLoop` (owns OnlineGrpo, Replay), `critique_response` (free fn), `LearningMetrics` | `core`, `inference`, `finetune` |
+| `aarambh-ai-selflearn` | 5 | `SelfLearnLoop` (owns OnlineGrpo, Replay), `critique_response` (free fn), `LearningMetrics` | `core`, `tokenizer`, `model`, `weights`, `train`, `inference`, `finetune` |
 | `aarambh-ai` (binary) | 6 | CLI commands: train / infer / finetune / quantise / convert / eval / selflearn | all crates |
 
 ---

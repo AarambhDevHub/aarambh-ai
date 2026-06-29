@@ -32,7 +32,7 @@ Phase 8  →  Quantisation stack                   (8–10 days)   [i3]
 Phase 9  →  Fine-tuning (LoRA, QLoRA, SFT)       (10–14 days)  [i3 + Kaggle]
 Phase 10 →  GRPO reinforcement learning          (7–10 days)   [Kaggle] ✅
 Phase 11 →  Safety layer                         (7–10 days)   [i3] ✅
-Phase 12 →  Self-learning loop                   (10–14 days)  [i3 + Kaggle]
+Phase 12 →  Self-learning loop                   (10–14 days)  [i3 + Kaggle] ✅
 Phase 13 →  GPU scale-up (Small → Large)         (5–7 days)    [Kaggle]
 Phase 14 →  Flash Attention CUDA kernels         (7–10 days)   [Kaggle]
 Phase 15 →  Production release v1.0              (7–10 days)   [all]  ← includes ALL 14 crates
@@ -1705,15 +1705,15 @@ v1.0 means every pre-trained checkpoint released in Phase 15 supports
 ### Tasks
 
 ```
-[ ] cargo new --lib crates/aarambh-ai-selflearn
-[ ] Add to workspace Cargo.toml members list
+[x] cargo new --lib crates/aarambh-ai-selflearn
+[x] Add to workspace Cargo.toml members list
 ```
 
 **`aarambh-ai-selflearn/src/config.rs`:**
 ```rust
-[ ] pub enum SelfLearnMode { Cpu, Gpu, Disabled }
+[x] pub enum SelfLearnMode { Cpu, Gpu, Disabled }
 
-[ ] pub struct OnlineGrpoConfig {
+[x] pub struct OnlineGrpoConfig {
       pub n_completions:       usize,   // CPU: 2  |  GPU: 8
       pub temperature:         f32,     // 0.8
       pub online_lr:           f64,     // 1e-5
@@ -1722,7 +1722,7 @@ v1.0 means every pre-trained checkpoint released in Phase 15 supports
       pub skip_inline_on_cpu:  bool,    // true on CPU: accumulate, don't step inline
     }
 
-[ ] pub struct ReplayConfig {
+[x] pub struct ReplayConfig {
       pub capacity:        usize,   // CPU: 500  |  GPU: 5000
       pub min_score:       f32,     // 0.7
       pub replay_every_n:  usize,   // CPU: 500  |  GPU: 50
@@ -1730,18 +1730,21 @@ v1.0 means every pre-trained checkpoint released in Phase 15 supports
       pub path:            PathBuf, // replay_buffer.jsonl
     }
 
-[ ] pub struct CritiqueConfig {
+[x] pub struct CritiqueConfig {
       pub enabled:           bool,   // true
       pub rewrite_threshold: f32,    // 0.7
       pub max_rewrites:      usize,  // CPU: 1  |  GPU: 3
+      pub max_tokens:        usize,  // critique JSON budget
+      pub rewrite_max_tokens: usize, // bounded by --max-tokens in CLI
       pub prompt_template:   String,
     }
 
-[ ] pub struct SelfLearnConfig {
+[x] pub struct SelfLearnConfig {
       pub mode:     SelfLearnMode,
       pub grpo:     OnlineGrpoConfig,
       pub replay:   ReplayConfig,
       pub critique: CritiqueConfig,
+      pub state_dir: PathBuf,
     }
     impl SelfLearnConfig {
       pub fn for_cpu() -> Self   // all CPU-safe defaults
@@ -1753,13 +1756,13 @@ v1.0 means every pre-trained checkpoint released in Phase 15 supports
 **`aarambh-ai-selflearn/src/critique.rs`:**
 ```rust
 // CRITICAL DESIGN: SelfCritique is a STATELESS free function, NOT a struct.
-// This avoids Rust borrow-checker issues with the InferenceEngine.
-[ ] pub fn critique_response(
-        engine: &mut InferenceEngine,
+// This avoids Rust borrow-checker issues with the mutable generation owner.
+[x] pub fn critique_response(
+        generator: &mut impl CritiqueGenerator,
         prompt: &str,
         response: &str,
         config: &CritiqueConfig,
-    ) -> Result<(String, f32)>
+    ) -> Result<CritiqueResult>
       // Fills critique_prompt_template with prompt + response
       // Calls engine.generate() for ~50 tokens
       // Parses JSON: {"score": 0.85, "reason": "..."}
@@ -1767,7 +1770,7 @@ v1.0 means every pre-trained checkpoint released in Phase 15 supports
       // If score < rewrite_threshold: re-generate at temperature=0.5, score again
       // After max_rewrites: return best version seen
 
-[ ] Critique prompt template (default):
+[x] Critique prompt template (default):
     """
     <|user|>
     Rate this response on a scale from 0.0 to 1.0.
@@ -1784,7 +1787,7 @@ v1.0 means every pre-trained checkpoint released in Phase 15 supports
 
 **`aarambh-ai-selflearn/src/replay.rs`:**
 ```rust
-[ ] pub struct ReplayEntry {
+[x] pub struct ReplayEntry {
       pub prompt:    String,
       pub response:  String,
       pub score:     f32,
@@ -1792,46 +1795,47 @@ v1.0 means every pre-trained checkpoint released in Phase 15 supports
       pub topic:     String,   // "math" | "code" | "reasoning" | "factual" | "creative" | "general"
     }
 
-[ ] pub struct ReplayBuffer { entries, config }
+[x] pub struct ReplayBuffer { entries, config }
 
-[ ] pub fn push(&mut self, entry: ReplayEntry)
+[x] pub fn push(&mut self, entry: ReplayEntry)
       // reject if score < config.min_score
       // if at capacity: evict entry with lowest score
       // NEVER evict entries with score >= 0.9
 
-[ ] pub fn sample_batch(&self, n: usize) -> Vec<&ReplayEntry>
+[x] pub fn sample_batch(&mut self, n: usize) -> Vec<ReplayEntry>
       // sample probability ∝ score²
       // diversity: max 2 entries per topic per batch
 
-[ ] pub fn should_replay(&self, step_count: usize) -> bool
+[x] pub fn should_replay(&self, step_count: usize) -> bool
       // step_count % config.replay_every_n == 0
       // AND buffer.len() >= config.batch_size
 
-[ ] pub fn save_jsonl(&self, path: &Path) -> Result<()>   // append-only, crash-safe
-[ ] pub fn load_jsonl(path: &Path, config: ReplayConfig) -> Result<Self>
+[x] pub fn save_jsonl(&self, path: &Path) -> Result<()>
+[x] pub fn load_jsonl(path: &Path, config: ReplayConfig) -> Result<Self>
 
-[ ] fn infer_topic(prompt: &str) -> String
+[x] fn infer_topic(prompt: &str) -> String
       // keyword matching — used only for diversity sampling, not for scoring
 ```
 
 **`aarambh-ai-selflearn/src/online_grpo.rs`:**
 ```rust
-[ ] pub struct OnlineGrpo {
-      engine:        InferenceEngine,
+[x] pub struct OnlineGrpo {
+      model:         LoraAarambhModel,
       ref_model:     AarambhModel,     // frozen — KL anchor
       optimizer:     AdamW,
-      lora_params:   Vec<(String, Tensor)>,
       config:        OnlineGrpoConfig,
-      pending_grads: Vec<Tensor>,      // CPU mode: accumulate across turns
+      pending_grads: GradMap,          // CPU mode: accumulate across turns
+      pending_grad_steps: usize,
       step_count:    usize,
     }
 
-[ ] pub fn generate_and_step(
+[x] pub fn generate_update(
         &mut self,
         prompt: &str,
         generate_cfg: &GenerateConfig,
-        verifier: &dyn Verifier,       // MUST be a deterministic verifier (Math/Code)
-    ) -> Result<(String, Vec<f32>)>    // (best completion, policy log_probs)
+        verifier: Option<&dyn Verifier>,       // MUST be deterministic when present
+        ground_truth: Option<&str>,
+    ) -> Result<OnlineUpdate>
       // 1. Generate N completions at temperature=0.8
       // 2. Score each using the deterministic verifier
       // 3. Compute advantages (normalise within group)
@@ -1841,54 +1845,58 @@ v1.0 means every pre-trained checkpoint released in Phase 15 supports
       // 6b. CPU: loss.backward() → accumulate into pending_grads (no step yet)
       // 7. return best completion (highest score)
 
-[ ] pub fn flush_pending_gradients(&mut self) -> Result<()>
+[x] pub fn flush_pending_gradients(&mut self) -> Result<Option<f64>>
       // CPU only: average pending_grads → clip → step → zero_grad → clear
+
+[x] pub fn replay_sft_batch(&mut self, examples: &[SftExample], batch_size: usize) -> Result<Option<f64>>
+      // masked SFT over replay examples using the same LoRA adapter and optimizer state
 ```
 
 **`aarambh-ai-selflearn/src/metrics.rs`:**
 ```rust
-[ ] pub struct LearningMetrics {
+[x] pub struct LearningMetrics {
       per_topic_scores: HashMap<String, VecDeque<f32>>,   // last 100 per topic
       total_steps:      usize,
       replay_count:     usize,
     }
-[ ] pub fn record(&mut self, score: f32, prompt: &str)
-[ ] pub fn topic_trend(&self, topic: &str) -> Option<f32>
+[x] pub fn record(&mut self, score: f32, prompt: &str)
+[x] pub fn topic_trend(&self, topic: &str) -> Option<f32>
       // positive = improving, negative = degrading over last 100 entries
-[ ] pub fn print_summary(&self)
+[x] pub fn summary(&self) -> String
       // "Math: ↑ +0.12 | Code: → +0.01 | Reasoning: ↑ +0.08"
-[ ] pub fn save_jsonl(&self, path: &Path) -> Result<()>
+[x] pub fn save_jsonl(&self, path: &Path) -> Result<()>
 ```
 
-**`aarambh-ai-selflearn/src/loop.rs`:**
+**`aarambh-ai-selflearn/src/learning_loop.rs`:**
 ```rust
 // NEW BORROW-CHECKER-SAFE DESIGN: SelfCritique is a free function.
 // SelfLearnLoop only holds the components that need to persist state.
 
-[ ] pub struct SelfLearnLoop {
-      pub online_grpo: OnlineGrpo,   // Owns the InferenceEngine entirely.
+[x] pub struct SelfLearnLoop {
+      pub online_grpo: OnlineGrpo,   // Owns LoRA policy + frozen reference.
       pub replay: ReplayBuffer,
       pub config: SelfLearnConfig,
     }
 
-[ ] pub fn generate_and_learn(
+[x] pub fn generate_draft(...) + commit_last_draft(...)
         &mut self,
         prompt: &str,
         generate_cfg: &GenerateConfig,
-        verifier: &dyn Verifier,     // deterministic verifier for GRPO
-    ) -> Result<SelfLearnResponse>
+        verifier: Option<&dyn Verifier>,     // deterministic verifier for GRPO
+        ground_truth: Option<&str>,
+    ) -> Result<&SelfLearnDraft>
       // 1. Safety check input (applied at binary level, not inside loop)
-      // 2. online_grpo.generate_and_step() → best candidate using verifier
-      // 3. critique_response() borrows engine mutably, then releases it
-      // 4. replay.push() if score >= min_score
-      // 5. replay_finetune() if replay.should_replay()
+      // 2. online_grpo.generate_update() → best candidate using verifier when available
+      // 3. critique_response() borrows generator mutably, then releases it
+      // 4. binary safety layer checks/redacts the draft
+      // 5. commit_last_draft() persists replay/gradients/metrics only after safety allows it
       // 6. metrics.record()
       // 7. return SelfLearnResponse
 
-[ ] pub fn replay_finetune(&mut self) -> Result<()>
-      // sample batch → 1 SFT epoch with loss masking → save updated adapter
+[x] pub fn replay_finetune(&mut self) -> Result<Option<f64>>
+      // sample batch → masked replay SFT → save updated adapter; returns grad_norm
 
-[ ] pub struct SelfLearnResponse {
+[x] pub struct SelfLearnResponse {
       pub response:         String,
       pub critique_score:   f32,
       pub was_rewritten:    bool,
@@ -1899,8 +1907,8 @@ v1.0 means every pre-trained checkpoint released in Phase 15 supports
 
 **Update CLI binary:**
 ```
-[ ] src/cmd/infer.rs     — add --self-learn cpu|gpu|disabled flag
-[ ] src/cmd/selflearn.rs — new subcommand:
+[x] src/cmd/infer.rs     — add --self-learn cpu|gpu|disabled flag
+[x] src/cmd/selflearn.rs — new subcommand:
       aarambh-ai selflearn flush-gradients  ← CPU: apply accumulated grads
       aarambh-ai selflearn stats            ← per-topic improvement trends
       aarambh-ai selflearn replay           ← manual replay fine-tune trigger
@@ -1959,32 +1967,38 @@ fn replay_persists_and_loads() {
 
 #[test]
 fn online_grpo_cpu_mode_accumulates_without_stepping() {
-    let mut grpo = OnlineGrpo::new_cpu_mode(engine, ref_model, config);
+    let mut grpo = OnlineGrpo::from_paths(build_cpu_config);
     let pending_before = grpo.pending_grads_count();
-    grpo.generate_and_step("test", &cfg, &verifier).unwrap();
+    let update = grpo.generate_update("test", cfg, Some(&verifier), Some("4")).unwrap();
+    grpo.commit_update(update).unwrap();
     assert!(grpo.pending_grads_count() > pending_before);
 }
 
 #[test]
 fn flush_gradients_clears_pending() {
-    let mut grpo = OnlineGrpo::new_cpu_mode(engine, ref_model, config);
-    for _ in 0..5 { grpo.generate_and_step("test", &cfg, &verifier).unwrap(); }
+    let mut grpo = OnlineGrpo::from_paths(build_cpu_config);
+    for _ in 0..5 {
+        let update = grpo.generate_update("test", cfg.clone(), Some(&verifier), Some("4")).unwrap();
+        grpo.commit_update(update).unwrap();
+    }
     grpo.flush_pending_gradients().unwrap();
     assert_eq!(grpo.pending_grads_count(), 0);
 }
 
 #[test]
 fn self_learn_loop_returns_response_on_cpu() {
-    let mut loop_ = SelfLearnLoop::new(SelfLearnConfig::for_cpu(), ..);
-    let resp = loop_.generate_and_learn("What is 2 + 2?", &cfg, &math_verifier).unwrap();
+    let mut loop_ = SelfLearnLoop::from_paths(build_loop_config);
+    loop_.generate_draft("What is 2 + 2?", cfg, Some(&math_verifier), Some("4")).unwrap();
+    let resp = loop_.commit_last_draft(None).unwrap();
     assert!(!resp.response.is_empty());
     assert!(resp.critique_score >= 0.0 && resp.critique_score <= 1.0);
 }
 
 #[test]
 fn self_learn_disabled_mode_has_zero_overhead() {
-    let mut loop_ = SelfLearnLoop::new(SelfLearnConfig::disabled(), ..);
-    let resp = loop_.generate_and_learn("Hello", &cfg, &math_verifier).unwrap();
+    let mut loop_ = SelfLearnLoop::from_paths(build_disabled_loop_config);
+    loop_.generate_draft("Hello", cfg, None, None).unwrap();
+    let resp = loop_.commit_last_draft(None).unwrap();
     assert!(!resp.stored_in_replay);
     assert!(!resp.was_rewritten);
 }
@@ -1994,8 +2008,10 @@ fn self_learn_disabled_mode_has_zero_overhead() {
 ```bash
 aarambh-ai infer \
   --model checkpoints/tiny_sft.safetensors \
+  --tokenizer checkpoints/tokenizer.json \
   --self-learn cpu \
   --replay-path data/replay.jsonl \
+  --self-learn-state-dir adapters/selflearn \
   --prompt "Explain recursion to a beginner."
 
 # [thinking: 41 tokens]
@@ -2004,10 +2020,12 @@ aarambh-ai infer \
 # [self-learn] replay buffer: 1/500  math:0 code:0 general:1
 
 aarambh-ai selflearn flush-gradients \
-  --model checkpoints/tiny_sft.safetensors \
-  --replay-path data/replay.jsonl
+  --base checkpoints/tiny_sft.safetensors \
+  --tokenizer checkpoints/tokenizer.json \
+  --replay-path data/replay.jsonl \
+  --self-learn-state-dir adapters/selflearn
 
-aarambh-ai selflearn stats --replay-path data/replay.jsonl
+aarambh-ai selflearn stats --replay-path data/replay.jsonl --self-learn-state-dir adapters/selflearn
 # Reasoning: ↑ +0.11 | Factual: ↑ +0.06 | Code: → +0.01
 ```
 
@@ -2197,7 +2215,7 @@ git tag v1.0.0
 | 9 | LoRA + QLoRA + SFT | Small fine-tunes on i3 in 400 MB | i3 + Kaggle | 10–14 days |
 | 10 | GRPO | Thinking quality improves via RL (deterministic verifier only) | Kaggle | 7–10 days |
 | 11 | Safety Layer | Injection / PII / toxicity guarded | i3 | 7–10 days ✅ |
-| 12 | Self-Learning | Model improves from own outputs, replay persists (Critique free function) | i3 + Kaggle | 10–14 days |
+| 12 | Self-Learning | Model improves from own outputs, replay persists (Critique free function) | i3 + Kaggle | 10–14 days ✅ |
 | 13 | GPU Scale-Up | Small→Large train on Kaggle; self-learn on GPU verified | Kaggle | 5–7 days |
 | 14 | Flash Attention | CUDA kernels, 2× GPU speedup | Kaggle | 7–10 days |
 | 15 | Production v1.0 | 13 library + 1 binary = 14 crates on crates.io, all with self-learn | all | 7–10 days |
