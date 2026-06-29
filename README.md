@@ -26,7 +26,7 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 | Full training pipeline with AdamW, cosine schedule, checkpointing | Phase 5 ✅ |
 | Quantisation: INT8, GPTQ INT4, AWQ INT4, GGUF, QAT | Phase 8 ✅ |
 | LoRA, QLoRA, SFT fine-tuning | Phase 9 ✅ |
-| GRPO reinforcement learning | Phase 10 |
+| GRPO reinforcement learning | Phase 10 ✅ |
 | Safety guardrails: input/output, PII, prompt injection | Phase 11 |
 | Self-learning loop: online GRPO, replay buffer, critique | Phase 12 |
 | Custom CUDA kernels: Flash Attention v2, fused RMSNorm, RoPE, SwiGLU | Phase 14 |
@@ -204,11 +204,12 @@ quantised, so Q4 artifacts are much smaller than SafeTensors checkpoints.
 
 ---
 
-## Fine-Tune With LoRA Or QLoRA
+## Fine-Tune With LoRA, QLoRA, Or GRPO
 
-Phase 9 adds adapter-only fine-tuning for instruction data. Training updates
-only LoRA tensors, saves a tiny adapter directory, and can merge the adapter
-back into a normal `model.safetensors` for existing inference commands.
+Phase 9 adds adapter-only SFT for instruction data. Phase 10 adds GRPO
+reinforcement learning with deterministic verifiers. Training updates only LoRA
+tensors, saves a tiny adapter directory, and can merge SFT adapters back into a
+normal `model.safetensors` for existing inference commands.
 
 Input data is JSONL:
 
@@ -253,6 +254,50 @@ cargo run --release -- infer \
   --greedy
 ```
 
+GRPO data is JSONL with either `prompt` or `question`, plus either
+`ground_truth` or `answer`. GSM8K-style `#### final_answer` records are
+accepted.
+
+```jsonl
+{"question":"What is 2 + 2?","answer":"#### 4"}
+{"prompt":"What is 10 - 7?","ground_truth":"3"}
+```
+
+```sh
+# Fast CPU smoke run.
+cargo run --release -- finetune grpo \
+  --config configs/tiny_shakespeare_smoke.toml \
+  --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --reference checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --data data/grpo_tiny_math.jsonl \
+  --verifier math-format \
+  --group-size 2 \
+  --max-new-tokens 16 \
+  --steps 2 \
+  --lora-rank 4 \
+  --output adapters/tiny_grpo_smoke
+
+# Kaggle-style GRPO run.
+cargo run --release -- finetune grpo \
+  --config configs/tiny_shakespeare.toml \
+  --base checkpoints/tiny_sft_merged/model.safetensors \
+  --reference checkpoints/tiny_sft_merged/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --data data/gsm8k_train.jsonl \
+  --verifier math-format \
+  --group-size 8 \
+  --max-new-tokens 128 \
+  --steps 2000 \
+  --lr 0.00001 \
+  --kl-coeff 0.01 \
+  --output adapters/tiny_grpo
+```
+
+GRPO uses deterministic `MathVerifier`, `FormatVerifier`, or `math-format`
+composite rewards. It does not use Self-Critique; critique is reserved for the
+Phase 12 replay buffer.
+
 Adapter layout:
 
 ```text
@@ -266,6 +311,9 @@ adapters/tiny_sft/
         ├── adapter.safetensors
         └── train_state.json
 ```
+
+GRPO adapter directories additionally write `grpo_config.json` with the
+reference checkpoint, verifier, GRPO sampling settings, and train settings.
 
 ---
 
@@ -435,7 +483,7 @@ aarambh-ai/
 | 7 | Thinking engine | i3 | ✅ |
 | 8 | Quantisation stack | i3 | ✅ |
 | 9 | Fine-tuning (LoRA, QLoRA, SFT) | i3 + GPU | ✅ |
-| 10 | GRPO reinforcement learning | GPU | ⬜ |
+| 10 | GRPO reinforcement learning | GPU | ✅ |
 | 11 | Safety layer | i3 | ⬜ |
 | 12 | Self-learning loop | i3 + GPU | ⬜ |
 | 13 | GPU scale-up (Small → Large) | GPU | ⬜ |

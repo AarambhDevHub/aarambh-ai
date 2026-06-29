@@ -30,7 +30,7 @@ Phase 6  →  Inference engine + CLI               (5–7 days)    [i3] ✅
 Phase 7  →  Thinking engine                      (4–6 days)    [i3] ✅
 Phase 8  →  Quantisation stack                   (8–10 days)   [i3]
 Phase 9  →  Fine-tuning (LoRA, QLoRA, SFT)       (10–14 days)  [i3 + Kaggle]
-Phase 10 →  GRPO reinforcement learning          (7–10 days)   [Kaggle]
+Phase 10 →  GRPO reinforcement learning          (7–10 days)   [Kaggle] ✅
 Phase 11 →  Safety layer                         (7–10 days)   [i3]
 Phase 12 →  Self-learning loop                   (10–14 days)  [i3 + Kaggle]
 Phase 13 →  GPU scale-up (Small → Large)         (5–7 days)    [Kaggle]
@@ -1422,61 +1422,70 @@ Do **NOT** use SelfCritique as the verifier for GRPO. SelfCritique is only used 
 
 **`aarambh-ai-finetune/src/grpo.rs`:**
 ```
-[ ] GrpoConfig {
+[x] GrpoConfig {
       group_size: usize,         // G — number of completions per prompt, default 8
       kl_coeff: f64,             // β — KL penalty weight, default 0.01
       max_new_tokens: usize,     // max tokens per completion
-      reference_model_path: PathBuf,
+      temperature: f32,          // default 0.8
+      top_p: Option<f32>,        // default 0.95
+      top_k: Option<usize>,      // default 50
+      thinking: GrpoThinkingMode,
     }
 
-[ ] fn sample_group(
-        engine: &mut InferenceEngine,
-        prompt: &str,
+[x] fn sample_group(
+        model: &LoraAarambhModel,
+        tokenizer: &BpeTokenizer,
+        example: &GrpoExample,
         config: &GrpoConfig,
-    ) -> Result<Vec<(String, Vec<f32>)>>   // (completion text, log_probs)
-      // generate G completions with temperature=0.8
-      // track log probability of each generated token
-      // these are "policy_log_probs" — from the model being trained
+    ) -> Result<Vec<Rollout>>
+      // generates G no-gradient completions from the current LoRA policy
+      // stores completion text and token ids only
 
-[ ] fn compute_advantages(scores: &[f32]) -> Vec<f32>
+[x] fn compute_advantages(scores: &[f32]) -> Vec<f32>
       // advantage_i = (score_i - mean) / (std + 1e-8)
 
-[ ] fn grpo_loss(
-        policy_log_probs: &[Vec<f32>],    // from current (trained) model
-        ref_log_probs: &[Vec<f32>],       // from frozen reference model
+[x] fn grpo_loss(
+        policy_log_probs: &[Tensor],      // from current trainable LoRA policy
+        ref_log_probs: &[Tensor],         // from frozen reference checkpoint
         advantages: &[f32],
         kl_coeff: f64,
     ) -> Result<Tensor>
-      // L = -mean(sum(policy_log_probs_i) × advantage_i)
-      //   + kl_coeff × KL(policy ‖ reference)
+      // L = -mean(policy_log_probs_i × advantage_i) + kl_coeff × KL policy/ref term
       //
       // Note: policy_log_probs and ref_log_probs come from DIFFERENT models.
       //       Keep variable names explicit to avoid confusion.
 
-[ ] GrpoTrainer {
-      engine: InferenceEngine,           // model being trained (updated each step)
-      ref_engine: InferenceEngine,       // frozen reference model (never updated)
-      lora_model: AarambhModel,
+[x] GrpoTrainer {
+      model: LoraAarambhModel,           // trainable adapter policy
+      reference: AarambhModel,           // frozen reference model
+      tokenizer: BpeTokenizer,
+      verifier: Box<dyn Verifier>,
       config: GrpoConfig,
     }
-    fn train_step(&mut self, prompts: &[&str], verifier: &dyn Verifier) -> Result<f32>
-    fn train(&mut self, dataset, verifier, n_steps) -> Result<()>
+    fn train_step(&mut self, example: &GrpoExample) -> Result<GrpoMetrics>
+    fn train(&mut self) -> Result<()>
+
+[x] Differentiable replay path
+      // sampling is graph-free
+      // policy log-probs are recomputed with LoraAarambhModel::forward_train()
+      // full-distribution KL is computed against the frozen reference model
 ```
 
 **`aarambh-ai-finetune/src/verifier.rs`:**
 ```
-[ ] trait Verifier { fn score(&self, completion: &str, ground_truth: &str) -> f32; }
+[x] trait Verifier { fn score(&self, completion: &str, ground_truth: &str) -> f32; }
 
-[ ] MathVerifier
+[x] MathVerifier
       // extract last number from completion
-      // compare to ground_truth number
+      // supports GSM8K #### answer, commas, negatives, decimals
+      // compare to ground_truth number with tolerance
       // 1.0 if correct, 0.0 if wrong
 
-[ ] FormatVerifier
+[x] FormatVerifier
       // 1.0 if completion contains valid <think>...</think> block
       // 0.5 if partial, 0.0 if no think block
 
-[ ] CompositeVerifier(Vec<(Box<dyn Verifier>, f32)>)
+[x] CompositeVerifier(Vec<(Box<dyn Verifier>, f32)>)
       // weighted sum of verifier scores
 ```
 
@@ -1510,8 +1519,8 @@ fn format_verifier_rewards_think_block() {
 fn grpo_loss_naming_is_unambiguous() {
     // Ensure policy and reference log probs are different tensors
     // (catches copy-paste bugs where same tensor is passed for both)
-    let policy_lp = vec![vec![-1.0_f32, -0.5, -2.0]];
-    let ref_lp    = vec![vec![-1.1_f32, -0.4, -1.9]];
+    let policy_lp = vec![Tensor::new(&[-1.0_f32, -0.5, -2.0], &Device::Cpu).unwrap()];
+    let ref_lp    = vec![Tensor::new(&[-1.1_f32, -0.4, -1.9], &Device::Cpu).unwrap()];
     let adv       = vec![0.5_f32];
     let loss = grpo_loss(&policy_lp, &ref_lp, &adv, 0.01).unwrap();
     assert!(loss.to_scalar::<f32>().unwrap().is_finite());
@@ -1520,14 +1529,19 @@ fn grpo_loss_naming_is_unambiguous() {
 
 ### GRPO Training Command
 ```bash
-aarambh-ai finetune grpo \
+cargo run --release -- finetune grpo \
+  --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_sft_merged/model.safetensors \
   --reference checkpoints/tiny_sft_merged/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
   --data data/gsm8k_train.jsonl \
-  --verifier math \
+  --verifier math-format \
   --group-size 8 \
+  --max-new-tokens 128 \
   --lora-rank 16 \
   --steps 2000 \
+  --lr 0.00001 \
+  --kl-coeff 0.01 \
   --output adapters/tiny_grpo/
 ```
 

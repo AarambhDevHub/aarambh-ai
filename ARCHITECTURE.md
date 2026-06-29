@@ -1308,20 +1308,26 @@ Self-Critique is too noisy for GRPO advantages; it is used exclusively for the R
 in Phase 12.
 
 ```
-1. Sample G=8 completions for each prompt using current model (temperature=0.8)
+1. Sample G=8 completions for each prompt using the current LoRA policy (temperature=0.8)
 2. Score each with deterministic verifier(completion, ground_truth) → score ∈ [0, 1]
 3. Normalise scores within the group:
    advantage_i = (score_i − mean(scores)) / (std(scores) + 1e-8)
-4. GRPO loss:
+4. Replay prompt + completion through the training graph:
+   policy_log_probs = LoraAarambhModel::forward_train(...)
+   ref_log_probs    = frozen AarambhModel::forward_train(...)
+5. GRPO loss:
    L = −mean(policy_log_prob(completion_i) × advantage_i) + β × KL(current ‖ reference)
-5. Backward + AdamW step
+6. Backward + AdamW step on LoRA parameters only
 ```
 
 > **Naming note:** The loss function parameters are `policy_log_probs` (from the
 > model being trained) and `ref_log_probs` (from the frozen reference checkpoint).
 > Keep these names explicit in `grpo.rs` — they refer to different models.
 
-The KL penalty keeps the model close to the SFT checkpoint so it doesn't drift.
+Sampling is graph-free and stores only completion token IDs/text. Differentiable
+log-probs are recomputed by replay so GRPO never backpropagates through the
+cached inference path. The KL penalty keeps the model close to the SFT
+checkpoint so it doesn't drift.
 
 **Built-in verifiers:**
 - `MathVerifier` — parse final number from response, compare to ground truth
