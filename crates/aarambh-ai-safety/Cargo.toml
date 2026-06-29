@@ -2,3 +2,10 @@
 name = "aarambh-ai-safety"
 version = "0.1.0"
 edition = "2024"
+
+[dependencies]
+aarambh-ai-core      = { path = "../aarambh-ai-core" }
+aarambh-ai-inference = { path = "../aarambh-ai-inference" }
+serde                = { workspace = true }
+serde_json           = { workspace = true }
+sha2                 = { workspace = true }

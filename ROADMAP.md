@@ -31,7 +31,7 @@ Phase 7  →  Thinking engine                      (4–6 days)    [i3] ✅
 Phase 8  →  Quantisation stack                   (8–10 days)   [i3]
 Phase 9  →  Fine-tuning (LoRA, QLoRA, SFT)       (10–14 days)  [i3 + Kaggle]
 Phase 10 →  GRPO reinforcement learning          (7–10 days)   [Kaggle] ✅
-Phase 11 →  Safety layer                         (7–10 days)   [i3]
+Phase 11 →  Safety layer                         (7–10 days)   [i3] ✅
 Phase 12 →  Self-learning loop                   (10–14 days)  [i3 + Kaggle]
 Phase 13 →  GPU scale-up (Small → Large)         (5–7 days)    [Kaggle]
 Phase 14 →  Flash Attention CUDA kernels         (7–10 days)   [Kaggle]
@@ -1569,19 +1569,19 @@ PII is redacted. Toxicity is scored. Audit log is written.
 
 **`aarambh-ai-safety`:**
 ```
-[ ] src/input/injection.rs
+[x] src/input/injection.rs
       fn detect_injection(prompt: &str) -> InjectionScore
         // Pattern library: "ignore previous instructions", "new system prompt:",
         //   "disregard your", "jailbreak", role-switching phrases
         // Structural anomaly: many newlines, XML-like instruction blocks
 
-[ ] src/input/jailbreak.rs
+[x] src/input/jailbreak.rs
       fn detect_jailbreak(prompt: &str) -> JailbreakScore
         // Role-play bypasses: "pretend you are", "act as if", "you are DAN"
         // Encoding tricks: detect Base64, normalise Unicode, Leetspeak
         // Known pattern list
 
-[ ] src/input/pii.rs
+[x] src/input/pii.rs
       fn detect_pii(text: &str) -> PiiFindings
         // email:       \b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z]{2,}\b
         // phone:       international format patterns
@@ -1591,32 +1591,32 @@ PII is redacted. Toxicity is scored. Audit log is written.
       fn redact_pii(text: &str, findings: &PiiFindings) -> String
         // replace each entity with [REDACTED_EMAIL] etc.
 
-[ ] src/output/toxicity.rs
+[x] src/output/toxicity.rs
       fn score_toxicity(text: &str) -> ToxicityScore
         // Five categories: hate_speech, violence, sexual, self_harm, illegal
         // Keyword blocklist approach (no model needed, fast on CPU)
         // Returns { overall: f32, categories: HashMap<Category, f32> }
 
-[ ] src/output/pii_redact.rs
+[x] src/output/pii_redact.rs
       // Same pii.rs applied to model output before user sees it
 
-[ ] src/output/audit.rs
+[x] src/output/audit.rs
       fn log_event(event: &SafetyEvent, path: &Path) -> Result<()>
         // Append JSON line to safety_audit.jsonl
         // NEVER log prompt text — only SHA-256 hash
 
-[ ] src/policy.rs
+[x] src/policy.rs
       SafetyPolicy { ... }   // see ARCHITECTURE.md Section 13.4 for full struct
       impl SafetyPolicy {
         fn strict() / fn permissive() / fn research()
       }
 
-[ ] src/verdict.rs
+[x] src/verdict.rs
       SafetyVerdict { Allow, Block(String), Redact(String), Regenerate }
 
-[ ] src/guard.rs — SafetyGuard
+[x] src/guard.rs — SafetyGuard
       fn new(engine: InferenceEngine, policy: SafetyPolicy) -> Self
-      fn generate(&self, prompt: &str, cfg: &GenerateConfig) -> Result<SafeResponse>
+      fn generate(&mut self, prompt: &str, cfg: GenerationConfig) -> Result<SafeResponse>
         // 1. check_input(prompt) → verdict
         // 2. if Block → return SafeResponse::Blocked
         // 3. if Redact → use cleaned prompt
@@ -1625,8 +1625,9 @@ PII is redacted. Toxicity is scored. Audit log is written.
         // 6. log event
         // 7. return SafeResponse::Ok(response) or Blocked or Regenerate
 
-[ ] Update CLI infer.rs to use SafetyGuard by default
+[x] Update CLI infer.rs to use SafetyGuard by default
       --safety strict|permissive|research|none
+      --safety-audit-log safety_audit.jsonl
 ```
 
 ### Tests
@@ -2195,7 +2196,7 @@ git tag v1.0.0
 | 8 | Quantisation | Tiny 13 MB INT4, HF conversion, QAT | i3 | 8–10 days |
 | 9 | LoRA + QLoRA + SFT | Small fine-tunes on i3 in 400 MB | i3 + Kaggle | 10–14 days |
 | 10 | GRPO | Thinking quality improves via RL (deterministic verifier only) | Kaggle | 7–10 days |
-| 11 | Safety Layer | Injection / PII / toxicity guarded | i3 | 7–10 days |
+| 11 | Safety Layer | Injection / PII / toxicity guarded | i3 | 7–10 days ✅ |
 | 12 | Self-Learning | Model improves from own outputs, replay persists (Critique free function) | i3 + Kaggle | 10–14 days |
 | 13 | GPU Scale-Up | Small→Large train on Kaggle; self-learn on GPU verified | Kaggle | 5–7 days |
 | 14 | Flash Attention | CUDA kernels, 2× GPU speedup | Kaggle | 7–10 days |
