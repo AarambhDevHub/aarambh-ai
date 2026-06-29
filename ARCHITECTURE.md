@@ -1341,7 +1341,9 @@ checkpoint so it doesn't drift.
 
 ### 13.1 Architecture
 
-The `SafetyGuard` wraps `InferenceEngine` and intercepts every call:
+The `SafetyGuard` wraps the mutable `InferenceEngine` and intercepts every
+generation call. Live streaming callbacks are buffered while safety is enabled,
+so output guardrails run before generated text is printed.
 
 ```
 User prompt
@@ -1412,18 +1414,23 @@ it is replaced with `[REDACTED_PHONE]` / `[REDACTED_EMAIL]`.
 pub struct SafetyPolicy {
     // Input
     pub check_prompt_injection: bool,
+    pub injection_threshold:    f32,
     pub check_jailbreak:        bool,
-    pub check_input_pii:        PiiPolicy,    // None/Detect/Redact/Block
-    pub max_prompt_tokens:      Option<usize>,
+    pub jailbreak_threshold:    f32,
+    pub input_pii:              PiiPolicy,    // Off/Warn/Redact/Block
+    pub max_prompt_chars:       Option<usize>,
 
     // Output
     pub check_toxicity:         bool,
     pub toxicity_threshold:     f32,          // 0.0–1.0, default 0.7
-    pub check_output_pii:       PiiPolicy,
+    pub output_pii:             PiiPolicy,
 
     // On violation
-    pub on_input_violation:     ViolationAction,  // Block/Warn/Log
+    pub on_input_violation:     ViolationAction,  // Allow/Warn/Block
     pub on_output_violation:    ViolationAction,  // Block/Regenerate/Warn
+    pub max_regenerations:      usize,
+    pub audit_enabled:          bool,
+    pub audit_path:             Option<PathBuf>,
 }
 
 impl SafetyPolicy {
@@ -1438,10 +1445,11 @@ impl SafetyPolicy {
 Every safety event → `safety_audit.jsonl`:
 ```json
 {
-  "timestamp":       1719000000,
+  "timestamp_unix_ms": 1719000000000,
   "prompt_hash":     "a3f5bc...",   ← SHA-256 of prompt (never the text)
-  "verdict":         "Block",
-  "triggered_rules": ["injection:ignore_previous_instructions"],
+  "stage":           "input",
+  "verdict":         "block",
+  "triggered_rules": ["input.ignore_previous_instructions"],
   "latency_ms":      2
 }
 ```

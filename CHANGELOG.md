@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.11.0] - 2026-06-29
+
+### Added
+
+- **`aarambh-ai-safety` Phase 11 implementation**
+  - Added prompt-injection and jailbreak detectors with weighted rule scoring, role-switch checks, leetspeak/confusable normalization, and Base64-like payload detection
+  - Added PII detection/redaction for email, phone, SSN/national ID, credit cards with Luhn validation, known API-key prefixes, and high-entropy secrets
+  - Added output toxicity scoring for hate speech, violence, sexual content, self-harm, and illegal activity
+  - Added `SafetyPolicy` presets, `SafetyVerdict`, `SafetyGuard`, `SafeResponse`, and privacy-safe `SafetyEvent` audit logging with SHA-256 prompt hashes
+
+### Changed
+
+- **CLI**
+  - `infer` now uses `SafetyGuard` by default
+  - Added `--safety strict|permissive|research|none` and `--safety-audit-log`
+  - Buffered safety-enabled streaming/predict-view callbacks until output checks pass, preventing unsafe text from being printed before guardrails run
+
+- **Documentation**
+  - Marked Phase 11 complete in README and ROADMAP
+  - Added safety CLI examples and audit privacy notes
+  - Aligned ARCHITECTURE safety policy fields with the implemented API
+
+### Verified
+
+- `cargo check -p aarambh-ai-safety`
+- `cargo check -p aarambh-ai`
+- `cargo test -p aarambh-ai-safety`
+
 ## [0.10.0] - 2026-06-29
 
 ### Added

@@ -6,6 +6,7 @@ use aarambh_ai_inference::{
     GenerationConfig, GenerationOutput, GenerationPhase, GenerationStep, InferenceEngine, Sampler,
     ThinkingMode,
 };
+use aarambh_ai_safety::{SafeResponse, SafetyGuard, SafetyMode, SafetyPolicy, SafetyVerdict};
 use aarambh_ai_tokenizer::{ASSISTANT, THINK_END_ID, THINK_START_ID, USER};
 use aarambh_ai_train::TrainingRunConfig;
 use clap::Args;
@@ -44,6 +45,10 @@ pub struct InferArgs {
     pub stream: bool,
     #[arg(long)]
     pub greedy: bool,
+    #[arg(long, default_value = "strict")]
+    pub safety: String,
+    #[arg(long, default_value = "safety_audit.jsonl")]
+    pub safety_audit_log: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,6 +75,7 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
         )?
     };
     let thinking_mode = parse_thinking_mode(&args.thinking)?;
+    let safety_mode = parse_safety_mode(&args.safety)?;
 
     let mut engine =
         InferenceEngine::from_paths(model_path, &run_config.model, tokenizer_path, device)?;
@@ -82,9 +88,37 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
 
     let prompt = prompt_for_mode(&args.prompt, thinking_mode);
     let tokenizer_for_view = engine.tokenizer().clone();
-    let mut stream_dim_active = false;
-    let mut stream_header_printed = false;
-    let mut stream_thinking_tokens = 0usize;
+    if let Some(policy) = SafetyPolicy::for_mode(safety_mode)
+        .map(|policy| policy.with_audit_path(&args.safety_audit_log))
+    {
+        let mut guard = SafetyGuard::new(engine, policy);
+        let mut stream_state = StreamState::default();
+        let response = guard.generate_with_callback(&prompt, config, |step| {
+            if args.predict_view {
+                print!(
+                    "{}",
+                    predict_view::render(step, &tokenizer_for_view, args.temperature, args.top_p)
+                );
+            }
+            if args.stream {
+                stream_step(step, thinking_mode, &mut stream_state)?;
+            }
+            if args.predict_view || args.stream {
+                io::stdout().flush()?;
+            }
+            Ok(())
+        })?;
+        print_safe_response(&response, thinking_mode, args.stream, &mut stream_state)?;
+        io::stdout().flush()?;
+        if let Some(output) = &response.output {
+            eprintln!("finish_reason={:?}", output.finish_reason);
+        } else {
+            eprintln!("finish_reason=SafetyBlocked");
+        }
+        return Ok(());
+    }
+
+    let mut stream_state = StreamState::default();
     let output = engine.generate_with_callback(&prompt, config, |step| {
         if args.predict_view {
             print!(
@@ -93,13 +127,7 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
             );
         }
         if args.stream {
-            stream_step(
-                step,
-                thinking_mode,
-                &mut stream_dim_active,
-                &mut stream_header_printed,
-                &mut stream_thinking_tokens,
-            )?;
+            stream_step(step, thinking_mode, &mut stream_state)?;
         }
         if args.predict_view || args.stream {
             io::stdout().flush()?;
@@ -108,11 +136,7 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
     })?;
 
     if args.stream {
-        if stream_dim_active {
-            println!("{ANSI_RESET}");
-            println!("[thinking: {stream_thinking_tokens} tokens]");
-        }
-        println!();
+        finish_stream(&mut stream_state);
     } else {
         print_generation_output(&output, thinking_mode)?;
     }
@@ -156,6 +180,10 @@ fn parse_thinking_mode(value: &str) -> anyhow::Result<ThinkingMode> {
     }
 }
 
+fn parse_safety_mode(value: &str) -> anyhow::Result<SafetyMode> {
+    value.parse::<SafetyMode>().map_err(anyhow::Error::msg)
+}
+
 fn prompt_for_mode(prompt: &str, thinking_mode: ThinkingMode) -> String {
     if thinking_mode.is_enabled() {
         format!("{USER}\n{prompt}\n{ASSISTANT}\n")
@@ -164,12 +192,17 @@ fn prompt_for_mode(prompt: &str, thinking_mode: ThinkingMode) -> String {
     }
 }
 
+#[derive(Default)]
+struct StreamState {
+    dim_active: bool,
+    header_printed: bool,
+    thinking_tokens: usize,
+}
+
 fn stream_step(
     step: &GenerationStep,
     thinking_mode: ThinkingMode,
-    dim_active: &mut bool,
-    header_printed: &mut bool,
-    thinking_tokens: &mut usize,
+    state: &mut StreamState,
 ) -> io::Result<()> {
     if !thinking_mode.is_enabled() {
         print!("{}", step.token_text);
@@ -178,24 +211,57 @@ fn stream_step(
 
     match step.phase {
         GenerationPhase::Thinking => {
-            if !*header_printed {
+            if !state.header_printed {
                 print!("[thinking]\n{ANSI_DIM}");
-                *header_printed = true;
-                *dim_active = true;
+                state.header_printed = true;
+                state.dim_active = true;
             }
             if !is_thinking_marker(step.token_id) {
-                *thinking_tokens += 1;
+                state.thinking_tokens += 1;
                 print!("{}", step.token_text);
             }
         }
         GenerationPhase::Answer => {
-            if *dim_active {
+            if state.dim_active {
                 println!("{ANSI_RESET}");
-                println!("[thinking: {thinking_tokens} tokens]");
-                *dim_active = false;
+                println!("[thinking: {} tokens]", state.thinking_tokens);
+                state.dim_active = false;
             }
             print!("{}", step.token_text);
         }
+    }
+    Ok(())
+}
+
+fn finish_stream(state: &mut StreamState) {
+    if state.dim_active {
+        println!("{ANSI_RESET}");
+        println!("[thinking: {} tokens]", state.thinking_tokens);
+        state.dim_active = false;
+    }
+    println!();
+}
+
+fn print_safe_response(
+    response: &SafeResponse,
+    thinking_mode: ThinkingMode,
+    stream: bool,
+    stream_state: &mut StreamState,
+) -> io::Result<()> {
+    if let SafetyVerdict::Block(reason) = &response.verdict {
+        println!("blocked by safety: {reason}");
+        return Ok(());
+    }
+
+    let Some(output) = &response.output else {
+        println!("blocked by safety");
+        return Ok(());
+    };
+
+    if stream && !response.output_redacted {
+        finish_stream(stream_state);
+    } else {
+        print_generation_output(output, thinking_mode)?;
     }
     Ok(())
 }

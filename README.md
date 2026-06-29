@@ -27,7 +27,7 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 | Quantisation: INT8, GPTQ INT4, AWQ INT4, GGUF, QAT | Phase 8 ✅ |
 | LoRA, QLoRA, SFT fine-tuning | Phase 9 ✅ |
 | GRPO reinforcement learning | Phase 10 ✅ |
-| Safety guardrails: input/output, PII, prompt injection | Phase 11 |
+| Safety guardrails: input/output, PII, prompt injection | Phase 11 ✅ |
 | Self-learning loop: online GRPO, replay buffer, critique | Phase 12 |
 | Custom CUDA kernels: Flash Attention v2, fused RMSNorm, RoPE, SwiGLU | Phase 14 |
 | CPU SIMD kernels: AVX2/FMA RMSNorm, AVX512 override, parallel attention via rayon | Phase 4 ✅ |
@@ -153,6 +153,32 @@ wraps the prompt with user/assistant markers, forces `<think>` as the first
 generated token, enforces the mode budget, force-closes with `</think>` when
 needed, and prints the final answer separately from the dimmed thinking block.
 Reasoning quality still depends on Phase 9/10 thinking SFT and GRPO training.
+
+Phase 11 enables the safety layer by default for `infer`. Use
+`--safety strict|permissive|research|none` to choose policy behavior and
+`--safety-audit-log` to choose the JSONL audit path. Audit records store a
+SHA-256 prompt hash and rule IDs only; prompt text, output text, and thinking
+text are never written to the log.
+
+```sh
+# Default strict safety: injection/jailbreak checks, PII redaction, output checks.
+cargo run --release -- infer \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tiny_shakespeare/best/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --prompt "To be, or not to be" \
+  --max-tokens 64 \
+  --greedy \
+  --safety strict \
+  --safety-audit-log safety_audit.jsonl
+
+# Raw legacy inference for benchmarks/debugging.
+cargo run --release -- infer \
+  --config configs/tiny_shakespeare.toml \
+  --prompt "The king" \
+  --max-tokens 64 \
+  --safety none
+```
 
 ---
 
@@ -484,7 +510,7 @@ aarambh-ai/
 | 8 | Quantisation stack | i3 | ✅ |
 | 9 | Fine-tuning (LoRA, QLoRA, SFT) | i3 + GPU | ✅ |
 | 10 | GRPO reinforcement learning | GPU | ✅ |
-| 11 | Safety layer | i3 | ⬜ |
+| 11 | Safety layer | i3 | ✅ |
 | 12 | Self-learning loop | i3 + GPU | ⬜ |
 | 13 | GPU scale-up (Small → Large) | GPU | ⬜ |
 | 14 | Flash Attention CUDA kernels | GPU | ⬜ |
