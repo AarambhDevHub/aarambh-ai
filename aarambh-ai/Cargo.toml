@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 aarambh-ai-core      = { path = "../crates/aarambh-ai-core" }
 aarambh-ai-data      = { path = "../crates/aarambh-ai-data" }
+aarambh-ai-finetune  = { path = "../crates/aarambh-ai-finetune" }
 aarambh-ai-inference = { path = "../crates/aarambh-ai-inference" }
 aarambh-ai-quant     = { path = "../crates/aarambh-ai-quant" }
 aarambh-ai-tokenizer = { path = "../crates/aarambh-ai-tokenizer" }

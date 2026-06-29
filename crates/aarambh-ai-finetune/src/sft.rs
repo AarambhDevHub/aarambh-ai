@@ -1,23 +1,342 @@
-use aarambh_ai_tokenizer::{ASSISTANT, ENDOFTEXT, THINK_END, THINK_START, USER};
+use std::fs;
+use std::path::Path;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use aarambh_ai_core::{AarambhError, Device, Result, TokenizerLike};
+use aarambh_ai_tokenizer::{ASSISTANT, ENDOFTEXT, PAD_ID, THINK_END, THINK_START, USER};
+use candle_core::Tensor;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SftExample {
+    pub instruction: String,
+    #[serde(default)]
+    pub input: Option<String>,
+    pub response: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThinkingSftExample {
     pub instruction: String,
     pub thinking: String,
     pub response: String,
 }
 
-pub fn format_thinking_sft(example: &ThinkingSftExample) -> String {
+#[derive(Debug, Clone, Default)]
+pub struct ChatTemplate;
+
+impl ChatTemplate {
+    pub fn format(&self, example: &SftExample) -> String {
+        format_sft(example)
+    }
+
+    pub fn format_with_thinking(&self, example: &ThinkingSftExample) -> String {
+        format_thinking_sft(example)
+    }
+
+    pub fn prefix(&self, instruction: &str, input: Option<&str>) -> String {
+        let instruction = join_instruction_input(instruction, input);
+        format!("{USER}\n{instruction}\n{ASSISTANT}\n")
+    }
+
+    pub fn target(&self, response: &str) -> String {
+        format!("{response}{ENDOFTEXT}")
+    }
+
+    pub fn thinking_target(&self, thinking: &str, response: &str) -> String {
+        format!("{THINK_START}\n{thinking}\n{THINK_END}\n{response}{ENDOFTEXT}")
+    }
+}
+
+pub fn format_sft(example: &SftExample) -> String {
+    let template = ChatTemplate;
     format!(
-        "{USER}\n{}\n{ASSISTANT}\n{THINK_START}\n{}\n{THINK_END}\n{}{}",
-        example.instruction, example.thinking, example.response, ENDOFTEXT
+        "{}{}",
+        template.prefix(&example.instruction, example.input.as_deref()),
+        template.target(&example.response)
     )
+}
+
+pub fn format_thinking_sft(example: &ThinkingSftExample) -> String {
+    let template = ChatTemplate;
+    format!(
+        "{}{}",
+        template.prefix(&example.instruction, None),
+        template.thinking_target(&example.thinking, &example.response)
+    )
+}
+
+#[derive(Debug, Clone)]
+struct SftSequence {
+    input_ids: Vec<u32>,
+    labels: Vec<u32>,
+    loss_mask: Vec<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SftDataset {
+    sequences: Vec<SftSequence>,
+    max_seq_len: usize,
+}
+
+impl SftDataset {
+    pub fn from_jsonl(
+        path: impl AsRef<Path>,
+        tokenizer: &dyn TokenizerLike,
+        max_seq_len: usize,
+    ) -> Result<Self> {
+        if max_seq_len == 0 {
+            return Err(AarambhError::Config("max_seq_len must be non-zero".into()));
+        }
+        let content = fs::read_to_string(path.as_ref())?;
+        let template = ChatTemplate;
+        let mut sequences = Vec::new();
+        for (line_idx, line) in content.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let raw: RawSftRecord = serde_json::from_str(line).map_err(|err| {
+                AarambhError::Config(format!("invalid SFT JSONL at line {}: {err}", line_idx + 1))
+            })?;
+            let prefix = template.prefix(&raw.instruction, raw.input.as_deref());
+            let target = match raw.thinking {
+                Some(thinking) => template.thinking_target(&thinking, &raw.response),
+                None => template.target(&raw.response),
+            };
+            let sequence = encode_sft_sequence(tokenizer, &prefix, &target, max_seq_len)?;
+            sequences.push(sequence);
+        }
+        if sequences.is_empty() {
+            return Err(AarambhError::Config(format!(
+                "SFT dataset {} produced no usable examples",
+                path.as_ref().display()
+            )));
+        }
+        Ok(Self {
+            sequences,
+            max_seq_len,
+        })
+    }
+
+    pub fn from_examples(
+        examples: &[SftExample],
+        tokenizer: &dyn TokenizerLike,
+        max_seq_len: usize,
+    ) -> Result<Self> {
+        let template = ChatTemplate;
+        let mut sequences = Vec::with_capacity(examples.len());
+        for example in examples {
+            sequences.push(encode_sft_sequence(
+                tokenizer,
+                &template.prefix(&example.instruction, example.input.as_deref()),
+                &template.target(&example.response),
+                max_seq_len,
+            )?);
+        }
+        if sequences.is_empty() {
+            return Err(AarambhError::Config(
+                "SFT dataset must contain at least one example".into(),
+            ));
+        }
+        Ok(Self {
+            sequences,
+            max_seq_len,
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.sequences.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sequences.is_empty()
+    }
+
+    pub fn max_seq_len(&self) -> usize {
+        self.max_seq_len
+    }
+}
+
+#[derive(Debug)]
+pub struct SftBatch {
+    pub input_ids: Tensor,
+    pub labels: Tensor,
+    pub loss_mask: Tensor,
+}
+
+pub struct SftDataLoader {
+    sequences: Vec<SftSequence>,
+    batch_size: usize,
+    max_seq_len: usize,
+    shuffle: bool,
+    rng: StdRng,
+    pos: usize,
+    device: Device,
+}
+
+impl SftDataLoader {
+    pub fn new(
+        dataset: &SftDataset,
+        batch_size: usize,
+        shuffle: bool,
+        seed: u64,
+        device: Device,
+    ) -> Result<Self> {
+        if batch_size == 0 {
+            return Err(AarambhError::Config("batch_size must be non-zero".into()));
+        }
+        Ok(Self {
+            sequences: dataset.sequences.clone(),
+            batch_size,
+            max_seq_len: dataset.max_seq_len,
+            shuffle,
+            rng: StdRng::seed_from_u64(seed),
+            pos: 0,
+            device,
+        })
+    }
+
+    pub fn reset(&mut self) {
+        self.pos = 0;
+        if self.shuffle {
+            self.sequences.shuffle(&mut self.rng);
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.sequences.len() / self.batch_size
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl Iterator for SftDataLoader {
+    type Item = Result<SftBatch>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos >= self.sequences.len() {
+            return None;
+        }
+        let end = (self.pos + self.batch_size).min(self.sequences.len());
+        if end - self.pos < self.batch_size {
+            self.pos = end;
+            return None;
+        }
+        let batch = &self.sequences[self.pos..end];
+        self.pos = end;
+        Some(batch_to_tensors(
+            batch,
+            self.batch_size,
+            self.max_seq_len,
+            &self.device,
+        ))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSftRecord {
+    instruction: String,
+    #[serde(default)]
+    input: Option<String>,
+    #[serde(default)]
+    thinking: Option<String>,
+    response: String,
+}
+
+fn encode_sft_sequence(
+    tokenizer: &dyn TokenizerLike,
+    prefix: &str,
+    target: &str,
+    max_seq_len: usize,
+) -> Result<SftSequence> {
+    let prefix_ids = tokenizer.encode(prefix)?;
+    let target_ids = tokenizer.encode(target)?;
+    if target_ids.is_empty() {
+        return Err(AarambhError::Config(
+            "SFT target encoded to zero tokens".into(),
+        ));
+    }
+    let prefix_len = prefix_ids.len();
+    let mut ids = prefix_ids;
+    ids.extend(target_ids);
+    if ids.len() > max_seq_len + 1 {
+        ids.truncate(max_seq_len + 1);
+    }
+    if ids.len() < 2 {
+        return Err(AarambhError::Config(
+            "SFT sequence must contain at least two tokens".into(),
+        ));
+    }
+
+    let input_ids = ids[..ids.len() - 1].to_vec();
+    let labels = ids[1..].to_vec();
+    let loss_mask = build_loss_mask(prefix_len, ids.len());
+    if loss_mask.iter().all(|value| *value == 0) {
+        return Err(AarambhError::Config(
+            "SFT sequence has no assistant tokens after truncation".into(),
+        ));
+    }
+    Ok(SftSequence {
+        input_ids,
+        labels,
+        loss_mask,
+    })
+}
+
+pub fn build_loss_mask(prefix_len: usize, token_count: usize) -> Vec<u32> {
+    if token_count < 2 {
+        return Vec::new();
+    }
+    (0..token_count - 1)
+        .map(|idx| u32::from(idx + 1 >= prefix_len))
+        .collect()
+}
+
+fn batch_to_tensors(
+    batch: &[SftSequence],
+    batch_size: usize,
+    max_seq_len: usize,
+    device: &Device,
+) -> Result<SftBatch> {
+    let candle_device = device.to_candle()?;
+    let mut input_ids = Vec::with_capacity(batch_size * max_seq_len);
+    let mut labels = Vec::with_capacity(batch_size * max_seq_len);
+    let mut loss_mask = Vec::with_capacity(batch_size * max_seq_len);
+
+    for sequence in batch {
+        push_padded(&mut input_ids, &sequence.input_ids, max_seq_len, PAD_ID);
+        push_padded(&mut labels, &sequence.labels, max_seq_len, PAD_ID);
+        push_padded(&mut loss_mask, &sequence.loss_mask, max_seq_len, 0);
+    }
+
+    Ok(SftBatch {
+        input_ids: Tensor::from_vec(input_ids, (batch_size, max_seq_len), &candle_device)?,
+        labels: Tensor::from_vec(labels, (batch_size, max_seq_len), &candle_device)?,
+        loss_mask: Tensor::from_vec(loss_mask, (batch_size, max_seq_len), &candle_device)?,
+    })
+}
+
+fn push_padded(dst: &mut Vec<u32>, values: &[u32], max_len: usize, pad: u32) {
+    let take = values.len().min(max_len);
+    dst.extend_from_slice(&values[..take]);
+    dst.extend(std::iter::repeat_n(pad, max_len - take));
+}
+
+fn join_instruction_input(instruction: &str, input: Option<&str>) -> String {
+    match input {
+        Some(input) if !input.trim().is_empty() => format!("{instruction}\n{input}"),
+        _ => instruction.to_string(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aarambh_ai_core::TokenizerLike;
     use aarambh_ai_tokenizer::{
         ASSISTANT_ID, BpeTokenizer, ENDOFTEXT_ID, THINK_END_ID, THINK_START_ID, USER_ID, Vocab,
     };
@@ -55,6 +374,32 @@ mod tests {
         assert!(ids.contains(&ENDOFTEXT_ID));
     }
 
+    #[test]
+    fn loss_mask_starts_at_first_target_token() {
+        let mask = build_loss_mask(4, 8);
+        assert_eq!(mask, vec![0, 0, 0, 1, 1, 1, 1]);
+    }
+
+    #[test]
+    fn sft_batch_pads_and_masks_prompt_tokens() {
+        let tokenizer = test_tokenizer();
+        let dataset = SftDataset::from_examples(
+            &[SftExample {
+                instruction: "Hi".into(),
+                input: None,
+                response: "Hello".into(),
+            }],
+            &tokenizer,
+            16,
+        )
+        .unwrap();
+        let mut loader = SftDataLoader::new(&dataset, 1, false, 42, Device::Cpu).unwrap();
+        let batch = loader.next().unwrap().unwrap();
+        let mask = batch.loss_mask.to_vec2::<u32>().unwrap();
+        assert!(mask[0].contains(&1));
+        assert_eq!(mask[0].last().copied(), Some(0));
+    }
+
     fn test_tokenizer() -> BpeTokenizer {
         let mut token_to_id = HashMap::from([
             (USER.to_string(), USER_ID),
@@ -63,11 +408,20 @@ mod tests {
             (THINK_END.to_string(), THINK_END_ID),
             (ENDOFTEXT.to_string(), ENDOFTEXT_ID),
         ]);
-        let mut id_to_token = vec![String::new(); 12];
+        let mut id_to_token = vec![String::new(); 32];
         for (token, id) in &token_to_id {
             id_to_token[*id as usize] = token.clone();
         }
-        for (token, id) in [("H", 7), ("i", 8), ("P", 9), ("l", 10), ("a", 11)] {
+        for (token, id) in [
+            ("H", 7),
+            ("i", 8),
+            ("P", 9),
+            ("l", 10),
+            ("a", 11),
+            ("n", 12),
+            ("e", 13),
+            ("o", 14),
+        ] {
             token_to_id.insert(token.to_string(), id);
             id_to_token[id as usize] = token.to_string();
         }

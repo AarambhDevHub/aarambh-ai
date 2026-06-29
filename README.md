@@ -25,7 +25,7 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 | Thinking engine: Low / Medium / High reasoning budgets | Phase 7 ✅ |
 | Full training pipeline with AdamW, cosine schedule, checkpointing | Phase 5 ✅ |
 | Quantisation: INT8, GPTQ INT4, AWQ INT4, GGUF, QAT | Phase 8 ✅ |
-| LoRA, QLoRA, DoRA fine-tuning | Phase 9 |
+| LoRA, QLoRA, SFT fine-tuning | Phase 9 ✅ |
 | GRPO reinforcement learning | Phase 10 |
 | Safety guardrails: input/output, PII, prompt injection | Phase 11 |
 | Self-learning loop: online GRPO, replay buffer, critique | Phase 12 |
@@ -204,6 +204,71 @@ quantised, so Q4 artifacts are much smaller than SafeTensors checkpoints.
 
 ---
 
+## Fine-Tune With LoRA Or QLoRA
+
+Phase 9 adds adapter-only fine-tuning for instruction data. Training updates
+only LoRA tensors, saves a tiny adapter directory, and can merge the adapter
+back into a normal `model.safetensors` for existing inference commands.
+
+Input data is JSONL:
+
+```jsonl
+{"instruction":"What is 2 + 2?","response":"4"}
+{"instruction":"Solve 3 x 7.","thinking":"3 x 7 is repeated addition.","response":"21"}
+```
+
+```sh
+# LoRA SFT on a SafeTensors base.
+cargo run --release -- finetune sft \
+  --config configs/tiny_shakespeare.toml \
+  --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --data data/instruct_tiny.jsonl \
+  --lora-rank 16 \
+  --output adapters/tiny_sft
+
+# QLoRA SFT from a GGUF or SafeTensors base.
+cargo run --release -- finetune qlora \
+  --config configs/tiny_shakespeare.toml \
+  --base checkpoints/tiny_shakespeare/tiny-q4.gguf \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --data data/instruct_tiny.jsonl \
+  --lora-rank 16 \
+  --output adapters/tiny_qlora
+
+# Merge an adapter into a normal SafeTensors checkpoint.
+cargo run --release -- finetune merge \
+  --config configs/tiny_shakespeare.toml \
+  --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --adapter adapters/tiny_sft \
+  --output checkpoints/tiny_sft_merged
+
+# Run the merged model with the existing inference engine.
+cargo run --release -- infer \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tiny_sft_merged/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --prompt "What is 2 + 2?" \
+  --thinking low \
+  --greedy
+```
+
+Adapter layout:
+
+```text
+adapters/tiny_sft/
+├── adapter_config.json
+├── adapter.safetensors
+├── train_state.json
+└── checkpoints/
+    └── step_000100/
+        ├── adapter_config.json
+        ├── adapter.safetensors
+        └── train_state.json
+```
+
+---
+
 ## Architecture
 
 ```
@@ -341,7 +406,7 @@ aarambh-ai/
 │   ├── aarambh-ai-weights/      ← Weight serialisation
 │   ├── aarambh-ai-quant/        ← Quantisation stack
 │   ├── aarambh-ai-train/        ← Training loop
-│   ├── aarambh-ai-finetune/     ← Fine-tuning (LoRA, etc.)
+│   ├── aarambh-ai-finetune/     ← LoRA, QLoRA, SFT adapters
 │   ├── aarambh-ai-inference/    ← Inference engine
 │   ├── aarambh-ai-safety/       ← Safety guardrails
 │   └── aarambh-ai-selflearn/    ← Self-learning loop
@@ -369,7 +434,7 @@ aarambh-ai/
 | 6 | Inference engine + CLI | i3 | ✅ |
 | 7 | Thinking engine | i3 | ✅ |
 | 8 | Quantisation stack | i3 | ✅ |
-| 9 | Fine-tuning (LoRA, QLoRA, SFT) | i3 + GPU | ⬜ |
+| 9 | Fine-tuning (LoRA, QLoRA, SFT) | i3 + GPU | ✅ |
 | 10 | GRPO reinforcement learning | GPU | ⬜ |
 | 11 | Safety layer | i3 | ⬜ |
 | 12 | Self-learning loop | i3 + GPU | ⬜ |

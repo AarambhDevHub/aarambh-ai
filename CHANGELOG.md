@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.9.0] - 2026-06-29
+
+### Added
+
+- **`aarambh-ai-finetune` Phase 9 implementation**
+  - Added `LoraConfig`, `LoraLinear`, frozen F32 base support, packed INT4 QLoRA base support, adapter dropout, target-module matching, and LoRA merge math
+  - Added `LoraAarambhModel`, an adapter-aware decoder forward path that keeps the existing base model/inference code unchanged
+  - Added adapter persistence with `adapter_config.json`, `adapter.safetensors`, and adapter train-state output
+  - Added SFT JSONL loading for `{"instruction","response"}` and `{"instruction","thinking","response"}`
+  - Added chat templates, thinking SFT formatting, shifted labels, prompt loss masking, and padded SFT batches
+  - Added `SftTrainer` with adapter-only AdamW, cosine warmup/decay, gradient accumulation, clipping, logging, and adapter checkpoints
+  - Added adapter merge into normal `model.safetensors` for the existing inference engine
+
+- **CLI**
+  - Added `aarambh-ai finetune sft`
+  - Added `aarambh-ai finetune qlora`
+  - Added `aarambh-ai finetune merge`
+  - Added fine-tune overrides for LoRA rank/alpha/dropout, target modules, batch size, max steps, learning rate, accumulation, warmup, logging, and save cadence
+
+### Changed
+
+- **Documentation**
+  - Marked Phase 9 complete in README and ROADMAP
+  - Added LoRA/QLoRA/SFT command examples and adapter layout documentation
+  - Clarified that DoRA is not part of Phase 9
+
+### Verified
+
+- `cargo fmt`
+- `cargo check --workspace`
+- `cargo test --workspace`
+
 ## [0.8.0] - 2026-06-28
 
 ### Added
