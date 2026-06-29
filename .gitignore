@@ -5,4 +5,5 @@ Cargo.lock
 *.gguf
 *.safetensors
 checkpoints/
-data/
+data/*
+!data/grpo_tiny_math.jsonl

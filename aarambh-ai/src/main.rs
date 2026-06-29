@@ -17,7 +17,7 @@ enum Command {
     Infer(cmd::infer::InferArgs),
     Quantise(cmd::quantise::QuantiseArgs),
     Convert(cmd::convert::ConvertArgs),
-    Finetune(cmd::finetune::FinetuneArgs),
+    Finetune(Box<cmd::finetune::FinetuneArgs>),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -27,6 +27,6 @@ fn main() -> anyhow::Result<()> {
         Command::Infer(args) => cmd::infer::run(args),
         Command::Quantise(args) => cmd::quantise::run(args),
         Command::Convert(args) => cmd::convert::run(args),
-        Command::Finetune(args) => cmd::finetune::run(args),
+        Command::Finetune(args) => cmd::finetune::run(*args),
     }
 }

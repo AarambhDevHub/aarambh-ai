@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.10.0] - 2026-06-29
+
+### Added
+
+- **`aarambh-ai-finetune` Phase 10 implementation**
+  - Added GRPO dataset loading for `prompt`/`question` plus `ground_truth`/`answer` JSONL records
+  - Added graph-free group rollout sampling from the live LoRA policy with temperature, top-k, top-p, and thinking-token forcing
+  - Added differentiable replay of sampled completions through `LoraAarambhModel::forward_train()` for policy log-probs
+  - Added frozen-reference KL loss using full generated-token distributions
+  - Added `GrpoTrainer` with adapter-only AdamW, cosine warmup/decay, gradient accumulation, clipping, logging, and adapter checkpoints
+
+- **Deterministic verifiers**
+  - Added `MathVerifier` with GSM8K `#### answer` parsing, commas, negatives, decimals, and numeric tolerance
+  - Added `FormatVerifier` for `<think>...</think>` structure rewards
+  - Added `CompositeVerifier` and `math-format` verifier selection
+
+- **CLI**
+  - Added `aarambh-ai finetune grpo`
+  - Added GRPO flags for reference checkpoint, verifier, group size, max new tokens, sampling controls, thinking mode, KL coefficient, LoRA rank/alpha/dropout, steps, LR, accumulation, logging, and save cadence
+
+### Changed
+
+- **Documentation**
+  - Marked Phase 10 complete in README and ROADMAP
+  - Added GRPO command examples, tiny local GRPO math data, and adapter output notes
+  - Clarified that GRPO uses deterministic verifiers only; Self-Critique remains Phase 12 replay-buffer logic
+  - Documented that GRPO training log-probs are recomputed by differentiable replay instead of cached inference
+
+### Verified
+
+- `cargo check -p aarambh-ai-finetune -p aarambh-ai`
+- `cargo check --workspace`
+- `cargo test -p aarambh-ai-finetune`
+- `cargo test --workspace`
+
 ## [0.9.0] - 2026-06-29
 
 ### Added
