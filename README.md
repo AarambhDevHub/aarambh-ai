@@ -29,6 +29,7 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 | GRPO reinforcement learning | Phase 10 ✅ |
 | Safety guardrails: input/output, PII, prompt injection | Phase 11 ✅ |
 | Self-learning loop: online GRPO, replay buffer, critique | Phase 12 ✅ |
+| GPU scale-up: CUDA feature, BF16 train/infer, Kaggle configs/notebooks | Phase 13 ✅ |
 | Custom CUDA kernels: Flash Attention v2, fused RMSNorm, RoPE, SwiGLU | Phase 14 |
 | CPU SIMD kernels: AVX2/FMA RMSNorm, AVX512 override, parallel attention via rayon | Phase 4 ✅ |
 | CUDA kernel build prep and FFI stubs | Phase 4 ✅ |
@@ -105,8 +106,47 @@ Typical log lines:
 
 ```text
 step=1 loss=9.0304 ppl=8352.87 lr=0.000250 grad_norm=0.7182
-step=10 loss=9.0241 ppl=8300.43 lr=0.000800 grad_norm=0.7221
+step=10 loss=9.0241 ppl=8300.43 lr=0.000800 grad_norm=0.7221 tok/s=182.44
 eval step=500 val_loss=3.2110 val_ppl=24.80
+```
+
+---
+
+## Train On Kaggle GPU
+
+Phase 13 adds an opt-in CUDA/BF16 path for WikiText-103 scale-up. CUDA is not
+enabled by default, so normal local CPU builds still work without NVCC.
+
+```sh
+# Prepare WikiText-103 raw text.
+scripts/phase13_prepare_wikitext103.sh data
+
+# Fast CUDA/BF16 smoke test on Kaggle.
+cargo run --release -p aarambh-ai --features cuda -- train \
+  --config configs/wikitext103_cuda_smoke.toml
+
+# Small on T4.
+cargo run --release -p aarambh-ai --features cuda -- train \
+  --config configs/wikitext103_small.toml
+
+# Medium on P100.
+cargo run --release -p aarambh-ai --features cuda -- train \
+  --config configs/wikitext103_medium.toml
+
+# Large on A100.
+cargo run --release -p aarambh-ai --features cuda -- train \
+  --config configs/wikitext103_large.toml
+```
+
+GPU configs use `device = "cuda:0"` and `dtype = "bf16"`. Training logs include
+`tok/s` so Kaggle runs produce the Phase 13 throughput benchmark automatically.
+Use `notebooks/phase13_small_train.ipynb`, `phase13_medium_train.ipynb`, and
+`phase13_large_train.ipynb` for end-to-end Kaggle runs, inference smoke checks,
+and packaged checkpoint downloads.
+
+```sh
+# Package a trained checkpoint directory for download.
+scripts/phase13_pack_checkpoint.sh checkpoints/wikitext103_small phase13_small_checkpoint.zip
 ```
 
 ---
@@ -554,7 +594,7 @@ aarambh-ai/
 | 10 | GRPO reinforcement learning | GPU | ✅ |
 | 11 | Safety layer | i3 | ✅ |
 | 12 | Self-learning loop | i3 + GPU | ✅ |
-| 13 | GPU scale-up (Small → Large) | GPU | ⬜ |
+| 13 | GPU scale-up (Small → Large) | GPU | ✅ |
 | 14 | Flash Attention CUDA kernels | GPU | ⬜ |
 | 15 | Production release v1.0 | all | ⬜ |
 
@@ -567,7 +607,7 @@ See [ROADMAP.md](ROADMAP.md) for the full phased delivery plan with tests and mi
 ```sh
 cargo check --workspace
 cargo test --workspace
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 cargo doc --workspace --no-deps
 ```

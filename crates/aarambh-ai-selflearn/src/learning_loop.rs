@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use aarambh_ai_core::{AarambhError, ModelConfig, Result};
 use aarambh_ai_finetune::{SftExample, Verifier};
 use aarambh_ai_inference::{GenerationConfig, GenerationOutput, GenerationStep};
-use candle_core::Device as CandleDevice;
+use candle_core::{DType, Device as CandleDevice};
 
 use crate::config::SelfLearnConfig;
 use crate::critique::{CritiqueResult, critique_response};
@@ -19,6 +19,7 @@ pub struct SelfLearnBuildConfig {
     pub tokenizer_path: PathBuf,
     pub config: SelfLearnConfig,
     pub device: CandleDevice,
+    pub dtype: DType,
     pub seed: u64,
 }
 
@@ -64,6 +65,7 @@ impl SelfLearnLoop {
             config: build.config.grpo.clone(),
             mode: build.config.mode,
             device: build.device,
+            dtype: build.dtype,
             seed: build.seed,
         })?;
         Ok(Self {

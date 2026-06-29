@@ -3,6 +3,19 @@ name = "aarambh-ai-selflearn"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+cuda = [
+    "aarambh-ai-core/cuda",
+    "aarambh-ai-finetune/cuda",
+    "aarambh-ai-inference/cuda",
+    "aarambh-ai-model/cuda",
+    "aarambh-ai-train/cuda",
+    "aarambh-ai-weights/cuda",
+    "candle-core/cuda",
+    "candle-nn/cuda",
+]
+
 [dependencies]
 aarambh-ai-core      = { path = "../aarambh-ai-core" }
 aarambh-ai-finetune  = { path = "../aarambh-ai-finetune" }

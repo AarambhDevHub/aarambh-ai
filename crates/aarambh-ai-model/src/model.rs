@@ -76,9 +76,15 @@ impl AarambhModel {
             LmHead::untied(cfg.hidden_dim, cfg.vocab_size, vb.pp("lm_head"))?
         };
 
-        let rope_cache =
-            RopeCache::new(cfg.max_seq_len, cfg.head_dim(), cfg.rope_theta, vb.device())?;
-        let causal_mask = create_causal_mask(cfg.max_seq_len, vb.device())?;
+        let dtype = embedding.weight().dtype();
+        let rope_cache = RopeCache::new(
+            cfg.max_seq_len,
+            cfg.head_dim(),
+            cfg.rope_theta,
+            dtype,
+            vb.device(),
+        )?;
+        let causal_mask = create_causal_mask(cfg.max_seq_len, dtype, vb.device())?;
 
         Ok(Self {
             config: cfg.clone(),
@@ -357,9 +363,13 @@ impl Forward for AarambhModel {
     }
 }
 
-fn create_causal_mask(seq_len: usize, device: &Device) -> candle_core::Result<Tensor> {
+fn create_causal_mask(
+    seq_len: usize,
+    dtype: DType,
+    device: &Device,
+) -> candle_core::Result<Tensor> {
     let tril = Tensor::tril2(seq_len, DType::U32, device)?;
     let zeros = Tensor::zeros((seq_len, seq_len), DType::F32, device)?;
     let neg_inf = Tensor::full(f32::NEG_INFINITY, (seq_len, seq_len), device)?;
-    tril.where_cond(&zeros, &neg_inf)
+    tril.where_cond(&zeros, &neg_inf)?.to_dtype(dtype)
 }

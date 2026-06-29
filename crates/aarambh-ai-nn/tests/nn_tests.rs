@@ -25,7 +25,7 @@ fn rmsnorm_output_shape_unchanged() {
 #[test]
 fn rope_preserves_vector_magnitude() {
     let device = Device::Cpu;
-    let rope = RopeCache::new(512, 64, 10000.0, &device).unwrap();
+    let rope = RopeCache::new(512, 64, 10000.0, DType::F32, &device).unwrap();
     let q = Tensor::randn(0f32, 1f32, (1, 4, 8, 64), &device).unwrap();
     let (q_rot, _) = rope.apply(&q, &q, 0).unwrap();
     let norm_before: f32 = q
@@ -80,7 +80,14 @@ fn swiglu_ffn_shape_unchanged() {
 fn gqa_output_shape() {
     let device = Device::Cpu;
     let cfg = ModelConfig::tiny();
-    let rope = RopeCache::new(cfg.max_seq_len, cfg.head_dim(), cfg.rope_theta, &device).unwrap();
+    let rope = RopeCache::new(
+        cfg.max_seq_len,
+        cfg.head_dim(),
+        cfg.rope_theta,
+        DType::F32,
+        &device,
+    )
+    .unwrap();
     let mask = create_causal_mask(16, &device);
 
     let wq = candle_nn::Linear::new(
@@ -135,7 +142,14 @@ fn gqa_output_shape() {
 fn transformer_block_output_shape() {
     let device = Device::Cpu;
     let cfg = ModelConfig::tiny();
-    let rope = RopeCache::new(cfg.max_seq_len, cfg.head_dim(), cfg.rope_theta, &device).unwrap();
+    let rope = RopeCache::new(
+        cfg.max_seq_len,
+        cfg.head_dim(),
+        cfg.rope_theta,
+        DType::F32,
+        &device,
+    )
+    .unwrap();
     let mask = create_causal_mask(16, &device);
 
     let norm1 = RMSNorm::new(

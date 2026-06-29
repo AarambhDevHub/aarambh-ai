@@ -1,4 +1,9 @@
-#[derive(Debug, Clone, Copy, PartialEq)]
+use std::fmt;
+use std::str::FromStr;
+
+use crate::error::AarambhError;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DType {
     F32,
     F16,
@@ -22,7 +27,33 @@ impl DType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+impl FromStr for DType {
+    type Err = AarambhError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "f32" | "float32" | "full" => Ok(Self::F32),
+            "f16" | "float16" | "half" => Ok(Self::F16),
+            "bf16" | "bfloat16" | "mixed" => Ok(Self::BF16),
+            other => Err(AarambhError::Config(format!(
+                "unsupported dtype '{other}', expected f32|f16|bf16|mixed"
+            ))),
+        }
+    }
+}
+
+impl fmt::Display for DType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::F32 => "f32",
+            Self::F16 => "f16",
+            Self::BF16 => "bf16",
+        };
+        f.write_str(value)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Precision {
     Full,
     Half,

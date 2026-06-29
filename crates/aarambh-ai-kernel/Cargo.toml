@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 build = "build.rs"
 
+[features]
+default = []
+cuda = ["aarambh-ai-core/cuda", "candle-core/cuda", "candle-nn/cuda"]
+
 [dependencies]
 aarambh-ai-core = { path = "../aarambh-ai-core" }
 candle-core     = { workspace = true }

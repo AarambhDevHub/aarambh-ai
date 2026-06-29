@@ -123,7 +123,9 @@ fn run_reset(args: ResetArgs) -> anyhow::Result<()> {
 
 fn build_loop(args: SelflearnRunArgs) -> anyhow::Result<SelfLearnLoop> {
     let run_config = TrainingRunConfig::from_toml(&args.config)?;
-    let device = run_config.device()?.to_candle()?;
+    let run_device = run_config.device()?;
+    let dtype = run_config.dtype_for_device(&run_device)?.to_candle();
+    let device = run_device.to_candle()?;
     let mode = args
         .mode
         .parse::<SelfLearnMode>()
@@ -147,6 +149,7 @@ fn build_loop(args: SelflearnRunArgs) -> anyhow::Result<SelfLearnLoop> {
         tokenizer_path,
         config,
         device,
+        dtype,
         seed: run_config.train.seed,
     })
     .map_err(anyhow::Error::from)

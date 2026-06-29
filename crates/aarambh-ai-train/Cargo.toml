@@ -3,6 +3,16 @@ name = "aarambh-ai-train"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+cuda = [
+    "aarambh-ai-core/cuda",
+    "aarambh-ai-data/cuda",
+    "aarambh-ai-model/cuda",
+    "candle-core/cuda",
+    "candle-nn/cuda",
+]
+
 [dependencies]
 aarambh-ai-core      = { path = "../aarambh-ai-core" }
 aarambh-ai-data      = { path = "../aarambh-ai-data" }

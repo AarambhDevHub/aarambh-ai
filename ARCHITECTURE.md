@@ -1949,10 +1949,13 @@ The predict-view will show coherent English candidates after ~2K steps.
 |---|---|---|---|---|
 | Small  | T4 16 GB   | BF16 | 16  | ~800 tok/s  |
 | Medium | P100 16 GB | BF16 | 8   | ~250 tok/s  |
-| Large  | A100 40 GB | BF16 | 16  | ~380 tok/s  |
+| Large  | A100 40 GB | BF16 | 2   | hardware-dependent |
 
-Switch `device = "cuda"`, `dtype = "bf16"` in the config. Zero code changes.
-Download checkpoints from Kaggle output → run inference locally.
+GPU scale-up uses opt-in Candle CUDA features so local CPU builds remain the
+default. Switch `device = "cuda:0"` and `dtype = "bf16"` in the config, then run
+with `cargo run --release -p aarambh-ai --features cuda -- train --config ...`.
+Training logs include `tok/s` for the Phase 13 throughput benchmark. Download
+checkpoints from Kaggle output, then run inference with the same config dtype.
 
 ### Self-Learning Overhead on i3
 

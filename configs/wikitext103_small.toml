@@ -1,0 +1,39 @@
+dataset_path = "data/wikitext-103-raw/wiki.train.raw"
+tokenizer_save_path = "checkpoints/wikitext103_small/tokenizer.json"
+vocab_size = 32000
+validation_split = 0.01
+shuffle = true
+resume = true
+device = "cuda:0"
+dtype = "bf16"
+
+[model]
+vocab_size = 32000
+hidden_dim = 768
+ffn_dim = 2688
+n_layers = 12
+n_heads = 12
+n_kv_heads = 4
+max_seq_len = 1024
+rope_theta = 10000.0
+norm_eps = 0.00001
+tie_embeddings = true
+
+[train]
+lr = 0.0003
+batch_size = 16
+grad_accum_steps = 2
+max_epochs = 1
+max_steps = 100000
+warmup_steps = 1000
+min_lr_ratio = 0.1
+weight_decay = 0.1
+beta1 = 0.9
+beta2 = 0.95
+epsilon = 0.00000001
+clip_grad_norm = 1.0
+save_every_n_steps = 5000
+log_every_n_steps = 10
+eval_steps = 1000
+seed = 42
+checkpoint_dir = "checkpoints/wikitext103_small"

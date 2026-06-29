@@ -17,9 +17,9 @@ use aarambh_ai_tokenizer::{
 };
 use aarambh_ai_train::optim::clip_gradients;
 use aarambh_ai_train::{AdamW, AdamWConfig, GradMap, cross_entropy_loss};
-use aarambh_ai_weights::load_any_model;
+use aarambh_ai_weights::load_any_model_with_dtype;
 use candle_core::backprop::GradStore;
-use candle_core::{Device as CandleDevice, Tensor};
+use candle_core::{DType, Device as CandleDevice, Tensor};
 use candle_nn::VarMap;
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +36,7 @@ pub struct OnlineGrpoBuildConfig {
     pub config: OnlineGrpoConfig,
     pub mode: SelfLearnMode,
     pub device: CandleDevice,
+    pub dtype: DType,
     pub seed: u64,
 }
 
@@ -71,13 +72,19 @@ impl OnlineGrpo {
         tokenizer.validate_special_tokens()?;
         build.model_config.vocab_size = tokenizer.vocab_size();
 
-        let base = load_any_model(&build.base_model_path, &build.model_config, &build.device)?;
+        let base = load_any_model_with_dtype(
+            &build.base_model_path,
+            &build.model_config,
+            &build.device,
+            build.dtype,
+        )?;
         let base_tensors = base.named_tensors();
         drop(base);
-        let reference = load_any_model(
+        let reference = load_any_model_with_dtype(
             &build.reference_model_path,
             &build.model_config,
             &build.device,
+            build.dtype,
         )?;
 
         let lora_config = LoraConfig {

@@ -10,7 +10,7 @@ use candle_core::{DType, Device};
 use candle_nn::VarBuilder;
 
 pub use convert::{HfArch, convert_hf, convert_hf_tensors, convert_hf_with_arch};
-pub use gguf::{load_gguf, load_gguf_tensors, save_gguf};
+pub use gguf::{load_gguf, load_gguf_tensors, load_gguf_with_dtype, save_gguf};
 
 pub fn save_model(model: &AarambhModel, path: impl AsRef<Path>) -> Result<()> {
     candle_core::safetensors::save(&model.named_tensors(), path.as_ref())?;
@@ -22,8 +22,17 @@ pub fn load_model(
     cfg: &ModelConfig,
     device: &Device,
 ) -> Result<AarambhModel> {
+    load_model_with_dtype(path, cfg, device, DType::F32)
+}
+
+pub fn load_model_with_dtype(
+    path: impl AsRef<Path>,
+    cfg: &ModelConfig,
+    device: &Device,
+    dtype: DType,
+) -> Result<AarambhModel> {
     let path = path.as_ref();
-    let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[path], DType::F32, device)? };
+    let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[path], dtype, device)? };
     AarambhModel::new(cfg, vb)
 }
 
@@ -32,10 +41,19 @@ pub fn load_any_model(
     cfg: &ModelConfig,
     device: &Device,
 ) -> Result<AarambhModel> {
+    load_any_model_with_dtype(path, cfg, device, DType::F32)
+}
+
+pub fn load_any_model_with_dtype(
+    path: impl AsRef<Path>,
+    cfg: &ModelConfig,
+    device: &Device,
+    dtype: DType,
+) -> Result<AarambhModel> {
     let path = path.as_ref();
     if path.extension().and_then(|ext| ext.to_str()) == Some("gguf") {
-        load_gguf(path, device)
+        load_gguf_with_dtype(path, device, dtype)
     } else {
-        load_model(path, cfg, device)
+        load_model_with_dtype(path, cfg, device, dtype)
     }
 }

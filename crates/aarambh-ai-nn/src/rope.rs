@@ -1,4 +1,4 @@
-use candle_core::{Device, Result, Tensor};
+use candle_core::{DType, Device, Result, Tensor};
 
 #[derive(Debug, Clone)]
 pub struct RopeCache {
@@ -8,7 +8,13 @@ pub struct RopeCache {
 }
 
 impl RopeCache {
-    pub fn new(max_seq_len: usize, head_dim: usize, theta: f64, device: &Device) -> Result<Self> {
+    pub fn new(
+        max_seq_len: usize,
+        head_dim: usize,
+        theta: f64,
+        dtype: DType,
+        device: &Device,
+    ) -> Result<Self> {
         let inv_freq: Vec<f32> = (0..head_dim / 2)
             .map(|i| (1.0 / theta.powf(2.0 * i as f64 / head_dim as f64)) as f32)
             .collect();
@@ -25,8 +31,8 @@ impl RopeCache {
         }
 
         let shape = (max_seq_len, head_dim / 2);
-        let cos = Tensor::from_vec(cos_vals, shape, device)?;
-        let sin = Tensor::from_vec(sin_vals, shape, device)?;
+        let cos = Tensor::from_vec(cos_vals, shape, device)?.to_dtype(dtype)?;
+        let sin = Tensor::from_vec(sin_vals, shape, device)?.to_dtype(dtype)?;
 
         Ok(Self { cos, sin, head_dim })
     }
@@ -43,6 +49,8 @@ impl RopeCache {
 
         let cos = self.cos.narrow(0, seqlen_offset, seq_len)?;
         let sin = self.sin.narrow(0, seqlen_offset, seq_len)?;
+        let cos = cos.to_dtype(x.dtype())?;
+        let sin = sin.to_dtype(x.dtype())?;
 
         let cos = cos.unsqueeze(0)?.unsqueeze(2)?;
         let sin = sin.unsqueeze(0)?.unsqueeze(2)?;
@@ -65,7 +73,7 @@ mod tests {
     #[test]
     fn rope_preserves_vector_magnitude() {
         let device = Device::Cpu;
-        let rope = RopeCache::new(512, 64, 10000.0, &device).unwrap();
+        let rope = RopeCache::new(512, 64, 10000.0, DType::F32, &device).unwrap();
         let q = Tensor::randn(0f32, 1f32, (1, 4, 8, 64), &device).unwrap();
         let (q_rot, _) = rope.apply(&q, &q, 0).unwrap();
         let norm_before: f32 = q
