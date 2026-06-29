@@ -78,19 +78,14 @@ impl GrpoConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GrpoThinkingMode {
     None,
+    #[default]
     Low,
     Medium,
     High,
-}
-
-impl Default for GrpoThinkingMode {
-    fn default() -> Self {
-        Self::Low
-    }
 }
 
 impl GrpoThinkingMode {

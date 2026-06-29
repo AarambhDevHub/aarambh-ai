@@ -145,10 +145,8 @@ pub fn extract_final_number(text: &str) -> Option<f64> {
             current.push(ch);
             continue;
         }
-        if has_digit {
-            if let Some(value) = parse_number(&current) {
-                last = Some(value);
-            }
+        if has_digit && let Some(value) = parse_number(&current) {
+            last = Some(value);
         }
         current.clear();
         has_digit = false;
