@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.13.0] - 2026-06-29
+
+### Added
+
+- **Phase 13 GPU scale-up implementation**
+  - Added opt-in `cuda` feature forwarding across the workspace without changing default CPU builds
+  - Added config-driven `dtype = "f32"|"f16"|"bf16"|"mixed"` parsing for train/infer paths
+  - Added dtype-aware SafeTensors/GGUF model loading helpers for BF16 GPU inference and self-learning
+  - Added WikiText-103 Small, Medium, Large, and CUDA smoke configs
+  - Added Kaggle notebooks for Small/T4, Medium/P100, and Large/A100 training workflows
+  - Added WikiText-103 preparation and checkpoint packaging scripts
+
+### Changed
+
+- **Training**
+  - Trainer now builds model weights using the configured dtype instead of hardcoded F32
+  - Cross-entropy casts logits to F32 for stable lower-precision training
+  - AdamW keeps moment buffers and update math in F32 while writing params back to their model dtype
+  - Training logs now include `tok/s` throughput for Phase 13 benchmarking
+
+- **Model internals**
+  - RoPE caches and causal masks are dtype-aware for BF16 model execution
+  - Inference and self-learning model loaders now honor the run config dtype
+
+- **Documentation**
+  - Marked Phase 13 complete in README and ROADMAP
+  - Updated architecture notes with CUDA feature commands and BF16 config behavior
+
+### Verified
+
+- `cargo fmt --all --check`
+- `cargo check --workspace`
+- `cargo test --workspace`
+- `cargo test -p aarambh-ai-train`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- Phase 13 notebook JSON validation
+- Phase 13 helper script syntax and dummy runtime checks
+- CUDA training is prepared through notebooks/configs and must be executed on Kaggle or another CUDA host with `--features cuda`
+
 ## [0.12.0] - 2026-06-29
 
 ### Added

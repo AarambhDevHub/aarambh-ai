@@ -3,6 +3,10 @@ name = "aarambh-ai-core"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+cuda = ["candle-core/cuda"]
+
 [dependencies]
 candle-core = { workspace = true }
 thiserror   = { workspace = true }

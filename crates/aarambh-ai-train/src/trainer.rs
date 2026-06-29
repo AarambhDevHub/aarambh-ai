@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use aarambh_ai_core::{AarambhError, ModelConfig, Result, TrainConfig};
 use aarambh_ai_data::{Batch, DataLoader};
 use aarambh_ai_model::AarambhModel;
@@ -33,6 +35,8 @@ pub struct Trainer {
     state: TrainState,
     pending_grads: GradMap,
     last_loss: Option<f64>,
+    tokens_since_log: usize,
+    last_log_at: Instant,
 }
 
 impl Trainer {
@@ -42,6 +46,7 @@ impl Trainer {
         train_loader: DataLoader,
         val_loader: Option<DataLoader>,
         device: candle_core::Device,
+        dtype: DType,
     ) -> Result<Self> {
         if train_config.grad_accum_steps == 0 {
             return Err(AarambhError::Config(
@@ -60,7 +65,7 @@ impl Trainer {
         }
 
         let varmap = VarMap::new();
-        let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
+        let vb = VarBuilder::from_varmap(&varmap, dtype, &device);
         let model = AarambhModel::new(&model_config, vb)?;
         let optimizer = AdamW::from_varmap(&varmap, AdamWConfig::from(&train_config))?;
         let schedule = CosineScheduleWithWarmup::from_train_config(&train_config);
@@ -79,6 +84,8 @@ impl Trainer {
             state: TrainState::default(),
             pending_grads: GradMap::new(),
             last_loss: None,
+            tokens_since_log: 0,
+            last_log_at: Instant::now(),
         })
     }
 
@@ -112,6 +119,7 @@ impl Trainer {
     }
 
     pub fn train_step(&mut self, batch: Batch) -> Result<TrainingMetrics> {
+        let token_count = batch.input_ids.elem_count();
         let logits = self.model.forward_train(&batch.input_ids)?;
         let loss = cross_entropy_loss(&logits, &batch.labels, &batch.attention_mask)?;
         let loss_value = loss.to_scalar::<f32>()? as f64;
@@ -127,6 +135,7 @@ impl Trainer {
         self.state.micro_step += 1;
         self.state.train_loss = Some(loss_value);
         self.last_loss = Some(loss_value);
+        self.tokens_since_log += token_count;
 
         let should_step = self
             .state
@@ -265,8 +274,13 @@ impl Trainer {
         {
             let grad_norm = metrics.grad_norm.unwrap_or(0.0);
             println!(
-                "step={} loss={:.4} ppl={:.2} lr={:.6} grad_norm={:.4}",
-                metrics.step, metrics.loss, metrics.perplexity, metrics.lr, grad_norm
+                "step={} loss={:.4} ppl={:.2} lr={:.6} grad_norm={:.4} tok/s={:.2}",
+                metrics.step,
+                metrics.loss,
+                metrics.perplexity,
+                metrics.lr,
+                grad_norm,
+                self.tokens_per_second_since_last_log()
             );
         }
 
@@ -297,6 +311,18 @@ impl Trainer {
                 .save(&self.varmap, &self.optimizer, &self.state)?;
         }
         Ok(())
+    }
+
+    fn tokens_per_second_since_last_log(&mut self) -> f64 {
+        let elapsed = self.last_log_at.elapsed().as_secs_f64();
+        let tokens = self.tokens_since_log;
+        self.tokens_since_log = 0;
+        self.last_log_at = Instant::now();
+        if elapsed > 0.0 {
+            tokens as f64 / elapsed
+        } else {
+            0.0
+        }
     }
 }
 
@@ -388,6 +414,7 @@ mod tests {
             train_loader,
             None,
             candle_device,
+            DType::F32,
         )
         .unwrap();
         let mut eval_loader = DataLoader::new(&dataset, &tokenizer, 1, 4, false, device);

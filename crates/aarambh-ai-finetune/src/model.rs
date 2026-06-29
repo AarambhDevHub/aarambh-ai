@@ -60,13 +60,15 @@ impl LoraAarambhModel {
                 device,
             )?)
         };
+        let dtype = embedding_weight.dtype();
         let rope_cache = RopeCache::new(
             config.max_seq_len,
             config.head_dim(),
             config.rope_theta,
+            dtype,
             device,
         )?;
-        let causal_mask = create_causal_mask(config.max_seq_len, device)?;
+        let causal_mask = create_causal_mask(config.max_seq_len, dtype, device)?;
         let adapter_param_count = adapter_param_count(&blocks, lm_head.as_ref());
         let base_param_count = tensors.values().map(tensor_elem_count).sum();
 
@@ -466,11 +468,15 @@ fn required_ref<'a>(tensors: &'a HashMap<String, Tensor>, name: &str) -> Result<
         .ok_or_else(|| AarambhError::Checkpoint(format!("missing tensor {name}")))
 }
 
-fn create_causal_mask(seq_len: usize, device: &Device) -> candle_core::Result<Tensor> {
+fn create_causal_mask(
+    seq_len: usize,
+    dtype: DType,
+    device: &Device,
+) -> candle_core::Result<Tensor> {
     let tril = Tensor::tril2(seq_len, DType::U32, device)?;
     let zeros = Tensor::zeros((seq_len, seq_len), DType::F32, device)?;
     let neg_inf = Tensor::full(f32::NEG_INFINITY, (seq_len, seq_len), device)?;
-    tril.where_cond(&zeros, &neg_inf)
+    tril.where_cond(&zeros, &neg_inf)?.to_dtype(dtype)
 }
 
 fn repeat_heads(x: &Tensor, n_repeats: usize) -> Result<Tensor> {

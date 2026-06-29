@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use aarambh_ai_core::{AarambhError, Result, TrainConfig};
-use candle_core::{Tensor, Var};
+use candle_core::{DType, Tensor, Var};
 use candle_nn::VarMap;
 use serde::{Deserialize, Serialize};
 
@@ -72,8 +72,8 @@ impl AdamW {
         let mut m = HashMap::with_capacity(params.len());
         let mut v = HashMap::with_capacity(params.len());
         for param in &params {
-            m.insert(param.name.clone(), param.tensor().zeros_like()?);
-            v.insert(param.name.clone(), param.tensor().zeros_like()?);
+            m.insert(param.name.clone(), f32_zeros_like(param.tensor())?);
+            v.insert(param.name.clone(), f32_zeros_like(param.tensor())?);
         }
         Ok(Self {
             config,
@@ -126,17 +126,18 @@ impl AdamW {
             let Some(grad) = grads.get(&param.name) else {
                 continue;
             };
-            let grad = grad.to_dtype(param.tensor().dtype())?;
+            let grad = grad.to_dtype(DType::F32)?;
+            let param_f32 = param.tensor().to_dtype(DType::F32)?;
             let m_prev = self
                 .m
                 .get(&param.name)
                 .ok_or_else(|| AarambhError::Config(format!("missing AdamW m for {}", param.name)))?
-                .clone();
+                .to_dtype(DType::F32)?;
             let v_prev = self
                 .v
                 .get(&param.name)
                 .ok_or_else(|| AarambhError::Config(format!("missing AdamW v for {}", param.name)))?
-                .clone();
+                .to_dtype(DType::F32)?;
 
             let m_new = (m_prev.affine(self.config.beta1, 0.0)?
                 + grad.affine(1.0 - self.config.beta1, 0.0)?)?;
@@ -149,12 +150,13 @@ impl AdamW {
             let denom = v_hat.sqrt()?.affine(1.0, self.config.epsilon)?;
             let adam_update = m_hat.broadcast_div(&denom)?;
             let update = if param.decoupled_weight_decay && self.config.weight_decay > 0.0 {
-                (adam_update + param.tensor().affine(self.config.weight_decay, 0.0)?)?
+                (adam_update + param_f32.affine(self.config.weight_decay, 0.0)?)?
             } else {
                 adam_update
             };
             let update = update.affine(lr, 0.0)?;
-            let new_value = (param.tensor() - update)?;
+            let new_value = (param_f32 - update)?;
+            let new_value = new_value.to_dtype(param.tensor().dtype())?;
             param.var.set(&new_value.detach())?;
 
             self.m.insert(param.name.clone(), m_new.detach());
@@ -195,16 +197,21 @@ impl AdamW {
             let v = tensors.get(&v_name).ok_or_else(|| {
                 AarambhError::Checkpoint(format!("missing optimizer state tensor {v_name}"))
             })?;
-            self.m.insert(param.name.clone(), m.clone());
-            self.v.insert(param.name.clone(), v.clone());
+            self.m.insert(param.name.clone(), m.to_dtype(DType::F32)?);
+            self.v.insert(param.name.clone(), v.to_dtype(DType::F32)?);
         }
         Ok(())
     }
 }
 
+fn f32_zeros_like(tensor: &Tensor) -> candle_core::Result<Tensor> {
+    Tensor::zeros(tensor.shape(), DType::F32, tensor.device())
+}
+
 pub fn global_grad_norm(grads: &GradMap) -> Result<f64> {
     let mut sum_sq = 0f64;
     for grad in grads.values() {
+        let grad = grad.to_dtype(DType::F32)?;
         sum_sq += grad.sqr()?.sum_all()?.to_scalar::<f32>()? as f64;
     }
     Ok(sum_sq.sqrt())
@@ -290,5 +297,25 @@ mod tests {
         let after = global_grad_norm(&grads).unwrap();
         assert!((before - 5.0).abs() < 1e-5);
         assert!(after <= 1.00001, "after norm was {after}");
+    }
+
+    #[test]
+    fn optimizer_state_uses_f32_for_lower_precision_params() {
+        let device = Device::Cpu;
+        let Ok(var) = Var::ones((2, 2), DType::BF16, &device) else {
+            return;
+        };
+        let optimizer = AdamW::new(
+            vec![TrainableParameter::new("w.weight".into(), var)],
+            AdamWConfig {
+                beta1: 0.9,
+                beta2: 0.95,
+                epsilon: 1e-8,
+                weight_decay: 0.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(optimizer.m["w.weight"].dtype(), DType::F32);
+        assert_eq!(optimizer.v["w.weight"].dtype(), DType::F32);
     }
 }

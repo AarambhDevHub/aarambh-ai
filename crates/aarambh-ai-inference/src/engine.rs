@@ -3,7 +3,7 @@ use std::path::Path;
 use aarambh_ai_core::{AarambhError, Configurable, Result, TokenizerLike};
 use aarambh_ai_model::AarambhModel;
 use aarambh_ai_tokenizer::{BpeTokenizer, THINK_END_ID, THINK_START_ID};
-use candle_core::Tensor;
+use candle_core::{DType, Tensor};
 
 use crate::kvcache::KvCache;
 use crate::sampler::{Sampler, TokenCandidate};
@@ -91,11 +91,26 @@ impl InferenceEngine {
         tokenizer_path: impl AsRef<Path>,
         device: candle_core::Device,
     ) -> Result<Self> {
+        Self::from_paths_with_dtype(model_path, model_config, tokenizer_path, device, DType::F32)
+    }
+
+    pub fn from_paths_with_dtype(
+        model_path: impl AsRef<Path>,
+        model_config: &aarambh_ai_core::ModelConfig,
+        tokenizer_path: impl AsRef<Path>,
+        device: candle_core::Device,
+        dtype: DType,
+    ) -> Result<Self> {
         let tokenizer = BpeTokenizer::from_pretrained(tokenizer_path)?;
         tokenizer.validate_special_tokens()?;
         let mut model_config = model_config.clone();
         model_config.vocab_size = tokenizer.vocab_size();
-        let model = aarambh_ai_weights::load_any_model(model_path, &model_config, &device)?;
+        let model = aarambh_ai_weights::load_any_model_with_dtype(
+            model_path,
+            &model_config,
+            &device,
+            dtype,
+        )?;
         Self::new(model, tokenizer, device)
     }
 

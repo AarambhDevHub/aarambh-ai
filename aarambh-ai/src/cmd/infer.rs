@@ -75,7 +75,9 @@ struct CheckpointPointer {
 
 pub fn run(args: InferArgs) -> anyhow::Result<()> {
     let run_config = TrainingRunConfig::from_toml(&args.config)?;
-    let device = run_config.device()?.to_candle()?;
+    let run_device = run_config.device()?;
+    let dtype = run_config.dtype_for_device(&run_device)?.to_candle();
+    let device = run_device.to_candle()?;
     let tokenizer_path = tokenizer_path(&args, &run_config);
     let model_path = match args.model.clone() {
         Some(path) => path,
@@ -110,6 +112,7 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
             model_path,
             tokenizer_path,
             device,
+            dtype,
             config,
             prompt,
             safety_mode,
@@ -118,8 +121,13 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
         );
     }
 
-    let mut engine =
-        InferenceEngine::from_paths(model_path, &run_config.model, tokenizer_path, device)?;
+    let mut engine = InferenceEngine::from_paths_with_dtype(
+        model_path,
+        &run_config.model,
+        tokenizer_path,
+        device,
+        dtype,
+    )?;
     let tokenizer_for_view = engine.tokenizer().clone();
     if let Some(policy) = SafetyPolicy::for_mode(safety_mode)
         .map(|policy| policy.with_audit_path(&args.safety_audit_log))
@@ -246,6 +254,7 @@ fn run_self_learn_infer(
     model_path: PathBuf,
     tokenizer_path: PathBuf,
     device: candle_core::Device,
+    dtype: candle_core::DType,
     config: GenerationConfig,
     prompt: String,
     safety_mode: SafetyMode,
@@ -283,6 +292,7 @@ fn run_self_learn_infer(
         tokenizer_path,
         config: self_config,
         device,
+        dtype,
         seed: run_config.train.seed,
     })?;
     let mut adapter = SelfLearnSafetyAdapter {

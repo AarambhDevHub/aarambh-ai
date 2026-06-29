@@ -3,11 +3,14 @@ name = "aarambh-ai-data"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+cuda = ["aarambh-ai-core/cuda", "candle-core/cuda"]
+
 [dependencies]
 aarambh-ai-core = { path = "../aarambh-ai-core" }
 candle-core      = { workspace = true }
 rand             = "0.8"
 serde_json       = { workspace = true }
 serde            = { workspace = true }
-
 

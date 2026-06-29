@@ -3,6 +3,15 @@ name = "aarambh-ai-nn"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+cuda = [
+    "aarambh-ai-core/cuda",
+    "aarambh-ai-kernel/cuda",
+    "candle-core/cuda",
+    "candle-nn/cuda",
+]
+
 [dependencies]
 aarambh-ai-core = { path = "../aarambh-ai-core" }
 aarambh-ai-kernel = { path = "../aarambh-ai-kernel" }

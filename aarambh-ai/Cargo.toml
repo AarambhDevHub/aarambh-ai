@@ -3,6 +3,21 @@ name = "aarambh-ai"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+cuda = [
+    "aarambh-ai-core/cuda",
+    "aarambh-ai-data/cuda",
+    "aarambh-ai-finetune/cuda",
+    "aarambh-ai-inference/cuda",
+    "aarambh-ai-quant/cuda",
+    "aarambh-ai-safety/cuda",
+    "aarambh-ai-selflearn/cuda",
+    "aarambh-ai-train/cuda",
+    "aarambh-ai-weights/cuda",
+    "candle-core/cuda",
+]
+
 [dependencies]
 aarambh-ai-core      = { path = "../crates/aarambh-ai-core" }
 aarambh-ai-data      = { path = "../crates/aarambh-ai-data" }

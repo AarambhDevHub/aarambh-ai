@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use aarambh_ai_core::{AarambhError, Device, ModelConfig, Result, TokenizerLike, TrainConfig};
+use aarambh_ai_core::{
+    AarambhError, DType as AarambhDType, Device, ModelConfig, Result, TokenizerLike, TrainConfig,
+};
 use aarambh_ai_data::DataLoader;
 use aarambh_ai_data::dataset::PlaintextDataset;
 use aarambh_ai_tokenizer::BpeTokenizer;
@@ -20,6 +22,7 @@ pub struct TrainingRunConfig {
     pub shuffle: bool,
     pub resume: bool,
     pub device: String,
+    pub dtype: String,
     pub model: ModelConfig,
     pub train: TrainConfig,
 }
@@ -35,6 +38,7 @@ impl Default for TrainingRunConfig {
             shuffle: true,
             resume: false,
             device: "cpu".to_string(),
+            dtype: "f32".to_string(),
             model: ModelConfig::tiny(),
             train: TrainConfig::default(),
         }
@@ -72,6 +76,20 @@ impl TrainingRunConfig {
         }
     }
 
+    pub fn dtype(&self) -> Result<AarambhDType> {
+        self.dtype.parse()
+    }
+
+    pub fn dtype_for_device(&self, device: &Device) -> Result<AarambhDType> {
+        let dtype = self.dtype()?;
+        if device.is_cpu() && dtype != AarambhDType::F32 {
+            return Err(AarambhError::Config(format!(
+                "dtype {dtype} requires a GPU device; use dtype = \"f32\" for CPU runs"
+            )));
+        }
+        Ok(dtype)
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.dataset_path.as_os_str().is_empty() {
             return Err(AarambhError::Config("dataset_path is required".into()));
@@ -84,6 +102,8 @@ impl TrainingRunConfig {
         if self.vocab_size == 0 {
             return Err(AarambhError::Config("vocab_size must be non-zero".into()));
         }
+        let device = self.device()?;
+        self.dtype_for_device(&device)?;
         Ok(())
     }
 }
@@ -93,6 +113,7 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
     config.validate()?;
 
     let device = config.device()?;
+    let dtype = config.dtype_for_device(&device)?.to_candle();
     let candle_device = device.to_candle()?;
     let tokenizer = prepare_tokenizer(&config)?;
     let mut model_config = config.model.clone();
@@ -124,6 +145,7 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
         train_loader,
         val_loader,
         candle_device,
+        dtype,
     )?;
     if config.resume && trainer.load_latest_checkpoint()? {
         println!("resumed checkpoint at step={}", trainer.state().step);
@@ -203,5 +225,25 @@ mod tests {
     fn parses_cpu_device() {
         let config = TrainingRunConfig::default();
         assert_eq!(config.device().unwrap(), Device::Cpu);
+    }
+
+    #[test]
+    fn parses_mixed_dtype_alias() {
+        let config = TrainingRunConfig {
+            dtype: "mixed".into(),
+            ..TrainingRunConfig::default()
+        };
+        assert_eq!(config.dtype().unwrap(), AarambhDType::BF16);
+    }
+
+    #[test]
+    fn cpu_rejects_non_f32_dtype() {
+        let config = TrainingRunConfig {
+            dataset_path: "data.txt".into(),
+            dtype: "bf16".into(),
+            ..TrainingRunConfig::default()
+        };
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("requires a GPU device"), "{err}");
     }
 }

@@ -27,7 +27,7 @@ pub fn cross_entropy_loss(
     }
 
     let tokens = batch * seq_len;
-    let flat_logits = logits.reshape((tokens, vocab))?;
+    let flat_logits = logits.reshape((tokens, vocab))?.to_dtype(DType::F32)?;
     let flat_labels = labels.reshape((tokens,))?;
     let flat_mask = padding_mask.reshape((tokens,))?.to_dtype(DType::F32)?;
     let denom = flat_mask.sum_all()?;
@@ -85,5 +85,20 @@ mod tests {
 
         assert!(full > 5.0, "full loss was {full}");
         assert!(partial < 1e-3, "partial loss was {partial}");
+    }
+
+    #[test]
+    fn cross_entropy_returns_f32_for_lower_precision_logits() {
+        let device = Device::Cpu;
+        let Ok(logits) = Tensor::from_vec(vec![2f32, -2., -2., 2.], (1, 2, 2), &device)
+            .and_then(|tensor| tensor.to_dtype(DType::BF16))
+        else {
+            return;
+        };
+        let labels = Tensor::from_vec(vec![0u32, 1], (1, 2), &device).unwrap();
+        let mask = Tensor::from_vec(vec![1u32, 1], (1, 2), &device).unwrap();
+
+        let loss = cross_entropy_loss(&logits, &labels, &mask).unwrap();
+        assert_eq!(loss.dtype(), DType::F32);
     }
 }

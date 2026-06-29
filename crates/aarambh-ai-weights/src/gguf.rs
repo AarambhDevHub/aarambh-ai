@@ -71,8 +71,16 @@ pub fn save_gguf(model: &AarambhModel, format: GgufFormat, path: impl AsRef<Path
 }
 
 pub fn load_gguf(path: impl AsRef<Path>, device: &Device) -> Result<AarambhModel> {
+    load_gguf_with_dtype(path, device, DType::F32)
+}
+
+pub fn load_gguf_with_dtype(
+    path: impl AsRef<Path>,
+    device: &Device,
+    dtype: DType,
+) -> Result<AarambhModel> {
     let (config, tensors) = load_gguf_tensors(path, device)?;
-    let vb = VarBuilder::from_tensors(tensors, DType::F32, device);
+    let vb = VarBuilder::from_tensors(tensors, dtype, device);
     AarambhModel::new(&config, vb)
 }
 
