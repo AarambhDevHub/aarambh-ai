@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.12.0] - 2026-06-29
+
+### Added
+
+- **`aarambh-ai-selflearn` Phase 12 implementation**
+  - Added CPU/GPU/disabled self-learning presets with online GRPO, replay, critique, metrics, and persistent state configuration
+  - Added replay buffer JSONL persistence, score filtering, high-quality retention, score-squared sampling, topic diversity, and topic inference
+  - Added stateless replay-only self-critique with robust JSON parsing, score clamping, malformed-output fallback, bounded rewrite generation, and rewrite support
+  - Added LoRA-backed self-learning generation, deterministic-verifier online GRPO updates, CPU deferred pending gradients, GPU inline stepping, optimizer state, adapter state, pending-gradient persistence, and pending-gradient contribution accounting
+  - Added replay SFT updates that train the live LoRA adapter from sampled replay entries with response-only loss masking
+  - Added learning metrics with per-topic trend summaries
+
+### Changed
+
+- **CLI**
+  - Added `--self-learn disabled|cpu|gpu`, `--replay-path`, `--self-learn-state-dir`, `--self-learn-verifier`, and `--self-learn-ground-truth` to `infer`
+  - Added `aarambh-ai selflearn flush-gradients`, `replay`, `stats`, and `reset --yes`
+  - Composed self-learning with safety so replay/gradient state commits only after safety allows the generated draft
+
+- **Documentation**
+  - Marked Phase 12 complete in README and ROADMAP
+  - Updated self-learning CLI examples and architecture notes
+
+### Verified
+
+- `cargo check --workspace`
+- `cargo test -p aarambh-ai-selflearn`
+- `cargo test --workspace`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo run -p aarambh-ai -- infer --help`
+- `cargo run -p aarambh-ai -- selflearn --help`
+- `cargo run -p aarambh-ai -- selflearn replay --help`
+- `cargo run -p aarambh-ai -- selflearn stats --replay-path /tmp/aarambh_phase12_empty_replay.jsonl --self-learn-state-dir /tmp/aarambh_phase12_empty_state`
+
 ## [0.11.0] - 2026-06-29
 
 ### Added

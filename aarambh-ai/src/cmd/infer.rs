@@ -2,12 +2,17 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use aarambh_ai_core::TokenizerLike;
+use aarambh_ai_finetune::{Verifier, VerifierKind};
 use aarambh_ai_inference::{
     GenerationConfig, GenerationOutput, GenerationPhase, GenerationStep, InferenceEngine, Sampler,
     ThinkingMode,
 };
-use aarambh_ai_safety::{SafeResponse, SafetyGuard, SafetyMode, SafetyPolicy, SafetyVerdict};
-use aarambh_ai_tokenizer::{ASSISTANT, THINK_END_ID, THINK_START_ID, USER};
+use aarambh_ai_safety::{
+    SafeResponse, SafetyGenerator, SafetyGuard, SafetyMode, SafetyPolicy, SafetyVerdict,
+};
+use aarambh_ai_selflearn::{SelfLearnBuildConfig, SelfLearnConfig, SelfLearnLoop, SelfLearnMode};
+use aarambh_ai_tokenizer::{ASSISTANT, BpeTokenizer, THINK_END_ID, THINK_START_ID, USER};
 use aarambh_ai_train::TrainingRunConfig;
 use clap::Args;
 use serde::Deserialize;
@@ -49,6 +54,18 @@ pub struct InferArgs {
     pub safety: String,
     #[arg(long, default_value = "safety_audit.jsonl")]
     pub safety_audit_log: PathBuf,
+    #[arg(long, default_value = "disabled")]
+    pub self_learn: String,
+    #[arg(long, default_value = "data/replay.jsonl")]
+    pub replay_path: PathBuf,
+    #[arg(long, default_value = "adapters/selflearn")]
+    pub self_learn_state_dir: PathBuf,
+    #[arg(long)]
+    pub self_learn_reference: Option<PathBuf>,
+    #[arg(long, default_value = "none")]
+    pub self_learn_verifier: String,
+    #[arg(long)]
+    pub self_learn_ground_truth: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,9 +93,8 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
     };
     let thinking_mode = parse_thinking_mode(&args.thinking)?;
     let safety_mode = parse_safety_mode(&args.safety)?;
+    let self_learn_mode = parse_self_learn_mode(&args.self_learn)?;
 
-    let mut engine =
-        InferenceEngine::from_paths(model_path, &run_config.model, tokenizer_path, device)?;
     let config = GenerationConfig {
         max_new_tokens: args.max_tokens,
         sampler,
@@ -87,6 +103,23 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
     };
 
     let prompt = prompt_for_mode(&args.prompt, thinking_mode);
+    if self_learn_mode.is_enabled() {
+        return run_self_learn_infer(
+            &args,
+            run_config,
+            model_path,
+            tokenizer_path,
+            device,
+            config,
+            prompt,
+            safety_mode,
+            self_learn_mode,
+            thinking_mode,
+        );
+    }
+
+    let mut engine =
+        InferenceEngine::from_paths(model_path, &run_config.model, tokenizer_path, device)?;
     let tokenizer_for_view = engine.tokenizer().clone();
     if let Some(policy) = SafetyPolicy::for_mode(safety_mode)
         .map(|policy| policy.with_audit_path(&args.safety_audit_log))
@@ -184,12 +217,190 @@ fn parse_safety_mode(value: &str) -> anyhow::Result<SafetyMode> {
     value.parse::<SafetyMode>().map_err(anyhow::Error::msg)
 }
 
+fn parse_self_learn_mode(value: &str) -> anyhow::Result<SelfLearnMode> {
+    value.parse::<SelfLearnMode>().map_err(anyhow::Error::msg)
+}
+
+fn parse_self_learn_verifier(value: &str) -> anyhow::Result<Option<VerifierKind>> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "none" | "disabled" | "off" => Ok(None),
+        other => other
+            .parse::<VerifierKind>()
+            .map(Some)
+            .map_err(anyhow::Error::msg),
+    }
+}
+
 fn prompt_for_mode(prompt: &str, thinking_mode: ThinkingMode) -> String {
     if thinking_mode.is_enabled() {
         format!("{USER}\n{prompt}\n{ASSISTANT}\n")
     } else {
         prompt.to_string()
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_self_learn_infer(
+    args: &InferArgs,
+    mut run_config: TrainingRunConfig,
+    model_path: PathBuf,
+    tokenizer_path: PathBuf,
+    device: candle_core::Device,
+    config: GenerationConfig,
+    prompt: String,
+    safety_mode: SafetyMode,
+    self_learn_mode: SelfLearnMode,
+    thinking_mode: ThinkingMode,
+) -> anyhow::Result<()> {
+    let mut self_config = SelfLearnConfig::for_mode(self_learn_mode)
+        .with_replay_path(args.replay_path.clone())
+        .with_state_dir(args.self_learn_state_dir.clone());
+    self_config.grpo.max_new_tokens = args.max_tokens;
+    self_config.critique.rewrite_max_tokens = self_config
+        .critique
+        .rewrite_max_tokens
+        .min(args.max_tokens)
+        .max(1);
+    let reference_path = args
+        .self_learn_reference
+        .clone()
+        .unwrap_or_else(|| model_path.clone());
+    let verifier = parse_self_learn_verifier(&args.self_learn_verifier)?.map(VerifierKind::build);
+    if verifier.is_some() && args.self_learn_ground_truth.is_none() {
+        eprintln!(
+            "[self-learn] deterministic verifier requested without --self-learn-ground-truth; online GRPO will be skipped"
+        );
+    }
+
+    let tokenizer_for_view = BpeTokenizer::from_pretrained(&tokenizer_path)?;
+    let loop_ = SelfLearnLoop::from_paths(SelfLearnBuildConfig {
+        model_config: {
+            run_config.model.vocab_size = tokenizer_for_view.vocab_size();
+            run_config.model.clone()
+        },
+        base_model_path: model_path,
+        reference_model_path: reference_path,
+        tokenizer_path,
+        config: self_config,
+        device,
+        seed: run_config.train.seed,
+    })?;
+    let mut adapter = SelfLearnSafetyAdapter {
+        loop_,
+        verifier,
+        ground_truth: args.self_learn_ground_truth.clone(),
+    };
+
+    if let Some(policy) = SafetyPolicy::for_mode(safety_mode)
+        .map(|policy| policy.with_audit_path(&args.safety_audit_log))
+    {
+        let mut guard = SafetyGuard::new(adapter, policy);
+        let mut stream_state = StreamState::default();
+        let response = guard.generate_with_callback(&prompt, config, |step| {
+            if args.predict_view {
+                print!(
+                    "{}",
+                    predict_view::render(step, &tokenizer_for_view, args.temperature, args.top_p)
+                );
+            }
+            if args.stream {
+                stream_step(step, thinking_mode, &mut stream_state)?;
+            }
+            if args.predict_view || args.stream {
+                io::stdout().flush()?;
+            }
+            Ok(())
+        })?;
+        print_safe_response(&response, thinking_mode, args.stream, &mut stream_state)?;
+        let mut adapter = guard.into_inner();
+        if response.is_blocked() {
+            adapter.loop_.discard_last_draft();
+        } else {
+            let learned = adapter
+                .loop_
+                .commit_last_draft(Some(response.text.clone()))?;
+            print_self_learn_summary(&learned);
+        }
+        io::stdout().flush()?;
+        if let Some(output) = &response.output {
+            eprintln!("finish_reason={:?}", output.finish_reason);
+        } else {
+            eprintln!("finish_reason=SafetyBlocked");
+        }
+        return Ok(());
+    }
+
+    let mut stream_state = StreamState::default();
+    let output = adapter.generate_with_callback(&prompt, config, |step| {
+        if args.predict_view {
+            print!(
+                "{}",
+                predict_view::render(step, &tokenizer_for_view, args.temperature, args.top_p)
+            );
+        }
+        if args.stream {
+            stream_step(step, thinking_mode, &mut stream_state)?;
+        }
+        if args.predict_view || args.stream {
+            io::stdout().flush()?;
+        }
+        Ok(())
+    })?;
+    if args.stream {
+        finish_stream(&mut stream_state);
+    } else {
+        print_generation_output(&output, thinking_mode)?;
+    }
+    let learned = adapter.loop_.commit_last_draft(Some(output.text.clone()))?;
+    print_self_learn_summary(&learned);
+    io::stdout().flush()?;
+    eprintln!("finish_reason={:?}", output.finish_reason);
+    Ok(())
+}
+
+struct SelfLearnSafetyAdapter {
+    loop_: SelfLearnLoop,
+    verifier: Option<Box<dyn Verifier>>,
+    ground_truth: Option<String>,
+}
+
+impl SafetyGenerator for SelfLearnSafetyAdapter {
+    fn generate(
+        &mut self,
+        prompt: &str,
+        config: GenerationConfig,
+    ) -> aarambh_ai_core::Result<GenerationOutput> {
+        self.generate_with_callback(prompt, config, |_| Ok(()))
+    }
+
+    fn generate_with_callback<F>(
+        &mut self,
+        prompt: &str,
+        config: GenerationConfig,
+        on_step: F,
+    ) -> aarambh_ai_core::Result<GenerationOutput>
+    where
+        F: FnMut(&GenerationStep) -> aarambh_ai_core::Result<()>,
+    {
+        self.loop_.generate_draft_with_callback(
+            prompt,
+            config,
+            self.verifier.as_deref(),
+            self.ground_truth.as_deref(),
+            on_step,
+        )
+    }
+}
+
+fn print_self_learn_summary(response: &aarambh_ai_selflearn::SelfLearnResponse) {
+    eprintln!(
+        "[self-learn] critique_score={:.2} stored={} rewritten={} grpo={} metrics={}",
+        response.critique_score,
+        response.stored_in_replay,
+        response.was_rewritten,
+        response.used_grpo,
+        response.metrics_summary
+    );
 }
 
 #[derive(Default)]

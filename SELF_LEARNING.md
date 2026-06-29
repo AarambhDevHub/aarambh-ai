@@ -32,8 +32,9 @@ being used. It is frozen — every conversation is the same model.
 **Self-learning changes that.** Every time the model answers a question, it:
 1. Generates multiple candidate answers and picks the best one using a deterministic verifier (Math/Code)
 2. Reads its own answer and scores it (for replay filtering only)
-3. Stores high-quality answers in a memory bank
-4. Periodically re-trains on those stored answers
+3. Passes the user-visible draft through the safety layer
+4. Stores high-quality safe answers in a memory bank
+5. Periodically re-trains on those stored answers
 
 Over hundreds of conversations, the model measurably improves — especially on
 the topics it talks about most.
@@ -121,9 +122,16 @@ User asks a question
                    │ final response + score
                    ▼
 ┌───────────────────────────────────────────┐
+│  Safety output check                      │
+│  Only allowed/redacted text may commit    │
+│  replay entries, gradients, or metrics    │
+└──────────────────┬────────────────────────┘
+                   │ safe response + score
+                   ▼
+┌───────────────────────────────────────────┐
 │  Replay Buffer                            │
 │  score ≥ 0.70 → store to JSONL           │
-│  every 500 steps → replay fine-tune       │
+│  manual/periodic replay → masked SFT      │
 └──────────────────┬────────────────────────┘
                    │
                    ▼
@@ -247,7 +255,6 @@ Model returns malformed JSON   → score = 0.5 (neutral fallback)
 Model returns score > 1.0      → clamp to 1.0
 Model returns score < 0.0      → clamp to 0.0
 Model returns "I don't know"   → score = 0.5
-Inference error                → score = 0.5, log warning, continue
 ```
 
 None of these should crash the inference loop.
@@ -303,8 +310,8 @@ not the prompt tokens. LoRA adapters are used — not the full model.
 ```
 Replay fine-tune on Tiny (CPU):
   32 entries × 1 epoch ≈ 120 seconds
-  Runs asynchronously if --async-replay flag is set
-  Or synchronously during the flush_gradients call
+  Runs synchronously through `aarambh-ai selflearn replay`
+  Uses the same LoRA adapter and optimizer state as online learning
 ```
 
 ---
@@ -318,6 +325,9 @@ Replay fine-tune on Tiny (CPU):
 [self_learn]
 mode = "cpu"   # or "gpu" or "disabled"
 ```
+
+Phase 12 currently exposes self-learning through CLI flags. The TOML section
+above is the stable configuration shape for future config-file loading.
 
 ```bash
 # Command line override
@@ -399,8 +409,8 @@ crates/aarambh-ai-selflearn/
 └── src/
     ├── lib.rs           ← pub use all public types
     ├── config.rs        ← SelfLearnConfig, OnlineGrpoConfig, ReplayConfig, CritiqueConfig
-    ├── loop.rs          ← SelfLearnLoop (owns OnlineGrpo, Replay), SelfLearnResponse
-    ├── online_grpo.rs   ← OnlineGrpo, generate_and_step(), flush_pending_gradients()
+    ├── learning_loop.rs ← SelfLearnLoop (owns OnlineGrpo, Replay), SelfLearnResponse
+    ├── online_grpo.rs   ← OnlineGrpo, generate_update(), replay_sft_batch(), flush_pending_gradients()
     ├── critique.rs      ← critique_response() free function (replay-only scoring)
     ├── replay.rs        ← ReplayBuffer, ReplayEntry, push(), sample_batch(), save/load
     └── metrics.rs       ← LearningMetrics, record(), topic_trend(), print_summary()
@@ -410,12 +420,14 @@ crates/aarambh-ai-selflearn/
 
 **Depends on:**
 - `aarambh-ai-core` (config types, error type)
-- `aarambh-ai-inference` (InferenceEngine for generation)
-- `aarambh-ai-finetune` (AdamW, LoRA inject, SFT trainer for replay, Verifier trait)
+- `aarambh-ai-tokenizer` (BPE tokenizer and special token IDs)
+- `aarambh-ai-model` / `aarambh-ai-weights` (base and frozen reference model loading)
+- `aarambh-ai-inference` (generation config, sampling, thinking controller)
+- `aarambh-ai-finetune` (LoRA model, GRPO helpers, verifier trait, SFT examples)
+- `aarambh-ai-train` (AdamW, loss, clipping, gradient maps)
 
 **Does NOT depend on:**
 - `aarambh-ai-safety` (safety is applied at the binary level, not inside selflearn)
-- `aarambh-ai-train` (uses finetune's trainer directly, not the full pretraining loop)
 
 ---
 
@@ -440,11 +452,14 @@ pub struct SelfLearnConfig {
     pub replay_every_n:     usize,   // CPU: 500  |  GPU: 50
     pub replay_batch_size:  usize,   // CPU: 32   |  GPU: 128
     pub replay_path:        PathBuf, // e.g. "data/replay.jsonl"
+    pub state_dir:          PathBuf, // e.g. "adapters/selflearn"
 
     // Self-critique (replay-only)
     pub critique_enabled:      bool,   // true
     pub rewrite_threshold:     f32,    // 0.70
     pub max_rewrites:          usize,  // CPU: 1  |  GPU: 3
+    pub max_tokens:            usize,  // critique JSON budget
+    pub rewrite_max_tokens:    usize,  // bounded by --max-tokens in CLI
 }
 ```
 
@@ -472,10 +487,13 @@ replay_min_score     = 0.70
 replay_every_n       = 500
 replay_batch_size    = 32
 replay_path          = "data/replay.jsonl"
+state_dir            = "adapters/selflearn"
 
 critique_enabled     = true
 rewrite_threshold    = 0.70
 max_rewrites         = 1
+max_tokens           = 50
+rewrite_max_tokens   = 32
 ```
 
 ---
@@ -487,20 +505,27 @@ max_rewrites         = 1
 ```bash
 # CPU mode (i3)
 aarambh-ai infer \
+  --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_sft.safetensors \
+  --tokenizer checkpoints/tokenizer.json \
   --self-learn cpu \
   --replay-path data/replay.jsonl \
+  --self-learn-state-dir adapters/selflearn \
   --prompt "Explain what a closure is in Rust."
 
 # GPU mode (Kaggle)
 aarambh-ai infer \
+  --config configs/small.toml \
   --model checkpoints/small_sft.safetensors \
+  --tokenizer checkpoints/tokenizer.json \
   --self-learn gpu \
   --replay-path data/replay.jsonl \
+  --self-learn-state-dir adapters/selflearn \
   --stream
 
 # Disable (standard inference)
 aarambh-ai infer \
+  --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_sft.safetensors \
   --self-learn disabled
 ```
@@ -510,18 +535,24 @@ aarambh-ai infer \
 ```bash
 # CPU mode: flush accumulated gradients and take an optimizer step
 aarambh-ai selflearn flush-gradients \
-  --model checkpoints/tiny_sft.safetensors \
-  --replay-path data/replay.jsonl
+  --config configs/tiny_shakespeare.toml \
+  --base checkpoints/tiny_sft.safetensors \
+  --tokenizer checkpoints/tokenizer.json \
+  --replay-path data/replay.jsonl \
+  --self-learn-state-dir adapters/selflearn
 
 # Trigger a replay fine-tune immediately (without waiting for N steps)
 aarambh-ai selflearn replay \
-  --model checkpoints/tiny_sft.safetensors \
+  --config configs/tiny_shakespeare.toml \
+  --base checkpoints/tiny_sft.safetensors \
+  --tokenizer checkpoints/tokenizer.json \
   --replay-path data/replay.jsonl \
-  --batch-size 32
+  --self-learn-state-dir adapters/selflearn
 
 # Print improvement statistics
 aarambh-ai selflearn stats \
-  --replay-path data/replay.jsonl
+  --replay-path data/replay.jsonl \
+  --self-learn-state-dir adapters/selflearn
 
 # Example output:
 # Replay buffer: 347 / 500 entries  avg score: 0.81
@@ -532,7 +563,9 @@ aarambh-ai selflearn stats \
 
 # Clear everything (start fresh)
 aarambh-ai selflearn reset \
-  --replay-path data/replay.jsonl
+  --replay-path data/replay.jsonl \
+  --self-learn-state-dir adapters/selflearn \
+  --yes
 ```
 
 ---
