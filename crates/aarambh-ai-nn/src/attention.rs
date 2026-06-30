@@ -62,7 +62,7 @@ impl GroupedQueryAttention {
         let k = k.reshape((b, seq_len, self.n_kv_heads, self.head_dim))?;
         let v = v.reshape((b, seq_len, self.n_kv_heads, self.head_dim))?;
 
-        let (q, k) = rope.apply(&q, &k, seqlen_offset)?;
+        let (q, k) = rope.apply_inference(&q, &k, seqlen_offset)?;
 
         let (k, v) = match kv_cache {
             Some(cache) => cache.update(&k, &v)?,
@@ -115,7 +115,7 @@ impl GroupedQueryAttention {
         let v = v.transpose(1, 2)?.contiguous()?;
 
         let out =
-            aarambh_ai_kernel::dispatch::attention_forward_candle(&q, &k, &v, mask, self.scale)?;
+            aarambh_ai_kernel::dispatch::attention_forward_train(&q, &k, &v, mask, self.scale)?;
 
         let out = out.transpose(1, 2)?;
         let out = out.reshape((b, seq_len, self.n_heads * self.head_dim))?;
@@ -147,7 +147,7 @@ impl GroupedQueryAttention {
         let k = k.reshape((b, seq_len, self.n_kv_heads, self.head_dim))?;
         let v = v.reshape((b, seq_len, self.n_kv_heads, self.head_dim))?;
 
-        let (q, k) = rope.apply(&q, &k, 0)?;
+        let (q, k) = rope.apply_inference(&q, &k, 0)?;
 
         let n_repeats = self.n_heads / self.n_kv_heads;
         let k = repeat_heads(&k, n_repeats)?;

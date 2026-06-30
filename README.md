@@ -30,9 +30,9 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 | Safety guardrails: input/output, PII, prompt injection | Phase 11 ✅ |
 | Self-learning loop: online GRPO, replay buffer, critique | Phase 12 ✅ |
 | GPU scale-up: CUDA feature, BF16 train/infer, Kaggle configs/notebooks | Phase 13 ✅ |
-| Custom CUDA kernels: Flash Attention v2, fused RMSNorm, RoPE, SwiGLU | Phase 14 |
+| Custom CUDA kernels: Flash Attention v2, fused RMSNorm, RoPE, SwiGLU | Phase 14 ✅ |
 | CPU SIMD kernels: AVX2/FMA RMSNorm, AVX512 override, parallel attention via rayon | Phase 4 ✅ |
-| CUDA kernel build prep and FFI stubs | Phase 4 ✅ |
+| CUDA kernel build prep | Phase 4 ✅ |
 | CLI binary with predict-view, streaming, thinking modes | Phase 6 ✅ |
 
 ---
@@ -114,8 +114,10 @@ eval step=500 val_loss=3.2110 val_ppl=24.80
 
 ## Train On Kaggle GPU
 
-Phase 13 adds an opt-in CUDA/BF16 path for WikiText-103 scale-up. CUDA is not
-enabled by default, so normal local CPU builds still work without NVCC.
+Phase 13 adds an opt-in CUDA/BF16 path for WikiText-103 scale-up. Phase 14 adds
+runtime PTX kernels for Flash Attention, fused RMSNorm, fused RoPE, and fused
+SwiGLU when `nvcc` is available at build time. CUDA is not enabled by default,
+so normal local CPU builds still work without NVCC.
 
 ```sh
 # Prepare WikiText-103 raw text.
@@ -140,6 +142,9 @@ cargo run --release -p aarambh-ai --features cuda -- train \
 
 GPU configs use `device = "cuda:0"` and `dtype = "bf16"`. Training logs include
 `tok/s` so Kaggle runs produce the Phase 13 throughput benchmark automatically.
+On CUDA builds with NVCC, Phase 14 dispatch chooses CUDA fused RMSNorm and
+FlashAttention for supported contiguous F32/F16/BF16 tensors; unsupported masks,
+layouts, and dtypes fall back to Candle.
 Use `notebooks/phase13_small_train.ipynb`, `phase13_medium_train.ipynb`, and
 `phase13_large_train.ipynb` for end-to-end Kaggle runs, inference smoke checks,
 and packaged checkpoint downloads.
@@ -585,7 +590,7 @@ aarambh-ai/
 | 1 | Tokeniser + data pipeline | i3 | ✅ |
 | 2 | Neural network primitives | i3 | ✅ |
 | 3 | Full model forward pass | i3 | ✅ |
-| 4 | Custom kernels (CPU SIMD + CUDA stubs) | i3 + GPU | ✅ |
+| 4 | Custom kernels (CPU SIMD + CUDA build prep) | i3 + GPU | ✅ |
 | 5 | Training loop — Tiny trains! | i3 | ✅ |
 | 6 | Inference engine + CLI | i3 | ✅ |
 | 7 | Thinking engine | i3 | ✅ |
@@ -595,7 +600,7 @@ aarambh-ai/
 | 11 | Safety layer | i3 | ✅ |
 | 12 | Self-learning loop | i3 + GPU | ✅ |
 | 13 | GPU scale-up (Small → Large) | GPU | ✅ |
-| 14 | Flash Attention CUDA kernels | GPU | ⬜ |
+| 14 | Flash Attention CUDA kernels | GPU | ✅ |
 | 15 | Production release v1.0 | all | ⬜ |
 
 See [ROADMAP.md](ROADMAP.md) for the full phased delivery plan with tests and milestones.
@@ -620,9 +625,9 @@ cargo bench -p aarambh-ai-kernel
 
 Phase 4 uses stable CPU intrinsics with cached AVX2/FMA, AVX512, and scalar
 dispatch. The default prefers AVX2/FMA on this CPU; set `AARAMBH_SIMD_FORCE=avx512`
-to force AVX512 when it wins on another machine. CUDA files are compiled only
-when `nvcc` is installed; otherwise the build emits a warning and keeps the
-Candle fallback path.
+to force AVX512 when it wins on another machine. Phase 14 CUDA PTX is generated
+only when `nvcc` is installed; otherwise the build emits a warning and keeps the
+CPU/Candle fallback path.
 
 ---
 

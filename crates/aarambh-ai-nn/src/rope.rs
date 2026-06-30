@@ -43,6 +43,21 @@ impl RopeCache {
         Ok((q_rot, k_rot))
     }
 
+    pub fn apply_inference(
+        &self,
+        q: &Tensor,
+        k: &Tensor,
+        seqlen_offset: usize,
+    ) -> Result<(Tensor, Tensor)> {
+        let q_rot = self
+            .apply_rotate_fused(q, seqlen_offset)
+            .or_else(|_| self.apply_rotate(q, seqlen_offset))?;
+        let k_rot = self
+            .apply_rotate_fused(k, seqlen_offset)
+            .or_else(|_| self.apply_rotate(k, seqlen_offset))?;
+        Ok((q_rot, k_rot))
+    }
+
     fn apply_rotate(&self, x: &Tensor, seqlen_offset: usize) -> Result<Tensor> {
         let half = self.head_dim / 2;
         let seq_len = x.dim(1)?;
@@ -62,6 +77,16 @@ impl RopeCache {
         let rot2 = (x1.broadcast_mul(&sin)? + x2.broadcast_mul(&cos)?)?;
 
         Tensor::cat(&[&rot1, &rot2], candle_core::D::Minus1)
+    }
+
+    fn apply_rotate_fused(&self, x: &Tensor, seqlen_offset: usize) -> Result<Tensor> {
+        let seq_len = x.dim(1)?;
+        let cos = self.cos.to_dtype(x.dtype())?;
+        let sin = self.sin.to_dtype(x.dtype())?;
+        if seqlen_offset + seq_len > cos.dim(0)? {
+            return self.apply_rotate(x, seqlen_offset);
+        }
+        aarambh_ai_kernel::fused_rope::fused_rope_apply(x, &cos, &sin, seqlen_offset)
     }
 }
 

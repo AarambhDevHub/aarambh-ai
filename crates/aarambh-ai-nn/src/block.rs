@@ -64,7 +64,7 @@ impl TransformerBlock {
 
         let residual = x.clone();
         let x = self.norm2.forward_train(&x)?;
-        let x = self.ffn.forward(&x)?;
+        let x = self.ffn.forward_train(&x)?;
         residual + x
     }
 

@@ -20,6 +20,16 @@ impl SwiGluFfn {
     }
 
     pub fn forward(&self, x: &Tensor) -> Result<Tensor> {
+        let gate = self.w_gate.forward(x)?;
+        let up = self.w_up.forward(x)?;
+        let hidden = aarambh_ai_kernel::fused_ffn::fused_swiglu(&gate, &up).or_else(|_| {
+            let gate = candle_nn::ops::silu(&gate)?;
+            gate * up
+        })?;
+        self.w_down.forward(&hidden)
+    }
+
+    pub fn forward_train(&self, x: &Tensor) -> Result<Tensor> {
         let gate = candle_nn::ops::silu(&self.w_gate.forward(x)?)?;
         let up = self.w_up.forward(x)?;
         let hidden = (gate * up)?;
@@ -34,9 +44,12 @@ impl SwiGluFfn {
     ) -> Result<Tensor> {
         capture.insert(format!("blocks.{layer_idx}.ffn.w_gate.weight"), x.clone());
         capture.insert(format!("blocks.{layer_idx}.ffn.w_up.weight"), x.clone());
-        let gate = candle_nn::ops::silu(&self.w_gate.forward(x)?)?;
+        let gate = self.w_gate.forward(x)?;
         let up = self.w_up.forward(x)?;
-        let hidden = (gate * up)?;
+        let hidden = aarambh_ai_kernel::fused_ffn::fused_swiglu(&gate, &up).or_else(|_| {
+            let gate = candle_nn::ops::silu(&gate)?;
+            gate * up
+        })?;
         capture.insert(
             format!("blocks.{layer_idx}.ffn.w_down.weight"),
             hidden.clone(),
