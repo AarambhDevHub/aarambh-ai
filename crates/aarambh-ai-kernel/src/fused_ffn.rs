@@ -18,12 +18,6 @@ pub fn fused_swiglu(gate: &Tensor, up: &Tensor) -> Result<Tensor> {
     }
 }
 
-pub fn fused_swiglu_stub() -> Result<()> {
-    Err(Error::msg(
-        "Fused CUDA SwiGLU stubs were replaced by Phase 14 PTX kernels",
-    ))
-}
-
 #[cfg(all(feature = "cuda", aarambh_cuda_kernels))]
 mod cuda {
     use candle_core::cuda_backend::cudarc::driver::{LaunchConfig, PushKernelArg};

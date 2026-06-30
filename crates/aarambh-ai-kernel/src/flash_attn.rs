@@ -44,18 +44,6 @@ pub fn flash_attention_forward_train(
     }
 }
 
-pub fn flash_attention_forward_stub() -> Result<()> {
-    Err(Error::msg(
-        "Flash Attention stubs were replaced by Phase 14 PTX kernels",
-    ))
-}
-
-pub fn flash_attention_backward_stub() -> Result<()> {
-    Err(Error::msg(
-        "Flash Attention backward stubs were replaced by Phase 14 PTX kernels",
-    ))
-}
-
 #[cfg(all(feature = "cuda", aarambh_cuda_kernels))]
 mod cuda {
     use candle_core::cuda_backend::cudarc::driver::{LaunchConfig, PushKernelArg};

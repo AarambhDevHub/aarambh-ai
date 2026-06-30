@@ -23,12 +23,6 @@ pub fn fused_rope_apply(
     }
 }
 
-pub fn fused_rope_stub() -> Result<()> {
-    Err(Error::msg(
-        "Fused CUDA RoPE stubs were replaced by Phase 14 PTX kernels",
-    ))
-}
-
 #[cfg(all(feature = "cuda", aarambh_cuda_kernels))]
 mod cuda {
     use candle_core::cuda_backend::cudarc::driver::{LaunchConfig, PushKernelArg};

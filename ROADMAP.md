@@ -97,7 +97,7 @@ criterion          = "0.5"
 ### Goal
 A compilable Cargo workspace where `cargo check --workspace` passes with zero
 errors and zero warnings. `aarambh-ai-core` is 100% complete. All other crates
-exist as stubs with empty public modules.
+exist as initial scaffold modules for later phases.
 
 ### Tasks (do in this order)
 
@@ -196,7 +196,7 @@ exist as stubs with empty public modules.
 [x] src/lib.rs   — re-export everything flat
 ```
 
-**Stub all other crates** (just `lib.rs` with `//! Coming in Phase N`):
+**Scaffold all other crates** (minimal `lib.rs` modules for later phases):
 ```
 [x] All 12 other crates: empty lib.rs, no dependencies yet
 ```
@@ -594,8 +594,8 @@ git tag v0.3.0
 
 ### Goal
 CPU: SIMD RMSNorm and parallel attention give measurable speedup on your i3.
-GPU: `build.rs` detects NVCC and validates CUDA build plumbing. Phase 14 replaces
-the original placeholders with PTX-loaded runtime kernels.
+GPU: `build.rs` detects NVCC and validates CUDA build plumbing. Phase 14 now
+provides the PTX-loaded runtime kernels.
 All kernels are behind runtime dispatch — fallback to candle if kernel unavailable.
 
 ### Toolchain Setup for SIMD
@@ -629,16 +629,16 @@ scalar code based on the CPU and optional `AARAMBH_SIMD_FORCE`.
       fn cpu_parallel_attn(q, k, v, mask, scale) -> Result<Tensor>
         // Tiny has 6 heads → parallel CPU work across available cores
 
-[x] kernels/flash_attention.cu    (Phase 4 placeholder, replaced in Phase 14)
-[x] kernels/flash_attn_bwd.cu     (Phase 4 placeholder, replaced in Phase 14)
-[x] kernels/rms_norm_fused.cu     (Phase 4 placeholder, replaced in Phase 14)
-[x] kernels/rope_apply.cu         (Phase 4 placeholder, replaced in Phase 14)
-[x] kernels/swiglu_fused.cu       (Phase 4 placeholder, replaced in Phase 14)
+[x] kernels/flash_attention.cu    (real PTX kernel in Phase 14)
+[x] kernels/flash_attn_bwd.cu     (real CUDA backward source in Phase 14)
+[x] kernels/rms_norm_fused.cu     (real PTX kernel in Phase 14)
+[x] kernels/rope_apply.cu         (real PTX kernel in Phase 14)
+[x] kernels/swiglu_fused.cu       (real PTX kernel in Phase 14)
 
-[x] src/flash_attn.rs   — FFI wrapper stub
-[x] src/fused_norm.rs   — FFI wrapper stub
-[x] src/fused_rope.rs   — FFI wrapper stub
-[x] src/fused_ffn.rs    — FFI wrapper stub
+[x] src/flash_attn.rs   — PTX loader/custom op wrapper
+[x] src/fused_norm.rs   — PTX loader/custom op wrapper
+[x] src/fused_rope.rs   — PTX loader/custom op wrapper
+[x] src/fused_ffn.rs    — PTX loader/custom op wrapper
 ```
 
 **Update `aarambh-ai-nn`:**
@@ -2125,7 +2125,7 @@ All fused kernels complete. Measurable speed improvement vs candle baseline.
       // element-wise swish(gate) * up after Candle Linear projections
       // avoids the separate SiLU allocation before multiply
 
-[x] Update src/flash_attn.rs — real PTX loader/custom op (not stub)
+[x] Update src/flash_attn.rs — real PTX loader/custom op
 [x] Update src/fused_norm.rs  — real PTX loader/custom op
 [x] Update src/fused_rope.rs  — real PTX loader/custom op
 [x] Update src/fused_ffn.rs   — real PTX loader/custom op

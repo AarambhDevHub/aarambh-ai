@@ -18,12 +18,6 @@ pub fn fused_rms_norm(x: &Tensor, weight: &Tensor, eps: f32) -> Result<Tensor> {
     }
 }
 
-pub fn fused_rms_norm_stub() -> Result<()> {
-    Err(Error::msg(
-        "Fused CUDA RMSNorm stubs were replaced by Phase 14 PTX kernels",
-    ))
-}
-
 #[cfg(all(feature = "cuda", aarambh_cuda_kernels))]
 mod cuda {
     use candle_core::cuda_backend::cudarc::driver::{LaunchConfig, PushKernelArg};
