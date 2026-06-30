@@ -2,13 +2,21 @@
 //!
 //! Phase 9 implements LoRA, QLoRA, SFT loss masking, and adapter merge support.
 //! Phase 10 adds deterministic-verifier GRPO for adapter-only RL fine-tuning.
+#![deny(missing_docs)]
 
+/// Adapter metadata and serialization helpers.
 pub mod adapter;
+/// Group Relative Policy Optimization data loading, rollout, and training.
 pub mod grpo;
+/// LoRA adapter layers and configuration.
 pub mod lora;
+/// LoRA-wrapped Aarambh model implementation.
 pub mod model;
+/// Supervised fine-tuning datasets, templates, and batches.
 pub mod sft;
+/// SFT trainer and adapter merge entrypoints.
 pub mod trainer;
+/// Rule-based verifiers used by GRPO and self-learning.
 pub mod verifier;
 
 pub use adapter::{AdapterMetadata, load_adapter_metadata, save_adapter};

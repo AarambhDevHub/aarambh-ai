@@ -9,6 +9,7 @@ use crate::norm::RMSNorm;
 use crate::rope::RopeCache;
 
 #[derive(Debug, Clone)]
+/// Pre-norm transformer decoder block.
 pub struct TransformerBlock {
     norm1: RMSNorm,
     attn: GroupedQueryAttention,
@@ -17,6 +18,7 @@ pub struct TransformerBlock {
 }
 
 impl TransformerBlock {
+    /// Create a transformer block from its norm, attention, and feed-forward layers.
     pub fn new(
         norm1: RMSNorm,
         attn: GroupedQueryAttention,
@@ -31,6 +33,7 @@ impl TransformerBlock {
         }
     }
 
+    /// Run the inference block path, optionally using a KV cache.
     pub fn forward(
         &self,
         x: &Tensor,
@@ -50,6 +53,7 @@ impl TransformerBlock {
         residual + x
     }
 
+    /// Run the training block path without cache mutation.
     pub fn forward_train(
         &self,
         x: &Tensor,
@@ -68,6 +72,7 @@ impl TransformerBlock {
         residual + x
     }
 
+    /// Run the block while recording activation tensors for calibration.
     pub fn forward_with_capture(
         &self,
         x: &Tensor,
@@ -89,18 +94,22 @@ impl TransformerBlock {
         residual + x
     }
 
+    /// Return the first RMSNorm layer.
     pub fn norm1(&self) -> &RMSNorm {
         &self.norm1
     }
 
+    /// Return the attention layer.
     pub fn attn(&self) -> &GroupedQueryAttention {
         &self.attn
     }
 
+    /// Return the second RMSNorm layer.
     pub fn norm2(&self) -> &RMSNorm {
         &self.norm2
     }
 
+    /// Return the feed-forward layer.
     pub fn ffn(&self) -> &SwiGluFfn {
         &self.ffn
     }

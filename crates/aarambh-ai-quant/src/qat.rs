@@ -4,17 +4,22 @@ use candle_core::Tensor;
 use crate::types::{tensor_from_f32_vec, tensor_shape, tensor_to_f32_vec};
 
 #[derive(Debug, Clone, Copy)]
+/// Fake-quantisation node used during quantisation-aware training.
 pub struct FakeQuantNode {
+    /// Number of quantisation bits.
     pub bits: u8,
+    /// Whether to use symmetric quantisation around zero.
     pub symmetric: bool,
 }
 
 impl FakeQuantNode {
+    /// Create a fake-quantisation node after validating bit width.
     pub fn new(bits: u8, symmetric: bool) -> Result<Self> {
         validate_bits(bits)?;
         Ok(Self { bits, symmetric })
     }
 
+    /// Apply fake quantisation to a tensor.
     pub fn forward(&self, x: &Tensor) -> Result<Tensor> {
         if self.symmetric {
             fake_quantise_symmetric(x, self.bits)
@@ -24,6 +29,7 @@ impl FakeQuantNode {
     }
 }
 
+/// Apply asymmetric fake quantisation to a tensor.
 pub fn fake_quantise(x: &Tensor, bits: u8) -> Result<Tensor> {
     validate_bits(bits)?;
     let values = tensor_to_f32_vec(x)?;

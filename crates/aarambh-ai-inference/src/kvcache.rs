@@ -2,41 +2,49 @@ use aarambh_ai_model::AarambhModel;
 use aarambh_ai_nn::KVCache;
 
 #[derive(Debug, Clone)]
+/// Multi-layer KV cache used by the inference engine.
 pub struct KvCache {
     layers: Vec<KVCache>,
 }
 
 impl KvCache {
+    /// Create a cache with `n_layers` empty layer caches.
     pub fn new(n_layers: usize) -> Self {
         Self {
             layers: (0..n_layers).map(|_| KVCache::new()).collect(),
         }
     }
 
+    /// Create a cache sized for a model.
     pub fn for_model(model: &AarambhModel) -> Self {
         Self {
             layers: model.empty_kv_cache(),
         }
     }
 
+    /// Return mutable layer caches.
     pub fn layers_mut(&mut self) -> &mut [KVCache] {
         &mut self.layers
     }
 
+    /// Clear all layer caches.
     pub fn clear(&mut self) {
         for layer in &mut self.layers {
             layer.clear();
         }
     }
 
+    /// Return cached sequence length from the first layer.
     pub fn seqlen(&self) -> usize {
         self.layers.first().map(KVCache::seq_len).unwrap_or(0)
     }
 
+    /// Return the number of layer caches.
     pub fn len(&self) -> usize {
         self.layers.len()
     }
 
+    /// Return true when no layers are cached.
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
     }

@@ -3,19 +3,26 @@ use std::str::FromStr;
 use aarambh_ai_tokenizer::{THINK_END, THINK_START};
 use serde::{Deserialize, Serialize};
 
+/// Scores generated completions against ground-truth answers.
 pub trait Verifier: Send + Sync {
+    /// Return a reward score in the range expected by the verifier.
     fn score(&self, completion: &str, ground_truth: &str) -> f32;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+/// Built-in verifier selector.
 pub enum VerifierKind {
+    /// Numeric final-answer verifier.
     Math,
+    /// Thinking-format verifier.
     Format,
+    /// Weighted math plus format verifier.
     MathFormat,
 }
 
 impl VerifierKind {
+    /// Build the selected verifier.
     pub fn build(self) -> Box<dyn Verifier> {
         match self {
             Self::Math => Box::new(MathVerifier::default()),
@@ -44,6 +51,7 @@ impl FromStr for VerifierKind {
 }
 
 #[derive(Debug, Clone, Copy)]
+/// Verifies numeric final answers with tolerance.
 pub struct MathVerifier {
     tolerance: f64,
 }
@@ -55,6 +63,7 @@ impl Default for MathVerifier {
 }
 
 impl MathVerifier {
+    /// Create a math verifier with absolute/relative tolerance.
     pub fn new(tolerance: f64) -> Self {
         Self { tolerance }
     }
@@ -79,6 +88,7 @@ impl Verifier for MathVerifier {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
+/// Verifies that thinking markers contain non-empty thinking text.
 pub struct FormatVerifier;
 
 impl Verifier for FormatVerifier {
@@ -97,12 +107,14 @@ impl Verifier for FormatVerifier {
     }
 }
 
+/// Weighted composition of multiple verifiers.
 pub struct CompositeVerifier {
     verifiers: Vec<(Box<dyn Verifier>, f32)>,
     weight_sum: f32,
 }
 
 impl CompositeVerifier {
+    /// Create a composite verifier from verifier/weight pairs.
     pub fn new(verifiers: Vec<(Box<dyn Verifier>, f32)>) -> Self {
         let weight_sum = verifiers
             .iter()
@@ -126,6 +138,7 @@ impl Verifier for CompositeVerifier {
     }
 }
 
+/// Extract the final numeric answer from text.
 pub fn extract_final_number(text: &str) -> Option<f64> {
     let source = text
         .rsplit_once("####")

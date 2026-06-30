@@ -4,6 +4,7 @@ use candle_core::Tensor;
 use crate::int4::quantise_affine_i4;
 use crate::types::{PackedInt4Tensor, tensor_from_f32_vec, tensor_to_f32_vec};
 
+/// Compute a simple activation Hessian approximation for GPTQ.
 pub fn compute_hessian(activations: &Tensor) -> Result<Tensor> {
     let dims = activations.dims();
     let features = *dims.last().ok_or_else(|| {
@@ -33,6 +34,7 @@ pub fn compute_hessian(activations: &Tensor) -> Result<Tensor> {
     tensor_from_f32_vec(hessian, &[features, features], activations.device())
 }
 
+/// Invert a positive semi-definite Hessian with damping retries.
 pub fn cholesky_invert(h: &Tensor, damp: f32) -> Result<Tensor> {
     let dims = h.dims();
     if dims.len() != 2 || dims[0] != dims[1] {
@@ -64,6 +66,7 @@ pub fn cholesky_invert(h: &Tensor, damp: f32) -> Result<Tensor> {
     )))
 }
 
+/// Quantise a rank-2 weight tensor using GPTQ calibration inputs.
 pub fn quantise_layer_gptq(weight: &Tensor, hessian_inv: &Tensor) -> Result<PackedInt4Tensor> {
     let dims = hessian_inv.dims();
     if dims.len() != 2 || dims[0] != dims[1] {

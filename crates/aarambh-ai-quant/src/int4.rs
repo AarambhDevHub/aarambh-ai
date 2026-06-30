@@ -3,6 +3,7 @@ use candle_core::Tensor;
 
 use crate::types::{PackedInt4Tensor, ensure_same_numel, numel, tensor_shape, tensor_to_f32_vec};
 
+/// Quantise a tensor to affine per-group packed int4.
 pub fn quantise_affine_i4(tensor: &Tensor, group_size: usize) -> Result<PackedInt4Tensor> {
     if group_size == 0 {
         return Err(AarambhError::Config("group_size must be non-zero".into()));
@@ -40,6 +41,7 @@ pub fn quantise_affine_i4(tensor: &Tensor, group_size: usize) -> Result<PackedIn
     })
 }
 
+/// Pack 4-bit unsigned values into bytes.
 pub fn pack_i4_values(values: &[u8]) -> Vec<u8> {
     let mut packed = Vec::with_capacity(values.len().div_ceil(2));
     for pair in values.chunks(2) {
@@ -50,6 +52,7 @@ pub fn pack_i4_values(values: &[u8]) -> Vec<u8> {
     packed
 }
 
+/// Unpack 4-bit unsigned values from bytes.
 pub fn unpack_i4_values(data: &[u8], len: usize) -> Vec<u8> {
     let mut values = Vec::with_capacity(len);
     for byte in data {
@@ -63,6 +66,7 @@ pub fn unpack_i4_values(data: &[u8], len: usize) -> Vec<u8> {
     values
 }
 
+/// Dequantise a packed int4 tensor into f32 values.
 pub fn dequantise_packed_i4_to_vec(tensor: &PackedInt4Tensor) -> Result<Vec<f32>> {
     let n = numel(&tensor.shape);
     let expected_groups = n.div_ceil(tensor.group_size);

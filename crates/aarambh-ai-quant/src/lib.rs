@@ -1,12 +1,25 @@
+//! Quantisation, dequantisation, calibration, and GGUF-compatible packing utilities.
+#![deny(missing_docs)]
+
+/// Absolute-maximum int8 quantisation.
 pub mod absmax;
+/// Activation-aware weight quantisation.
 pub mod awq;
+/// Calibration statistics collection.
 pub mod calibrate;
+/// Dequantisation helpers.
 pub mod dequant;
+/// GGUF Q4_K_M block packing helpers.
 pub mod gguf_quant;
+/// GPTQ calibration and quantisation.
 pub mod gptq;
+/// Affine int4 packing and unpacking.
 pub mod int4;
+/// Quantised key/value cache utilities.
 pub mod kv_quant;
+/// Fake quantisation nodes for quantisation-aware training.
 pub mod qat;
+/// Shared quantisation data structures.
 pub mod types;
 
 pub use absmax::quantise_absmax_i8;

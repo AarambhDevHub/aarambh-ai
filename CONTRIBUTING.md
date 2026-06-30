@@ -62,7 +62,7 @@ cargo build --workspace
 cargo test --workspace
 
 # Check linting:
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 
 # Check formatting:
 cargo fmt --check
@@ -215,7 +215,7 @@ cargo test -p aarambh-ai-core tiny_config_head_dim_is_correct
 The CI runs:
 
 ```sh
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 This means any clippy warning is a CI failure. Fix all warnings before pushing.
@@ -245,9 +245,9 @@ Run this checklist locally:
 
 ```sh
 cargo fmt --check
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo doc --workspace
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
 All must pass cleanly — zero warnings, zero failures.
@@ -301,14 +301,11 @@ Feature requests that describe only the desired API without explaining the use c
 
 The `aarambh-ai-kernel` crate is the only crate in the workspace that contains CUDA C code, unsafe Rust, and raw pointer arithmetic. All other crates stay 100% safe Rust.
 
-### CPU SIMD (nightly)
+### CPU SIMD
 
-CPU SIMD kernels use `std::simd` which requires nightly Rust:
-
-```sh
-cd crates/aarambh-ai-kernel
-rustup override set nightly
-```
+CPU SIMD kernels use stable `std::arch` intrinsics with runtime dispatch for
+AVX2/FMA, AVX512, AVX2, and scalar fallback paths. No nightly toolchain is
+required.
 
 ### CUDA kernels
 
@@ -333,8 +330,8 @@ All tests should pass even without NVCC — they test the candle fallback path.
 
 aarambh-ai follows [Semantic Versioning](https://semver.org/).
 
-- **Patch** (`0.1.x`) — bug fixes only, no API changes.
-- **Minor** (`0.x.0`) — new features, backward-compatible API additions, new crates.
+- **Patch** (`1.0.x`) — bug fixes only, no API changes.
+- **Minor** (`1.x.0`) — new features and backward-compatible API additions.
 - **Major** (`x.0.0`) — breaking API changes with migration notes.
 
 All sub-crates share the same version as the workspace (tracked via the root `Cargo.toml`).
@@ -343,6 +340,4 @@ All sub-crates share the same version as the workspace (tracked via the root `Ca
 
 ## Questions?
 
-If you are unsure about anything — whether a bug is worth reporting, whether a feature fits the project, or how to approach a change — open an issue and ask. There are no stupid questions.
-
-You can also join the discussion on the [Aarambh Dev Hub Discord](https://discord.gg/aarambhdevhub) — look for the `#aarambh-ai` channel.
+If you are unsure about anything — whether a bug is worth reporting, whether a feature fits the project, or how to approach a change — open an issue and ask.

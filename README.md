@@ -8,6 +8,8 @@
 
 A decoder-only transformer with four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA fine-tuning, GRPO reinforcement learning, custom CUDA + SIMD kernels, safety guardrails, and a self-learning loop — all in one clean 14-crate Rust workspace.
 
+v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, and pretrained checkpoints are not attached to the release.
+
 **Inspired by:** LLaMA · Mistral · DeepSeek · GPT · Claude · Qwen · Gemma
 
 ---
@@ -34,6 +36,7 @@ A decoder-only transformer with four model scales, a three-level thinking engine
 | CPU SIMD kernels: AVX2/FMA RMSNorm, AVX512 override, parallel attention via rayon | Phase 4 ✅ |
 | CUDA kernel build prep | Phase 4 ✅ |
 | CLI binary with predict-view, streaming, thinking modes | Phase 6 ✅ |
+| Production v1.0 source release: strict docs, CI, release workflow, release notes | Phase 15 ✅ |
 
 ---
 
@@ -57,10 +60,34 @@ cargo check --workspace
 cargo test --workspace
 
 # Build a release binary
-cargo build --release
+cargo build --release -p aarambh-ai
 
 # Run the CLI
-cargo run --release -- --help
+cargo run --release -p aarambh-ai -- --help
+
+# Optional local install from this source checkout
+cargo install --path aarambh-ai
+aarambh-ai --version
+```
+
+---
+
+## Production v1.0 Source Release
+
+aarambh-ai v1.0.0 is released as source through GitHub tags and release notes:
+
+- Build/install from the repository source tree.
+- Crates use `publish = false`; there is no crates.io release yet.
+- No pretrained checkpoints, model weights, adapters, tokenizer artifacts, or GGUF files are released.
+- Example Tiny configs and data paths are for local smoke tests and user-created checkpoints.
+- CUDA is optional; default CPU builds work without NVCC.
+
+```sh
+git clone https://github.com/AarambhDevHub/aarambh-ai.git
+cd aarambh-ai
+git checkout v1.0.0
+cargo build --release -p aarambh-ai
+target/release/aarambh-ai --version
 ```
 
 ---
@@ -71,10 +98,10 @@ Phase 5 adds a working training loop for Tiny-scale pretraining:
 
 ```sh
 # Put Tiny Shakespeare at data/tiny_shakespeare.txt first.
-cargo run --release -- train --config configs/tiny_shakespeare.toml
+cargo run --release -p aarambh-ai -- train --config configs/tiny_shakespeare.toml
 
 # Fast CPU smoke run for checking the training path.
-cargo run --release -- train --config configs/tiny_shakespeare_smoke.toml
+cargo run --release -p aarambh-ai -- train --config configs/tiny_shakespeare_smoke.toml
 ```
 
 The trainer builds or loads a BPE tokenizer, creates train/validation loaders,
@@ -162,7 +189,7 @@ Phase 6 adds a checkpoint-backed inference engine and `infer` CLI command:
 
 ```sh
 # Use latest.json or best.json from the config checkpoint directory.
-cargo run --release -- infer \
+cargo run --release -p aarambh-ai -- infer \
   --config configs/tiny_shakespeare_smoke.toml \
   --prompt "To be, or not to be" \
   --max-tokens 32 \
@@ -170,7 +197,7 @@ cargo run --release -- infer \
   --predict-view
 
 # Stream sampled text from an explicit model/tokenizer pair.
-cargo run --release -- infer \
+cargo run --release -p aarambh-ai -- infer \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_shakespeare/best/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -182,7 +209,7 @@ cargo run --release -- infer \
   --stream
 
 # Force a budget-controlled thinking block before the visible answer.
-cargo run --release -- infer \
+cargo run --release -p aarambh-ai -- infer \
   --config configs/tiny_shakespeare.toml \
   --prompt "What is 15 x 27?" \
   --max-tokens 96 \
@@ -207,7 +234,7 @@ text are never written to the log.
 
 ```sh
 # Default strict safety: injection/jailbreak checks, PII redaction, output checks.
-cargo run --release -- infer \
+cargo run --release -p aarambh-ai -- infer \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_shakespeare/best/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -218,7 +245,7 @@ cargo run --release -- infer \
   --safety-audit-log safety_audit.jsonl
 
 # Raw legacy inference for benchmarks/debugging.
-cargo run --release -- infer \
+cargo run --release -p aarambh-ai -- infer \
   --config configs/tiny_shakespeare.toml \
   --prompt "The king" \
   --max-tokens 64 \
@@ -232,7 +259,7 @@ state only after the safety layer allows the draft.
 
 ```sh
 # CPU-safe self-learning with critique + replay.
-cargo run --release -- infer \
+cargo run --release -p aarambh-ai -- infer \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_shakespeare/best/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -243,7 +270,7 @@ cargo run --release -- infer \
   --self-learn-state-dir adapters/selflearn
 
 # Deterministic-verifier online GRPO when ground truth is available.
-cargo run --release -- infer \
+cargo run --release -p aarambh-ai -- infer \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_shakespeare/best/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -254,12 +281,12 @@ cargo run --release -- infer \
   --self-learn-ground-truth "#### 4"
 
 # Manage persistent self-learning state.
-cargo run --release -- selflearn stats --replay-path data/replay.jsonl
-cargo run --release -- selflearn flush-gradients \
+cargo run --release -p aarambh-ai -- selflearn stats --replay-path data/replay.jsonl
+cargo run --release -p aarambh-ai -- selflearn flush-gradients \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_shakespeare/best/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json
-cargo run --release -- selflearn replay \
+cargo run --release -p aarambh-ai -- selflearn replay \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_shakespeare/best/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -276,7 +303,7 @@ conversion, QAT primitives, and INT8 KV-cache storage:
 
 ```sh
 # Export a SafeTensors checkpoint to INT8 GGUF.
-cargo run --release -- quantise \
+cargo run --release -p aarambh-ai -- quantise \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_shakespeare/best/model.safetensors \
   --bits 8 \
@@ -284,7 +311,7 @@ cargo run --release -- quantise \
   --output checkpoints/tiny-q8.gguf
 
 # Calibrate and export an INT4 GGUF checkpoint.
-cargo run --release -- quantise \
+cargo run --release -p aarambh-ai -- quantise \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_shakespeare/best/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -295,7 +322,7 @@ cargo run --release -- quantise \
   --output checkpoints/tiny-q4.gguf
 
 # Infer directly from GGUF.
-cargo run --release -- infer \
+cargo run --release -p aarambh-ai -- infer \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny-q4.gguf \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -304,7 +331,7 @@ cargo run --release -- infer \
   --greedy
 
 # Convert a HuggingFace safetensors directory into Aarambh SafeTensors.
-cargo run --release -- convert \
+cargo run --release -p aarambh-ai -- convert \
   --config configs/tiny_shakespeare.toml \
   --input /path/to/hf_model \
   --output checkpoints/hf-aarambh.safetensors \
@@ -333,7 +360,7 @@ Input data is JSONL:
 
 ```sh
 # LoRA SFT on a SafeTensors base.
-cargo run --release -- finetune sft \
+cargo run --release -p aarambh-ai -- finetune sft \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -342,7 +369,7 @@ cargo run --release -- finetune sft \
   --output adapters/tiny_sft
 
 # QLoRA SFT from a GGUF or SafeTensors base.
-cargo run --release -- finetune qlora \
+cargo run --release -p aarambh-ai -- finetune qlora \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_shakespeare/tiny-q4.gguf \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -351,14 +378,14 @@ cargo run --release -- finetune qlora \
   --output adapters/tiny_qlora
 
 # Merge an adapter into a normal SafeTensors checkpoint.
-cargo run --release -- finetune merge \
+cargo run --release -p aarambh-ai -- finetune merge \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --adapter adapters/tiny_sft \
   --output checkpoints/tiny_sft_merged
 
 # Run the merged model with the existing inference engine.
-cargo run --release -- infer \
+cargo run --release -p aarambh-ai -- infer \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_sft_merged/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -378,7 +405,7 @@ accepted.
 
 ```sh
 # Fast CPU smoke run.
-cargo run --release -- finetune grpo \
+cargo run --release -p aarambh-ai -- finetune grpo \
   --config configs/tiny_shakespeare_smoke.toml \
   --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --reference checkpoints/tiny_shakespeare/step_000050/model.safetensors \
@@ -392,7 +419,7 @@ cargo run --release -- finetune grpo \
   --output adapters/tiny_grpo_smoke
 
 # Kaggle-style GRPO run.
-cargo run --release -- finetune grpo \
+cargo run --release -p aarambh-ai -- finetune grpo \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_sft_merged/model.safetensors \
   --reference checkpoints/tiny_sft_merged/model.safetensors \
@@ -601,7 +628,7 @@ aarambh-ai/
 | 12 | Self-learning loop | i3 + GPU | ✅ |
 | 13 | GPU scale-up (Small → Large) | GPU | ✅ |
 | 14 | Flash Attention CUDA kernels | GPU | ✅ |
-| 15 | Production release v1.0 | all | ⬜ |
+| 15 | Production release v1.0 | all | ✅ |
 
 See [ROADMAP.md](ROADMAP.md) for the full phased delivery plan with tests and milestones.
 
@@ -614,7 +641,7 @@ cargo check --workspace
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
-cargo doc --workspace --no-deps
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
 ### Kernel Benchmarks
@@ -638,6 +665,8 @@ CPU/Candle fallback path.
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Complete design document, layer-by-layer explanation, data flow, thinking engine, quantisation, fine-tuning, safety, self-learning |
 | [ROADMAP.md](ROADMAP.md) | Step-by-step build plan with tasks, tests, and milestones for all 15 phases |
 | [SELF_LEARNING.md](SELF_LEARNING.md) | Deep dive into the self-learning loop: online GRPO, replay buffer, self-critique, CPU vs GPU modes |
+| [RELEASE.md](RELEASE.md) | v1.0.0 source-release checklist, validation commands, and release policy |
+| [.github/release-notes/v1.0.0.md](.github/release-notes/v1.0.0.md) | GitHub Release body for v1.0.0 |
 
 ---
 
@@ -651,7 +680,7 @@ If you use aarambh-ai in your research, please cite it as follows:
   author       = {Aarambh Dev Hub},
   year         = {2026},
   url          = {https://github.com/AarambhDevHub/aarambh-ai},
-  version      = {0.0.1},
+  version      = {1.0.0},
   license      = {Apache-2.0},
 }
 ```
@@ -662,7 +691,6 @@ If you use aarambh-ai in your research, please cite it as follows:
 
 - Star the repo on [GitHub](https://github.com/AarambhDevHub/aarambh-ai)
 - Open [issues](https://github.com/AarambhDevHub/aarambh-ai/issues) for reproducible bugs and clear feature requests
-- Join the discussion on [Discord](https://discord.gg/aarambhdevhub)
 - Report security vulnerabilities via [SECURITY.md](SECURITY.md)
 - Support development through [Buy Me a Coffee](https://buymeacoffee.com/aarambhdevhub) or [GitHub Sponsors](https://github.com/sponsors/aarambh-darshan)
 

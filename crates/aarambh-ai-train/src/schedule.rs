@@ -1,6 +1,7 @@
 use aarambh_ai_core::TrainConfig;
 
 #[derive(Debug, Clone)]
+/// Cosine learning-rate schedule with linear warmup.
 pub struct CosineScheduleWithWarmup {
     max_lr: f64,
     min_lr: f64,
@@ -9,6 +10,7 @@ pub struct CosineScheduleWithWarmup {
 }
 
 impl CosineScheduleWithWarmup {
+    /// Create a cosine schedule.
     pub fn new(max_lr: f64, warmup_steps: usize, total_steps: usize, min_lr_ratio: f64) -> Self {
         let total_steps = total_steps.max(1);
         let min_lr = max_lr * min_lr_ratio;
@@ -20,6 +22,7 @@ impl CosineScheduleWithWarmup {
         }
     }
 
+    /// Create a cosine schedule from training configuration.
     pub fn from_train_config(config: &TrainConfig) -> Self {
         Self::new(
             config.lr,
@@ -29,6 +32,7 @@ impl CosineScheduleWithWarmup {
         )
     }
 
+    /// Return the learning rate for zero-based optimizer step `step`.
     pub fn lr_at_step(&self, step: usize) -> f64 {
         if self.warmup_steps > 0 && step < self.warmup_steps {
             return self.max_lr * (step + 1) as f64 / self.warmup_steps as f64;

@@ -8,6 +8,7 @@ use crate::kvcache::KVCache;
 use crate::rope::RopeCache;
 
 #[derive(Debug, Clone)]
+/// Grouped-query self-attention layer.
 pub struct GroupedQueryAttention {
     wq: Linear,
     wk: Linear,
@@ -20,6 +21,7 @@ pub struct GroupedQueryAttention {
 }
 
 impl GroupedQueryAttention {
+    /// Create an attention layer from projection layers and head counts.
     pub fn new(
         wq: Linear,
         wk: Linear,
@@ -42,6 +44,7 @@ impl GroupedQueryAttention {
         }
     }
 
+    /// Run inference attention, optionally updating a KV cache.
     pub fn forward(
         &self,
         x: &Tensor,
@@ -85,6 +88,7 @@ impl GroupedQueryAttention {
         self.wo.forward(&out)
     }
 
+    /// Run the training attention path without mutating a KV cache.
     pub fn forward_train(
         &self,
         x: &Tensor,
@@ -123,6 +127,7 @@ impl GroupedQueryAttention {
         self.wo.forward(&out)
     }
 
+    /// Run attention while recording activation tensors for calibration.
     pub fn forward_with_capture(
         &self,
         x: &Tensor,
@@ -166,18 +171,22 @@ impl GroupedQueryAttention {
         self.wo.forward(&out)
     }
 
+    /// Return the query projection weight tensor.
     pub fn wq_weight(&self) -> &Tensor {
         self.wq.weight()
     }
 
+    /// Return the key projection weight tensor.
     pub fn wk_weight(&self) -> &Tensor {
         self.wk.weight()
     }
 
+    /// Return the value projection weight tensor.
     pub fn wv_weight(&self) -> &Tensor {
         self.wv.weight()
     }
 
+    /// Return the output projection weight tensor.
     pub fn wo_weight(&self) -> &Tensor {
         self.wo.weight()
     }

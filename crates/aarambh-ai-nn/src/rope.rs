@@ -1,6 +1,7 @@
 use candle_core::{DType, Device, Result, Tensor};
 
 #[derive(Debug, Clone)]
+/// Precomputed rotary-position embedding cache.
 pub struct RopeCache {
     cos: Tensor,
     sin: Tensor,
@@ -8,6 +9,7 @@ pub struct RopeCache {
 }
 
 impl RopeCache {
+    /// Build cosine and sine tables for the requested context length and head width.
     pub fn new(
         max_seq_len: usize,
         head_dim: usize,
@@ -37,12 +39,14 @@ impl RopeCache {
         Ok(Self { cos, sin, head_dim })
     }
 
+    /// Apply RoPE to query and key tensors through the standard path.
     pub fn apply(&self, q: &Tensor, k: &Tensor, seqlen_offset: usize) -> Result<(Tensor, Tensor)> {
         let q_rot = self.apply_rotate(q, seqlen_offset)?;
         let k_rot = self.apply_rotate(k, seqlen_offset)?;
         Ok((q_rot, k_rot))
     }
 
+    /// Apply RoPE to query and key tensors, using fused kernels when available.
     pub fn apply_inference(
         &self,
         q: &Tensor,

@@ -9,22 +9,33 @@ use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+/// Stage where a safety event occurred.
 pub enum SafetyStage {
+    /// Prompt/input stage.
     Input,
+    /// Generated output stage.
     Output,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Privacy-preserving safety audit event.
 pub struct SafetyEvent {
+    /// Event creation time in Unix milliseconds.
     pub timestamp_unix_ms: u128,
+    /// SHA-256 hash of the prompt.
     pub prompt_hash: String,
+    /// Safety stage.
     pub stage: SafetyStage,
+    /// Verdict label.
     pub verdict: String,
+    /// Rule identifiers that fired.
     pub triggered_rules: Vec<String>,
+    /// Check latency in milliseconds.
     pub latency_ms: u128,
 }
 
 impl SafetyEvent {
+    /// Create a safety audit event.
     pub fn new(
         prompt_hash: String,
         stage: SafetyStage,
@@ -43,6 +54,7 @@ impl SafetyEvent {
     }
 }
 
+/// Hash a prompt for audit logging without storing plaintext.
 pub fn hash_prompt(prompt: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(prompt.as_bytes());
@@ -50,6 +62,7 @@ pub fn hash_prompt(prompt: &str) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+/// Append a safety event as JSONL.
 pub fn log_event(event: &SafetyEvent, path: &Path) -> Result<()> {
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
     serde_json::to_writer(&mut file, event)?;

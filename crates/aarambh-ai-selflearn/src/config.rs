@@ -6,13 +6,18 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+/// Runtime mode for the self-learning loop.
 pub enum SelfLearnMode {
+    /// CPU mode defers expensive updates by default.
     Cpu,
+    /// GPU mode applies online updates inline.
     Gpu,
+    /// Self-learning is disabled.
     Disabled,
 }
 
 impl SelfLearnMode {
+    /// Return true when self-learning is enabled.
     pub fn is_enabled(self) -> bool {
         !matches!(self, Self::Disabled)
     }
@@ -34,48 +39,78 @@ impl FromStr for SelfLearnMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Online GRPO configuration used by self-learning.
 pub struct OnlineGrpoConfig {
+    /// Number of completions sampled for reward grouping.
     pub n_completions: usize,
+    /// Sampling temperature.
     pub temperature: f32,
+    /// Online adapter learning rate.
     pub online_lr: f64,
+    /// KL penalty coefficient.
     pub kl_coeff: f64,
+    /// LoRA adapter rank.
     pub lora_rank: usize,
+    /// Whether CPU mode should store gradients instead of stepping inline.
     pub skip_inline_on_cpu: bool,
+    /// Maximum generated tokens for self-learning rollouts.
     pub max_new_tokens: usize,
+    /// Optional top-k sampling limit.
     pub top_k: Option<usize>,
+    /// Optional nucleus sampling probability mass.
     pub top_p: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Replay buffer configuration.
 pub struct ReplayConfig {
+    /// Maximum stored replay entries.
     pub capacity: usize,
+    /// Minimum critique score required for storage.
     pub min_score: f32,
+    /// Online step interval for replay fine-tuning.
     pub replay_every_n: usize,
+    /// Replay fine-tuning batch size.
     pub batch_size: usize,
+    /// Replay JSONL path.
     pub path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Critique and rewrite configuration.
 pub struct CritiqueConfig {
+    /// Whether critique is enabled.
     pub enabled: bool,
+    /// Score threshold below which rewrite is attempted.
     pub rewrite_threshold: f32,
+    /// Maximum rewrite attempts.
     pub max_rewrites: usize,
+    /// Maximum critique generation tokens.
     pub max_tokens: usize,
     #[serde(default = "default_rewrite_max_tokens")]
+    /// Maximum rewrite generation tokens.
     pub rewrite_max_tokens: usize,
+    /// Critique prompt template.
     pub prompt_template: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Complete self-learning configuration.
 pub struct SelfLearnConfig {
+    /// Runtime mode.
     pub mode: SelfLearnMode,
+    /// Online GRPO settings.
     pub grpo: OnlineGrpoConfig,
+    /// Replay settings.
     pub replay: ReplayConfig,
+    /// Critique settings.
     pub critique: CritiqueConfig,
+    /// Directory for adapter, optimizer, and metrics state.
     pub state_dir: PathBuf,
 }
 
 impl SelfLearnConfig {
+    /// Return CPU-oriented defaults.
     pub fn for_cpu() -> Self {
         Self {
             mode: SelfLearnMode::Cpu,
@@ -109,6 +144,7 @@ impl SelfLearnConfig {
         }
     }
 
+    /// Return GPU-oriented defaults.
     pub fn for_gpu() -> Self {
         Self {
             mode: SelfLearnMode::Gpu,
@@ -142,6 +178,7 @@ impl SelfLearnConfig {
         }
     }
 
+    /// Return disabled self-learning defaults.
     pub fn disabled() -> Self {
         let mut config = Self::for_cpu();
         config.mode = SelfLearnMode::Disabled;
@@ -149,6 +186,7 @@ impl SelfLearnConfig {
         config
     }
 
+    /// Return defaults for a mode.
     pub fn for_mode(mode: SelfLearnMode) -> Self {
         match mode {
             SelfLearnMode::Cpu => Self::for_cpu(),
@@ -157,16 +195,19 @@ impl SelfLearnConfig {
         }
     }
 
+    /// Override the replay JSONL path.
     pub fn with_replay_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.replay.path = path.into();
         self
     }
 
+    /// Override the state directory.
     pub fn with_state_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.state_dir = path.into();
         self
     }
 
+    /// Validate configuration ranges.
     pub fn validate(&self) -> Result<()> {
         if self.grpo.n_completions == 0 {
             return Err(AarambhError::Config(
@@ -233,6 +274,7 @@ impl Default for SelfLearnConfig {
     }
 }
 
+/// Return the default JSON critique prompt template.
 pub fn default_critique_template() -> String {
     r#"<|user|>
 Rate this response on a scale from 0.0 to 1.0.

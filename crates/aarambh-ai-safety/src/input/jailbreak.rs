@@ -1,17 +1,22 @@
 use super::normalize_signal;
 
 #[derive(Debug, Clone, PartialEq)]
+/// Jailbreak detector score.
 pub struct JailbreakScore {
+    /// Normalized score in `[0, 1]`.
     pub score: f32,
+    /// Rule identifiers matched by the detector.
     pub matched_rules: Vec<String>,
 }
 
 impl JailbreakScore {
+    /// Return true when the score meets `threshold`.
     pub fn is_triggered(&self, threshold: f32) -> bool {
         self.score >= threshold
     }
 }
 
+/// Detect jailbreak patterns in a prompt.
 pub fn detect_jailbreak(prompt: &str) -> JailbreakScore {
     let text = normalize_signal(prompt);
     let mut score = 0.0f32;

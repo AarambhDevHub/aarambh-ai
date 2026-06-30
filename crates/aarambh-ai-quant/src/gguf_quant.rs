@@ -1,6 +1,9 @@
+/// Number of weights in one Q4_K_M block.
 pub const Q4_K_M_BLOCK_SIZE: usize = 256;
+/// Number of encoded bytes in one Q4_K_M block.
 pub const Q4_K_M_ENCODED_SIZE: usize = 132;
 
+/// Quantise one 256-value block to the project Q4_K_M byte layout.
 pub fn quantise_block_q4_k_m(block_256_weights: &[f32]) -> [u8; Q4_K_M_ENCODED_SIZE] {
     assert_eq!(block_256_weights.len(), Q4_K_M_BLOCK_SIZE);
     let min = block_256_weights
@@ -32,6 +35,7 @@ pub fn quantise_block_q4_k_m(block_256_weights: &[f32]) -> [u8; Q4_K_M_ENCODED_S
     encoded
 }
 
+/// Dequantise one Q4_K_M byte block to f32 values.
 pub fn dequantise_block_q4_k_m(block: &[u8; Q4_K_M_ENCODED_SIZE]) -> [f32; Q4_K_M_BLOCK_SIZE] {
     let scale = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
     let min = f16_to_f32(u16::from_le_bytes([block[2], block[3]]));
@@ -44,6 +48,7 @@ pub fn dequantise_block_q4_k_m(block: &[u8; Q4_K_M_ENCODED_SIZE]) -> [f32; Q4_K_
     values
 }
 
+/// Encode an f32 value as IEEE f16 bits.
 pub fn f32_to_f16(value: f32) -> u16 {
     let bits = value.to_bits();
     let sign = ((bits >> 16) & 0x8000) as u16;
@@ -77,6 +82,7 @@ pub fn f32_to_f16(value: f32) -> u16 {
     half
 }
 
+/// Decode IEEE f16 bits to f32.
 pub fn f16_to_f32(value: u16) -> f32 {
     let sign = ((value & 0x8000) as u32) << 16;
     let exp = ((value >> 10) & 0x1f) as i32;

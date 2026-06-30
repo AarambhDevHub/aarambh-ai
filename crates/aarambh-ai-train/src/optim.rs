@@ -6,13 +6,19 @@ use candle_core::{DType, Tensor, Var};
 use candle_nn::VarMap;
 use serde::{Deserialize, Serialize};
 
+/// Map from parameter name to accumulated gradient tensor.
 pub type GradMap = HashMap<String, Tensor>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// AdamW optimizer hyperparameters.
 pub struct AdamWConfig {
+    /// First-moment coefficient.
     pub beta1: f64,
+    /// Second-moment coefficient.
     pub beta2: f64,
+    /// Numerical epsilon.
     pub epsilon: f64,
+    /// Decoupled weight decay.
     pub weight_decay: f64,
 }
 
@@ -28,6 +34,7 @@ impl From<&TrainConfig> for AdamWConfig {
 }
 
 #[derive(Debug, Clone)]
+/// Named trainable parameter and its weight-decay policy.
 pub struct TrainableParameter {
     name: String,
     var: Var,
@@ -35,6 +42,7 @@ pub struct TrainableParameter {
 }
 
 impl TrainableParameter {
+    /// Create a trainable parameter from its checkpoint name and variable.
     pub fn new(name: String, var: Var) -> Self {
         let decoupled_weight_decay = uses_weight_decay(&name);
         Self {
@@ -44,20 +52,24 @@ impl TrainableParameter {
         }
     }
 
+    /// Return the parameter checkpoint name.
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    /// Return the current parameter tensor.
     pub fn tensor(&self) -> &Tensor {
         self.var.as_tensor()
     }
 
+    /// Return true when decoupled weight decay applies.
     pub fn uses_weight_decay(&self) -> bool {
         self.decoupled_weight_decay
     }
 }
 
 #[derive(Debug, Clone)]
+/// AdamW optimizer with serializable moment state.
 pub struct AdamW {
     config: AdamWConfig,
     step: usize,
@@ -67,6 +79,7 @@ pub struct AdamW {
 }
 
 impl AdamW {
+    /// Create AdamW from explicit trainable parameters.
     pub fn new(params: Vec<TrainableParameter>, config: AdamWConfig) -> Result<Self> {
         validate_config(&config)?;
         let mut m = HashMap::with_capacity(params.len());
@@ -84,6 +97,7 @@ impl AdamW {
         })
     }
 
+    /// Create AdamW from all variables in a [`VarMap`].
     pub fn from_varmap(varmap: &VarMap, config: AdamWConfig) -> Result<Self> {
         let mut params = {
             let data = varmap.data().lock().unwrap();
@@ -95,22 +109,27 @@ impl AdamW {
         Self::new(params, config)
     }
 
+    /// Return optimizer parameters.
     pub fn parameters(&self) -> &[TrainableParameter] {
         &self.params
     }
 
+    /// Return completed optimizer steps.
     pub fn step_num(&self) -> usize {
         self.step
     }
 
+    /// Set completed optimizer steps after checkpoint restore.
     pub fn set_step(&mut self, step: usize) {
         self.step = step;
     }
 
+    /// Return optimizer hyperparameters.
     pub fn config(&self) -> &AdamWConfig {
         &self.config
     }
 
+    /// Apply one AdamW update using gradients and learning rate.
     pub fn step(&mut self, grads: &GradMap, lr: f64) -> Result<()> {
         if grads.is_empty() {
             return Err(AarambhError::Config(
@@ -166,6 +185,7 @@ impl AdamW {
         Ok(())
     }
 
+    /// Save optimizer moment tensors to safetensors.
     pub fn save_state(&self, path: impl AsRef<Path>) -> Result<()> {
         let mut tensors = HashMap::with_capacity(self.params.len() * 2);
         for param in &self.params {
@@ -182,6 +202,7 @@ impl AdamW {
         Ok(())
     }
 
+    /// Load optimizer moment tensors from safetensors.
     pub fn load_state(
         &mut self,
         path: impl AsRef<Path>,
@@ -208,6 +229,7 @@ fn f32_zeros_like(tensor: &Tensor) -> candle_core::Result<Tensor> {
     Tensor::zeros(tensor.shape(), DType::F32, tensor.device())
 }
 
+/// Compute the global L2 norm across gradient tensors.
 pub fn global_grad_norm(grads: &GradMap) -> Result<f64> {
     let mut sum_sq = 0f64;
     for grad in grads.values() {
@@ -217,6 +239,7 @@ pub fn global_grad_norm(grads: &GradMap) -> Result<f64> {
     Ok(sum_sq.sqrt())
 }
 
+/// Clip gradients in place and return the original global norm.
 pub fn clip_gradients(grads: &mut GradMap, max_norm: f64) -> Result<f64> {
     let norm = global_grad_norm(grads)?;
     if max_norm > 0.0 && norm > max_norm {

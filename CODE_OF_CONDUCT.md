@@ -42,9 +42,10 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders via our
-[Discord server](https://discord.gg/aarambhdevhub) or by opening a
-[GitHub Issue](https://github.com/AarambhDevHub/aarambh-ai/issues).
+reported to the community leaders by opening a
+[GitHub Issue](https://github.com/AarambhDevHub/aarambh-ai/issues). Sensitive
+reports should use GitHub private vulnerability reporting or a private GitHub
+Security Advisory instead of a public issue.
 
 All complaints will be reviewed and investigated promptly and fairly.
 

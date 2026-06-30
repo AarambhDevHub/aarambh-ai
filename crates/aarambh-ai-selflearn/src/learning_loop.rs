@@ -12,36 +12,59 @@ use crate::online_grpo::{OnlineGrpo, OnlineGrpoBuildConfig, OnlineUpdate};
 use crate::replay::{ReplayBuffer, ReplayEntry};
 
 #[derive(Debug, Clone)]
+/// Build configuration for [`SelfLearnLoop`].
 pub struct SelfLearnBuildConfig {
+    /// Model architecture configuration.
     pub model_config: ModelConfig,
+    /// Path to the base model checkpoint.
     pub base_model_path: PathBuf,
+    /// Path to the frozen reference checkpoint.
     pub reference_model_path: PathBuf,
+    /// Path to tokenizer JSON.
     pub tokenizer_path: PathBuf,
+    /// Self-learning configuration.
     pub config: SelfLearnConfig,
+    /// Candle device.
     pub device: CandleDevice,
+    /// Model dtype.
     pub dtype: DType,
+    /// Random seed.
     pub seed: u64,
 }
 
 #[derive(Debug)]
+/// Generated draft awaiting safety approval and commit.
 pub struct SelfLearnDraft {
+    /// Original prompt.
     pub prompt: String,
+    /// Generated output.
     pub output: GenerationOutput,
+    /// Pending online update.
     pub update: OnlineUpdate,
+    /// Critique result for the output.
     pub critique: CritiqueResult,
 }
 
 #[derive(Debug, Clone)]
+/// Result returned after committing a self-learning draft.
 pub struct SelfLearnResponse {
+    /// Final response text.
     pub response: String,
+    /// Critique score.
     pub critique_score: f32,
+    /// Optional verifier score.
     pub verifier_score: Option<f32>,
+    /// Whether critique rewrote the response.
     pub was_rewritten: bool,
+    /// Whether response was stored in replay.
     pub stored_in_replay: bool,
+    /// Whether GRPO was used for the update.
     pub used_grpo: bool,
+    /// Human-readable metrics summary.
     pub metrics_summary: String,
 }
 
+/// Coordinates online GRPO, critique, replay, and metric state.
 pub struct SelfLearnLoop {
     online_grpo: OnlineGrpo,
     replay: ReplayBuffer,
@@ -51,6 +74,7 @@ pub struct SelfLearnLoop {
 }
 
 impl SelfLearnLoop {
+    /// Build a self-learning loop from checkpoint paths.
     pub fn from_paths(build: SelfLearnBuildConfig) -> Result<Self> {
         build.config.validate()?;
         let replay =
@@ -77,18 +101,22 @@ impl SelfLearnLoop {
         })
     }
 
+    /// Return self-learning configuration.
     pub fn config(&self) -> &SelfLearnConfig {
         &self.config
     }
 
+    /// Return replay buffer state.
     pub fn replay(&self) -> &ReplayBuffer {
         &self.replay
     }
 
+    /// Return learning metrics.
     pub fn metrics(&self) -> &LearningMetrics {
         &self.metrics
     }
 
+    /// Generate and store a draft without committing the update.
     pub fn generate_draft(
         &mut self,
         prompt: &str,
@@ -130,6 +158,7 @@ impl SelfLearnLoop {
         Ok(self.last_draft.as_ref().expect("draft inserted above"))
     }
 
+    /// Generate a draft and replay stored generation steps through a callback.
     pub fn generate_draft_with_callback<F>(
         &mut self,
         prompt: &str,
@@ -151,6 +180,7 @@ impl SelfLearnLoop {
         Ok(output)
     }
 
+    /// Commit the last draft after optional safety-filtered replacement text.
     pub fn commit_last_draft(
         &mut self,
         safe_response: Option<String>,
@@ -197,14 +227,17 @@ impl SelfLearnLoop {
         })
     }
 
+    /// Drop the last draft without applying learning state.
     pub fn discard_last_draft(&mut self) {
         self.last_draft = None;
     }
 
+    /// Apply any pending CPU-mode gradients.
     pub fn flush_pending_gradients(&mut self) -> Result<Option<f64>> {
         self.online_grpo.flush_pending_gradients()
     }
 
+    /// Run replay fine-tuning from sampled high-quality responses.
     pub fn replay_finetune(&mut self) -> Result<Option<f64>> {
         let batch = self.replay.sample_batch(self.config.replay.batch_size);
         if batch.is_empty() {

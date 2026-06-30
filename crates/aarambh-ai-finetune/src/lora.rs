@@ -6,11 +6,17 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
+/// LoRA adapter hyperparameters and target-module selection.
 pub struct LoraConfig {
+    /// Low-rank adapter rank.
     pub rank: usize,
+    /// LoRA alpha scaling value.
     pub alpha: f64,
+    /// Dropout probability applied to adapter inputs during training.
     pub dropout: f32,
+    /// Module suffixes that should receive adapters.
     pub target_modules: Vec<String>,
+    /// Quantisation group size used for QLoRA base weights.
     pub group_size: usize,
 }
 
@@ -32,6 +38,7 @@ impl Default for LoraConfig {
 }
 
 impl LoraConfig {
+    /// Validate LoRA hyperparameters.
     pub fn validate(&self) -> Result<()> {
         if self.rank == 0 {
             return Err(AarambhError::Config(
@@ -59,6 +66,7 @@ impl LoraConfig {
         Ok(())
     }
 
+    /// Parse comma-separated target-module suffixes.
     pub fn from_target_csv(value: &str) -> Vec<String> {
         value
             .split(',')
@@ -68,6 +76,7 @@ impl LoraConfig {
             .collect()
     }
 
+    /// Return true when `weight_name` matches configured target modules.
     pub fn targets_weight(&self, weight_name: &str) -> bool {
         let module_name = weight_name.strip_suffix(".weight").unwrap_or(weight_name);
         self.target_modules
@@ -77,12 +86,16 @@ impl LoraConfig {
 }
 
 #[derive(Debug, Clone)]
+/// Base linear weight storage for LoRA layers.
 pub enum BaseLinear {
+    /// Full-precision base weight.
     F32(Tensor),
+    /// Packed int4 base weight for QLoRA.
     I4(PackedInt4Tensor),
 }
 
 impl BaseLinear {
+    /// Build base storage from a tensor, optionally quantizing it.
     pub fn from_tensor(weight: &Tensor, quantized: bool, group_size: usize) -> Result<Self> {
         if quantized {
             Ok(Self::I4(quantise_affine_i4(weight, group_size)?))
@@ -91,6 +104,7 @@ impl BaseLinear {
         }
     }
 
+    /// Return the dequantised base weight on `device`.
     pub fn weight(&self, device: &Device) -> Result<Tensor> {
         match self {
             Self::F32(weight) => Ok(weight.clone()),
@@ -98,6 +112,7 @@ impl BaseLinear {
         }
     }
 
+    /// Return the base weight shape.
     pub fn shape(&self) -> &[usize] {
         match self {
             Self::F32(weight) => weight.dims(),
@@ -107,6 +122,7 @@ impl BaseLinear {
 }
 
 #[derive(Debug, Clone)]
+/// Linear layer with optional LoRA adapter matrices.
 pub struct LoraLinear {
     name: String,
     base: BaseLinear,
@@ -118,6 +134,7 @@ pub struct LoraLinear {
 }
 
 impl LoraLinear {
+    /// Create a LoRA-wrapped linear layer.
     pub fn new(
         name: impl Into<String>,
         base_weight: &Tensor,
@@ -174,6 +191,7 @@ impl LoraLinear {
         })
     }
 
+    /// Create a LoRA layer intended to load an existing adapter.
     pub fn from_adapter(
         name: impl Into<String>,
         base_weight: &Tensor,
@@ -185,14 +203,17 @@ impl LoraLinear {
         Self::new(name, base_weight, config, varmap, quantized_base, device)
     }
 
+    /// Return the checkpoint weight name.
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    /// Return true when this layer owns adapter tensors.
     pub fn has_adapter(&self) -> bool {
         self.lora_a.is_some() && self.lora_b.is_some()
     }
 
+    /// Run the base projection plus optional adapter update.
     pub fn forward(&self, x: &Tensor, train: bool) -> Result<Tensor> {
         let base_weight = self.base.weight(&self.device)?;
         let base_out = linear_forward(x, &base_weight)?;
@@ -211,6 +232,7 @@ impl LoraLinear {
         Ok((base_out + up)?)
     }
 
+    /// Return the base weight with adapter delta merged.
     pub fn merged_weight(&self) -> Result<Tensor> {
         let base = self.base.weight(&self.device)?;
         let (Some(lora_a), Some(lora_b)) = (&self.lora_a, &self.lora_b) else {
@@ -220,6 +242,7 @@ impl LoraLinear {
         Ok((base + delta)?.detach())
     }
 
+    /// Return the number of trainable adapter parameters.
     pub fn adapter_param_count(&self) -> usize {
         let mut count = 0;
         if let Some(a) = &self.lora_a {
@@ -232,11 +255,13 @@ impl LoraLinear {
     }
 }
 
+/// Apply a bias-free linear projection.
 pub fn linear_forward(x: &Tensor, weight: &Tensor) -> Result<Tensor> {
     let layer = Linear::new(weight.clone(), None);
     Ok(layer.forward(x)?)
 }
 
+/// Build the adapter tensor name for a base weight and suffix.
 pub fn adapter_tensor_name(weight_name: &str, suffix: &str) -> String {
     weight_name
         .strip_suffix(".weight")

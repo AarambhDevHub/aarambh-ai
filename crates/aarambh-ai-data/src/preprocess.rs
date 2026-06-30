@@ -2,6 +2,7 @@ use aarambh_ai_core::TokenizerLike;
 
 use crate::dataset::TextDataset;
 
+/// Tokenize all records and split them into input/label windows.
 pub fn chunk_and_tokenize(
     dataset: &dyn TextDataset,
     tokenizer: &dyn TokenizerLike,

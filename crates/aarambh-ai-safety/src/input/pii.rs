@@ -1,13 +1,20 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Supported personally identifiable information kind.
 pub enum PiiKind {
+    /// Email address.
     Email,
+    /// Phone number.
     Phone,
+    /// National identifier such as SSN-style patterns.
     NationalId,
+    /// Credit-card number.
     CreditCard,
+    /// API key or secret-like token.
     ApiKey,
 }
 
 impl PiiKind {
+    /// Return the redaction replacement string.
     pub fn replacement(self) -> &'static str {
         match self {
             Self::Email => "[REDACTED_EMAIL]",
@@ -18,6 +25,7 @@ impl PiiKind {
         }
     }
 
+    /// Return a stable label for rule identifiers.
     pub fn label(self) -> &'static str {
         match self {
             Self::Email => "email",
@@ -30,23 +38,32 @@ impl PiiKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// One detected PII span.
 pub struct PiiFinding {
+    /// PII kind.
     pub kind: PiiKind,
+    /// Byte start offset.
     pub start: usize,
+    /// Byte end offset.
     pub end: usize,
+    /// Detector confidence.
     pub confidence: f32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
+/// Collection of PII findings.
 pub struct PiiFindings {
+    /// Detected PII spans.
     pub items: Vec<PiiFinding>,
 }
 
 impl PiiFindings {
+    /// Return true when there are no findings.
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
+    /// Return rule ids for each finding with a prefix.
     pub fn rules(&self, prefix: &str) -> Vec<String> {
         self.items
             .iter()
@@ -55,6 +72,7 @@ impl PiiFindings {
     }
 }
 
+/// Detect PII spans in text.
 pub fn detect_pii(text: &str) -> PiiFindings {
     let mut items = Vec::new();
     detect_emails(text, &mut items);
@@ -67,6 +85,7 @@ pub fn detect_pii(text: &str) -> PiiFindings {
     }
 }
 
+/// Redact detected PII spans from text.
 pub fn redact_pii(text: &str, findings: &PiiFindings) -> String {
     if findings.items.is_empty() {
         return text.to_string();

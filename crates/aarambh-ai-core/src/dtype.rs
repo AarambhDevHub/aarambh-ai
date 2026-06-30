@@ -4,13 +4,18 @@ use std::str::FromStr;
 use crate::error::AarambhError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Numeric dtype used for model weights and activation tensors.
 pub enum DType {
+    /// 32-bit floating point.
     F32,
+    /// IEEE 16-bit floating point.
     F16,
+    /// Brain floating point 16-bit.
     BF16,
 }
 
 impl DType {
+    /// Convert this dtype to Candle's dtype representation.
     pub fn to_candle(self) -> candle_core::DType {
         match self {
             Self::F32 => candle_core::DType::F32,
@@ -19,6 +24,7 @@ impl DType {
         }
     }
 
+    /// Return the number of bytes used by one scalar of this dtype.
     pub fn size_bytes(self) -> usize {
         match self {
             Self::F32 => 4,
@@ -54,13 +60,18 @@ impl fmt::Display for DType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// High-level precision preset.
 pub enum Precision {
+    /// Full f32 weights.
     Full,
+    /// Half precision f16 weights.
     Half,
+    /// Mixed precision using bf16 weights.
     Mixed,
 }
 
 impl Precision {
+    /// Return the default weight dtype for this precision preset.
     pub fn weight_dtype(self) -> DType {
         match self {
             Self::Full => DType::F32,

@@ -1,14 +1,20 @@
 use aarambh_ai_tokenizer::{THINK_END_ID, THINK_START_ID};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Thinking budget mode.
 pub enum ThinkingMode {
+    /// Disable thinking markers and budget.
     None,
+    /// Low thinking budget.
     Low,
+    /// Medium thinking budget.
     Medium,
+    /// High thinking budget.
     High,
 }
 
 impl ThinkingMode {
+    /// Return the nominal token budget for this mode.
     pub fn budget(self) -> usize {
         match self {
             Self::None => 0,
@@ -18,18 +24,23 @@ impl ThinkingMode {
         }
     }
 
+    /// Return true when thinking is enabled.
     pub fn is_enabled(self) -> bool {
         !matches!(self, Self::None)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Token that should be forced by the thinking controller.
 pub enum ForceToken {
+    /// Force the thinking start marker.
     ThinkStart,
+    /// Force the thinking end marker.
     ThinkEnd,
 }
 
 impl ForceToken {
+    /// Return the tokenizer id for this forced token.
     pub fn token_id(self) -> u32 {
         match self {
             Self::ThinkStart => THINK_START_ID,
@@ -39,6 +50,7 @@ impl ForceToken {
 }
 
 #[derive(Debug, Clone)]
+/// Tracks thinking marker state and budget enforcement.
 pub struct ThinkingController {
     mode: ThinkingMode,
     in_thinking_block: bool,
@@ -50,10 +62,12 @@ pub struct ThinkingController {
 }
 
 impl ThinkingController {
+    /// Create a controller with the mode's nominal budget.
     pub fn new(mode: ThinkingMode) -> Self {
         Self::with_budget(mode, mode.budget())
     }
 
+    /// Create a controller clamped to a generation token budget.
     pub fn for_generation(mode: ThinkingMode, max_new_tokens: usize) -> Self {
         let budget = if mode.is_enabled() {
             mode.budget().min(max_new_tokens.saturating_sub(32))
@@ -75,34 +89,42 @@ impl ThinkingController {
         }
     }
 
+    /// Return the configured thinking mode.
     pub fn mode(&self) -> ThinkingMode {
         self.mode
     }
 
+    /// Return true when currently inside a thinking block.
     pub fn in_thinking_block(&self) -> bool {
         self.in_thinking_block
     }
 
+    /// Return thinking content tokens used so far.
     pub fn tokens_used(&self) -> usize {
         self.tokens_used
     }
 
+    /// Return the effective generation-time thinking budget.
     pub fn effective_budget(&self) -> usize {
         self.budget
     }
 
+    /// Return true after the thinking block has started.
     pub fn has_started(&self) -> bool {
         self.started
     }
 
+    /// Return true after the thinking block has closed.
     pub fn is_closed(&self) -> bool {
         self.closed
     }
 
+    /// Return true when a thinking start marker should be forced.
     pub fn should_force_think_start(&self) -> bool {
         self.mode.is_enabled() && !self.started && !self.closed && self.pending_force.is_none()
     }
 
+    /// Take the next forced token, if one is pending or required.
     pub fn take_forced_token(&mut self) -> Option<ForceToken> {
         self.pending_force.take().or_else(|| {
             self.should_force_think_start()
@@ -110,6 +132,7 @@ impl ThinkingController {
         })
     }
 
+    /// Update controller state after a token and return any pending force.
     pub fn on_token(&mut self, token_id: u32) -> Option<ForceToken> {
         if self.mode == ThinkingMode::None {
             return None;

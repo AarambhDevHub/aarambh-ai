@@ -3,15 +3,22 @@ use std::collections::HashMap;
 use crate::input::normalize_signal;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Toxicity category detected in generated text.
 pub enum ToxicityCategory {
+    /// Hate speech.
     HateSpeech,
+    /// Violent or threatening content.
     Violence,
+    /// Sexual content.
     SexualContent,
+    /// Self-harm content.
     SelfHarm,
+    /// Illegal activity content.
     IllegalActivity,
 }
 
 impl ToxicityCategory {
+    /// Return a stable category label.
     pub fn label(self) -> &'static str {
         match self {
             Self::HateSpeech => "hate_speech",
@@ -24,18 +31,24 @@ impl ToxicityCategory {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Toxicity score and matched rules.
 pub struct ToxicityScore {
+    /// Overall score in `[0, 1]`.
     pub overall: f32,
+    /// Per-category scores.
     pub categories: HashMap<ToxicityCategory, f32>,
+    /// Rule identifiers matched by the scorer.
     pub matched_rules: Vec<String>,
 }
 
 impl ToxicityScore {
+    /// Return true when the overall score meets `threshold`.
     pub fn is_triggered(&self, threshold: f32) -> bool {
         self.overall >= threshold
     }
 }
 
+/// Score generated text for toxicity.
 pub fn score_toxicity(text: &str) -> ToxicityScore {
     let text = normalize_signal(text);
     let mut categories = HashMap::new();

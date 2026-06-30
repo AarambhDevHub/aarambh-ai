@@ -7,13 +7,18 @@ use crate::special;
 use crate::vocab::Vocab;
 
 #[derive(Debug, Clone)]
+/// Pure-Rust BPE tokenizer loaded from or saved to tokenizer JSON.
 pub struct BpeTokenizer {
+    /// Token-to-id and id-to-token vocabulary.
     pub vocab: Vocab,
+    /// Ordered BPE merge pairs.
     pub merges: Vec<(String, String)>,
+    /// Rank lookup for merge pairs.
     pub merge_rank: HashMap<(String, String), usize>,
 }
 
 impl BpeTokenizer {
+    /// Train a BPE tokenizer from a whitespace corpus file.
     pub fn train(corpus_path: impl AsRef<Path>, vocab_size: usize) -> Result<Self> {
         use tokenizers::models::bpe::{BPE, BpeTrainer};
         use tokenizers::tokenizer::{Tokenizer as HfTokenizer, Trainer};
@@ -52,6 +57,7 @@ impl BpeTokenizer {
         result
     }
 
+    /// Load a HuggingFace-compatible `tokenizer.json` file.
     pub fn from_pretrained(path: impl AsRef<Path>) -> Result<Self> {
         let content = std::fs::read_to_string(path.as_ref())?;
         let json: serde_json::Value = serde_json::from_str(&content).map_err(AarambhError::Json)?;
@@ -98,10 +104,12 @@ impl BpeTokenizer {
         })
     }
 
+    /// Save only the vocabulary JSON.
     pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
         self.vocab.save_json(path)
     }
 
+    /// Save a HuggingFace-compatible tokenizer JSON.
     pub fn save_pretrained(&self, path: impl AsRef<Path>) -> Result<()> {
         let vocab = self
             .vocab
@@ -131,6 +139,7 @@ impl BpeTokenizer {
         Ok(())
     }
 
+    /// Verify that reserved Aarambh special tokens use their required ids.
     pub fn validate_special_tokens(&self) -> Result<()> {
         for (token, id) in special::SPECIAL_TOKENS {
             if self.vocab.get_id(token) != Some(id) {

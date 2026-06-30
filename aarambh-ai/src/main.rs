@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(name = "aarambh-ai")]
+#[command(version)]
 #[command(about = "Aarambh AI command line tools")]
 struct Cli {
     #[command(subcommand)]

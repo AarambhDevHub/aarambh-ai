@@ -11,6 +11,7 @@ use crate::embedding::TokenEmbedding;
 use crate::head::LmHead;
 
 #[derive(Debug, Clone)]
+/// Full Aarambh decoder-only causal language model.
 pub struct AarambhModel {
     config: ModelConfig,
     embedding: TokenEmbedding,
@@ -22,6 +23,7 @@ pub struct AarambhModel {
 }
 
 impl AarambhModel {
+    /// Build a model from configuration and a Candle variable builder.
     pub fn new(cfg: &ModelConfig, vb: VarBuilder<'_>) -> Result<Self> {
         Self::validate_config(cfg)?;
 
@@ -97,6 +99,7 @@ impl AarambhModel {
         })
     }
 
+    /// Validate model dimensions before construction.
     pub fn validate_config(cfg: &ModelConfig) -> Result<()> {
         if cfg.vocab_size == 0 {
             return Err(AarambhError::Config("vocab_size must be non-zero".into()));
@@ -132,6 +135,7 @@ impl AarambhModel {
         Ok(())
     }
 
+    /// Run a full causal forward pass over token ids.
     pub fn forward(&self, token_ids: &Tensor) -> Result<Tensor> {
         let (_, seq_len) = self.check_token_ids(token_ids, 0)?;
         let mask = self.causal_mask(seq_len, 0)?;
@@ -145,6 +149,7 @@ impl AarambhModel {
         Ok(self.lm_head.forward(&x)?)
     }
 
+    /// Run the training forward path over token ids.
     pub fn forward_train(&self, token_ids: &Tensor) -> Result<Tensor> {
         let (_, seq_len) = self.check_token_ids(token_ids, 0)?;
         let mask = self.causal_mask(seq_len, 0)?;
@@ -158,6 +163,7 @@ impl AarambhModel {
         Ok(self.lm_head.forward(&x)?)
     }
 
+    /// Capture inputs to linear layers for calibration and quantisation.
     pub fn linear_inputs(&self, token_ids: &Tensor) -> Result<HashMap<String, Tensor>> {
         let (_, seq_len) = self.check_token_ids(token_ids, 0)?;
         let mask = self.causal_mask(seq_len, 0)?;
@@ -181,6 +187,7 @@ impl AarambhModel {
         Ok(capture)
     }
 
+    /// Run incremental inference using per-layer KV caches.
     pub fn forward_with_cache(
         &self,
         token_ids: &Tensor,
@@ -213,10 +220,12 @@ impl AarambhModel {
         Ok(self.lm_head.forward(&x)?)
     }
 
+    /// Create one empty KV cache per transformer block.
     pub fn empty_kv_cache(&self) -> Vec<KVCache> {
         (0..self.blocks.len()).map(|_| KVCache::new()).collect()
     }
 
+    /// Return a map of model tensor names to tensors.
     pub fn named_tensors(&self) -> HashMap<String, Tensor> {
         let mut tensors = HashMap::new();
         tensors.insert(
@@ -273,6 +282,7 @@ impl AarambhModel {
         tensors
     }
 
+    /// Return a named weight tensor by checkpoint name.
     pub fn get_weight(&self, name: &str) -> Option<&Tensor> {
         if name == "embedding.weight" {
             return Some(self.embedding.weight());
@@ -306,14 +316,17 @@ impl AarambhModel {
         None
     }
 
+    /// Return the token embedding layer.
     pub fn embedding(&self) -> &TokenEmbedding {
         &self.embedding
     }
 
+    /// Return all transformer blocks.
     pub fn blocks(&self) -> &[TransformerBlock] {
         &self.blocks
     }
 
+    /// Return the language-model head.
     pub fn lm_head(&self) -> &LmHead {
         &self.lm_head
     }
