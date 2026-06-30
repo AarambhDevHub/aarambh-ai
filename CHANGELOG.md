@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.14.0] - 2026-06-30
+
+### Added
+
+- **Phase 14 Flash Attention CUDA kernels**
+  - Replaced Phase 4 CUDA placeholders with real `.cu` kernels for Flash Attention forward, Flash Attention backward source, fused RMSNorm, fused RoPE, and fused SwiGLU
+  - Added NVCC-to-PTX build plumbing with `cfg(aarambh_cuda_kernels)` and graceful CPU/Candle fallback when NVCC is missing
+  - Added Candle custom-op wrappers that load PTX into Candle's CUDA module cache at runtime
+  - Added CUDA dispatch paths for supported contiguous F32/F16/BF16 FlashAttention and fused RMSNorm tensors
+  - Added inference-only fused RoPE and fused SwiGLU hooks in `aarambh-ai-nn`
+  - Added CUDA-gated kernel correctness tests against Candle references
+
+### Changed
+
+- **Kernel dispatch**
+  - `KernelPath` now reports `CudaFlashAttention` and `CudaFusedRmsNorm` when CUDA PTX kernels are compiled and tensor shapes are supported
+  - Attention dispatch detects project causal masks and routes supported CUDA cases to FlashAttention; arbitrary additive masks keep using Candle
+  - Training attention uses a dedicated dispatch entry with Candle-compatible backward fallback behavior
+
+- **Documentation**
+  - Marked Phase 14 complete in README and ROADMAP
+  - Updated architecture notes to describe PTX loading instead of CUDA stubs
+
+### Verified
+
+- `cargo fmt`
+- `cargo check`
+- `cargo test -p aarambh-ai-kernel`
+- `cargo test -p aarambh-ai-nn`
+- CUDA PTX tests are gated and must be run on a CUDA host with NVCC and `--features cuda`
+
 ## [0.13.0] - 2026-06-29
 
 ### Added

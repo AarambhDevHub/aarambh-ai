@@ -12,6 +12,7 @@ cuda = ["aarambh-ai-core/cuda", "candle-core/cuda", "candle-nn/cuda"]
 aarambh-ai-core = { path = "../aarambh-ai-core" }
 candle-core     = { workspace = true }
 candle-nn       = { workspace = true }
+half            = { workspace = true }
 rayon           = { workspace = true }
 
 [build-dependencies]

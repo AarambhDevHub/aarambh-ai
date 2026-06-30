@@ -1041,8 +1041,10 @@ Memory: O(n) instead of O(n²). For n=4096: ~16× less HBM access on GPU.
 let output = aarambh_ai_kernel::dispatch::attention_forward(&q, &k, &v, mask, scale)?;
 ```
 
-On CPU F32 tensors, Phase 4 uses the Rayon attention kernel. CUDA execution stays
-as a stub until Phase 14, so CUDA devices keep using the Candle fallback.
+On CPU F32 tensors, Phase 4 uses the Rayon attention kernel. On CUDA builds with
+NVCC available, Phase 14 loads PTX kernels through Candle custom ops for
+supported contiguous F32/F16/BF16 no-mask or causal-mask attention. Unsupported
+layouts, dtypes, or additive masks keep using the Candle fallback.
 
 ### 10.4 Fused Kernels (GPU)
 
@@ -1051,8 +1053,8 @@ Each fused kernel eliminates one or more intermediate tensor allocations:
 | Kernel | What it eliminates | Speedup |
 |---|---|---|
 | `rms_norm_fused.cu` | Temp buffer between RMS compute + normalise passes | ~2.8× |
-| `rope_apply.cu` | Two separate Q and K element-wise ops become one kernel | ~1.5× |
-| `swiglu_fused.cu` | Intermediate `gate` and `up` tensors written to HBM | ~2.0× |
+| `rope_apply.cu` | RoPE split/mul/add/cat temporaries for each Q/K rotation | ~1.5× |
+| `swiglu_fused.cu` | Separate SiLU allocation before `gate * up` | ~2.0× |
 
 ### 10.5 CPU Kernels (for your i3)
 
@@ -1065,31 +1067,23 @@ Even without CUDA, the kernel crate gives speedups on CPU:
 
 ### 10.6 Build System
 
-`build.rs` detects NVCC at build time. If not found, CUDA stubs are skipped — the
-crate still compiles and the dispatch layer falls back to Candle where needed:
+`build.rs` detects NVCC at build time. If not found, CUDA PTX generation is
+skipped — the crate still compiles and the dispatch layer falls back to Candle
+where needed:
 
 ```rust
 // build.rs
 fn main() {
-    println!("cargo:rustc-check-cfg=cfg(aarambh_cuda_stubs)");
-    if which::which("nvcc").is_ok() {
-        cc::Build::new()
-            .cuda(true)
-            .file("kernels/flash_attention.cu")
-            .file("kernels/flash_attn_bwd.cu")
-            .file("kernels/rms_norm_fused.cu")
-            .file("kernels/rope_apply.cu")
-            .file("kernels/swiglu_fused.cu")
-            .compile("aarambh_cuda_stubs");
-        println!("cargo:rustc-cfg=aarambh_cuda_stubs");
-    } else {
-        println!("cargo:warning=nvcc not found; CUDA kernel stubs are disabled");
-    }
+    println!("cargo:rustc-check-cfg=cfg(aarambh_cuda_kernels)");
+    // If nvcc exists, compile each .cu file to PTX in OUT_DIR and expose the
+    // generated paths through cargo:rustc-env for include_str!().
+    // If nvcc is missing or compilation fails, no CUDA cfg is set.
 }
 ```
 
-CPU-only machines always build cleanly. On CUDA machines, Phase 4 validates the
-CUDA build plumbing; real GPU kernels are implemented later.
+CPU-only machines always build cleanly. On CUDA machines, Phase 14 enables
+`cfg(aarambh_cuda_kernels)`, and the Rust wrappers load PTX into Candle's CUDA
+module cache at runtime.
 
 ---
 
@@ -1972,8 +1966,8 @@ Total extra memory on i3 with self-learn: ~**400 MB peak**. Stays well under 8 G
 
 | Kernel | vs. candle baseline |
 |---|---|
-| Flash Attention v2 | ~3.5× |
-| Fused RMSNorm      | ~2.8× |
-| Fused RoPE         | ~1.5× |
-| Fused SwiGLU       | ~2.0× |
-| End-to-end Tiny    | ~2.8× |
+| Flash Attention v2 | target ~3.5× |
+| Fused RMSNorm      | target ~2.8× |
+| Fused RoPE         | target ~1.5× |
+| Fused SwiGLU       | target ~2.0× |
+| End-to-end Tiny    | target ~2.8× |
