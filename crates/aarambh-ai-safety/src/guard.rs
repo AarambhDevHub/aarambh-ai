@@ -9,9 +9,12 @@ use crate::output::toxicity::score_toxicity;
 use crate::policy::{PiiPolicy, SafetyPolicy, ViolationAction};
 use crate::verdict::SafetyVerdict;
 
+/// Generation engine interface consumed by [`SafetyGuard`].
 pub trait SafetyGenerator {
+    /// Generate text without exposing intermediate token steps.
     fn generate(&mut self, prompt: &str, config: GenerationConfig) -> Result<GenerationOutput>;
 
+    /// Generate text and call `on_step` for each token step.
     fn generate_with_callback<F>(
         &mut self,
         prompt: &str,
@@ -41,17 +44,26 @@ impl SafetyGenerator for InferenceEngine {
 }
 
 #[derive(Debug, Clone)]
+/// Safety-checked generation response.
 pub struct SafeResponse {
+    /// Raw generation output when generation was allowed.
     pub output: Option<GenerationOutput>,
+    /// Final text after safety redaction.
     pub text: String,
+    /// Raw text before safety redaction.
     pub raw_text: String,
+    /// Final safety verdict.
     pub verdict: SafetyVerdict,
+    /// Audit events emitted during safety checks.
     pub events: Vec<SafetyEvent>,
+    /// Whether prompt PII was redacted before generation.
     pub prompt_redacted: bool,
+    /// Whether output PII was redacted after generation.
     pub output_redacted: bool,
 }
 
 impl SafeResponse {
+    /// Build a blocked response.
     pub fn blocked(reason: String, events: Vec<SafetyEvent>) -> Self {
         Self {
             output: None,
@@ -64,35 +76,42 @@ impl SafeResponse {
         }
     }
 
+    /// Return true when the verdict blocks generation.
     pub fn is_blocked(&self) -> bool {
         matches!(self.verdict, SafetyVerdict::Block(_))
     }
 }
 
+/// Safety wrapper around a generation engine.
 pub struct SafetyGuard<G> {
     engine: G,
     policy: SafetyPolicy,
 }
 
 impl<G> SafetyGuard<G> {
+    /// Create a safety guard from an engine and policy.
     pub fn new(engine: G, policy: SafetyPolicy) -> Self {
         Self { engine, policy }
     }
 
+    /// Return the active safety policy.
     pub fn policy(&self) -> &SafetyPolicy {
         &self.policy
     }
 
+    /// Consume the guard and return the wrapped engine.
     pub fn into_inner(self) -> G {
         self.engine
     }
 }
 
 impl<G: SafetyGenerator> SafetyGuard<G> {
+    /// Generate a safety-checked response without streaming callbacks.
     pub fn generate(&mut self, prompt: &str, config: GenerationConfig) -> Result<SafeResponse> {
         self.generate_with_callback(prompt, config, |_| Ok(()))
     }
 
+    /// Generate a safety-checked response and emit safe token callbacks.
     pub fn generate_with_callback<F>(
         &mut self,
         prompt: &str,

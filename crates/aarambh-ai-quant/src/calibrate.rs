@@ -9,6 +9,7 @@ use crate::gptq::compute_hessian;
 use crate::types::{tensor_from_f32_vec, tensor_to_f32_vec};
 
 #[derive(Debug, Default)]
+/// Aggregated activation statistics used for AWQ and GPTQ.
 pub struct CalibrationStats {
     features: HashMap<String, usize>,
     rows: HashMap<String, usize>,
@@ -17,6 +18,7 @@ pub struct CalibrationStats {
 }
 
 impl CalibrationStats {
+    /// Observe one layer's activation tensor.
     pub fn observe(&mut self, name: &str, activations: &Tensor, with_hessian: bool) -> Result<()> {
         let dims = activations.dims();
         let features = *dims.last().ok_or_else(|| {
@@ -59,6 +61,7 @@ impl CalibrationStats {
         Ok(())
     }
 
+    /// Return normalized activation scales for a layer.
     pub fn activation_scales(&self, name: &str, device: &Device) -> Result<Tensor> {
         let rows = self.rows.get(name).copied().unwrap_or(0);
         let sums = self
@@ -78,6 +81,7 @@ impl CalibrationStats {
         tensor_from_f32_vec(scales, &[sums.len()], device)
     }
 
+    /// Return the accumulated Hessian approximation for a layer.
     pub fn hessian(&self, name: &str, device: &Device) -> Result<Tensor> {
         let features = self
             .features
@@ -92,6 +96,7 @@ impl CalibrationStats {
         tensor_from_f32_vec(values, &[features, features], device)
     }
 
+    /// Return sorted layer names present in the calibration statistics.
     pub fn layer_names(&self) -> Vec<String> {
         let mut names = self.features.keys().cloned().collect::<Vec<_>>();
         names.sort();
@@ -99,6 +104,7 @@ impl CalibrationStats {
     }
 }
 
+/// Run model calibration over dataset samples.
 pub fn run_calibration(
     model: &AarambhModel,
     tokenizer: &dyn TokenizerLike,

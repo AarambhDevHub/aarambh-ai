@@ -42,6 +42,7 @@ impl TensorEncoding {
     }
 }
 
+/// Save an Aarambh model to the v1 GGUF-compatible container.
 pub fn save_gguf(model: &AarambhModel, format: GgufFormat, path: impl AsRef<Path>) -> Result<()> {
     let file = File::create(path.as_ref())?;
     let mut writer = BufWriter::new(file);
@@ -70,10 +71,12 @@ pub fn save_gguf(model: &AarambhModel, format: GgufFormat, path: impl AsRef<Path
     Ok(())
 }
 
+/// Load a v1 GGUF-compatible checkpoint using f32 parameters.
 pub fn load_gguf(path: impl AsRef<Path>, device: &Device) -> Result<AarambhModel> {
     load_gguf_with_dtype(path, device, DType::F32)
 }
 
+/// Load a v1 GGUF-compatible checkpoint using the requested dtype.
 pub fn load_gguf_with_dtype(
     path: impl AsRef<Path>,
     device: &Device,
@@ -84,6 +87,7 @@ pub fn load_gguf_with_dtype(
     AarambhModel::new(&config, vb)
 }
 
+/// Load raw tensors and model configuration from a v1 GGUF-compatible checkpoint.
 pub fn load_gguf_tensors(
     path: impl AsRef<Path>,
     device: &Device,
@@ -229,6 +233,7 @@ fn decode_q4_k_m_tensor(shape: &[usize], payload: &[u8], device: &Device) -> Res
     Ok(Tensor::from_vec(values, shape, device)?)
 }
 
+/// Encode two f32 values as adjacent f16 little-endian values.
 pub fn encode_f16_pair(scale: f32, min: f32) -> [u8; 4] {
     let mut bytes = [0u8; 4];
     bytes[0..2].copy_from_slice(&f32_to_f16(scale).to_le_bytes());
@@ -236,6 +241,7 @@ pub fn encode_f16_pair(scale: f32, min: f32) -> [u8; 4] {
     bytes
 }
 
+/// Decode two adjacent f16 little-endian values to f32.
 pub fn decode_f16_pair(bytes: [u8; 4]) -> (f32, f32) {
     (
         f16_to_f32(u16::from_le_bytes([bytes[0], bytes[1]])),

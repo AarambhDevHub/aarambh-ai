@@ -8,14 +8,20 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Supported HuggingFace source checkpoint architecture families.
 pub enum HfArch {
+    /// Llama 2 style tensor naming.
     Llama2,
+    /// Llama 3 style tensor naming.
     Llama3,
+    /// Mistral style tensor naming.
     Mistral,
+    /// Qwen2 style tensor naming.
     Qwen2,
 }
 
 impl HfArch {
+    /// Parse a HuggingFace architecture name.
     pub fn from_name(value: &str) -> Result<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "llama2" => Ok(Self::Llama2),
@@ -29,10 +35,12 @@ impl HfArch {
     }
 }
 
+/// Convert a HuggingFace checkpoint with the default Llama 3 mapping on CPU.
 pub fn convert_hf(hf_path: &Path, cfg: &ModelConfig) -> Result<AarambhModel> {
     convert_hf_with_arch(hf_path, cfg, HfArch::Llama3, &Device::Cpu)
 }
 
+/// Convert a HuggingFace checkpoint into an Aarambh model.
 pub fn convert_hf_with_arch(
     hf_path: &Path,
     cfg: &ModelConfig,
@@ -44,6 +52,7 @@ pub fn convert_hf_with_arch(
     AarambhModel::new(cfg, vb)
 }
 
+/// Convert HuggingFace checkpoint tensors into Aarambh tensor names.
 pub fn convert_hf_tensors(
     hf_path: &Path,
     cfg: &ModelConfig,

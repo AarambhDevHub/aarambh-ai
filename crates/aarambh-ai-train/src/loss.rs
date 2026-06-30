@@ -1,6 +1,7 @@
 use aarambh_ai_core::{AarambhError, Result};
 use candle_core::{DType, Tensor};
 
+/// Compute masked next-token cross-entropy loss.
 pub fn cross_entropy_loss(
     logits: &Tensor,
     labels: &Tensor,

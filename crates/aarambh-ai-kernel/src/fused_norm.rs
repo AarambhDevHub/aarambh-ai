@@ -1,9 +1,11 @@
 use candle_core::{Error, Result, Tensor};
 
+/// Return true when CUDA PTX kernels were compiled into this crate.
 pub fn cuda_kernels_compiled() -> bool {
     cfg!(aarambh_cuda_kernels)
 }
 
+/// Run the CUDA fused RMSNorm kernel.
 pub fn fused_rms_norm(x: &Tensor, weight: &Tensor, eps: f32) -> Result<Tensor> {
     #[cfg(all(feature = "cuda", aarambh_cuda_kernels))]
     {

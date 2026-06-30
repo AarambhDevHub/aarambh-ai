@@ -15,15 +15,22 @@ const HIGH_QUALITY_LOCK_SCORE: f32 = 0.90;
 const TOPIC_BATCH_CAP: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// High-quality response stored for replay fine-tuning.
 pub struct ReplayEntry {
+    /// Original prompt.
     pub prompt: String,
+    /// Response text.
     pub response: String,
+    /// Quality score in `[0, 1]`.
     pub score: f32,
+    /// Unix timestamp in seconds.
     pub timestamp: u64,
+    /// Inferred topic label.
     pub topic: String,
 }
 
 impl ReplayEntry {
+    /// Create a replay entry and infer its topic.
     pub fn new(prompt: impl Into<String>, response: impl Into<String>, score: f32) -> Self {
         let prompt = prompt.into();
         Self {
@@ -37,14 +44,20 @@ impl ReplayEntry {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Replay buffer summary statistics.
 pub struct ReplayStats {
+    /// Current entry count.
     pub len: usize,
+    /// Maximum entry count.
     pub capacity: usize,
+    /// Average stored score.
     pub avg_score: f32,
+    /// Entry count by topic.
     pub topics: HashMap<String, usize>,
 }
 
 #[derive(Debug, Clone)]
+/// Bounded replay buffer with quality and topic-aware sampling.
 pub struct ReplayBuffer {
     entries: Vec<ReplayEntry>,
     config: ReplayConfig,
@@ -52,6 +65,7 @@ pub struct ReplayBuffer {
 }
 
 impl ReplayBuffer {
+    /// Create an empty replay buffer.
     pub fn new(config: ReplayConfig) -> Self {
         Self {
             entries: Vec::new(),
@@ -60,22 +74,27 @@ impl ReplayBuffer {
         }
     }
 
+    /// Return replay configuration.
     pub fn config(&self) -> &ReplayConfig {
         &self.config
     }
 
+    /// Return stored entries.
     pub fn entries(&self) -> &[ReplayEntry] {
         &self.entries
     }
 
+    /// Return current entry count.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    /// Return true when no entries are stored.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
+    /// Push an entry if it meets quality and capacity rules.
     pub fn push(&mut self, mut entry: ReplayEntry) -> bool {
         entry.score = entry.score.clamp(0.0, 1.0);
         if entry.score < self.config.min_score {
@@ -103,6 +122,7 @@ impl ReplayBuffer {
         true
     }
 
+    /// Sample a quality-weighted replay batch.
     pub fn sample_batch(&mut self, n: usize) -> Vec<ReplayEntry> {
         if n == 0 || self.entries.is_empty() {
             return Vec::new();
@@ -138,12 +158,14 @@ impl ReplayBuffer {
         selected
     }
 
+    /// Return true when replay should run at `step_count`.
     pub fn should_replay(&self, step_count: usize) -> bool {
         step_count > 0
             && step_count.is_multiple_of(self.config.replay_every_n)
             && self.entries.len() >= self.config.batch_size
     }
 
+    /// Save the full buffer as JSONL.
     pub fn save_jsonl(&self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
         if let Some(parent) = path.parent()
@@ -159,6 +181,7 @@ impl ReplayBuffer {
         Ok(())
     }
 
+    /// Append one replay entry to JSONL.
     pub fn append_jsonl(path: impl AsRef<Path>, entry: &ReplayEntry) -> Result<()> {
         let path = path.as_ref();
         if let Some(parent) = path.parent()
@@ -172,6 +195,7 @@ impl ReplayBuffer {
         Ok(())
     }
 
+    /// Load replay entries from JSONL.
     pub fn load_jsonl(path: impl AsRef<Path>, config: ReplayConfig) -> Result<Self> {
         let path = path.as_ref();
         let mut buffer = Self::new(config);
@@ -197,6 +221,7 @@ impl ReplayBuffer {
         Ok(buffer)
     }
 
+    /// Return summary statistics.
     pub fn stats(&self) -> ReplayStats {
         let mut topics = HashMap::new();
         let mut total = 0.0f32;
@@ -217,6 +242,7 @@ impl ReplayBuffer {
     }
 }
 
+/// Infer a broad topic label from a prompt.
 pub fn infer_topic(prompt: &str) -> String {
     let text = prompt.to_ascii_lowercase();
     if contains_any(
@@ -247,6 +273,7 @@ fn contains_any(text: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| text.contains(needle))
 }
 
+/// Return current Unix time in seconds.
 pub fn now_unix_seconds() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

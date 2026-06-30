@@ -6,21 +6,32 @@ use crate::flash_attn::{flash_attention_forward, flash_attention_forward_train};
 use crate::fused_norm::fused_rms_norm;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Kernel implementation chosen for a supported operation.
 pub enum KernelPath {
+    /// CPU SIMD kernel.
     CpuSimd,
+    /// CPU parallel kernel.
     CpuParallel,
+    /// CUDA Flash Attention kernel.
     CudaFlashAttention,
+    /// CUDA fused RMSNorm kernel.
     CudaFusedRmsNorm,
+    /// Candle fallback path.
     CandleFallback,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Attention mask representation understood by kernel dispatch.
 pub enum AttentionMaskKind {
+    /// No mask was supplied.
     None,
+    /// Standard causal mask.
     Causal,
+    /// Additive attention bias mask.
     Additive,
 }
 
+/// Run RMSNorm with the fastest available kernel and fall back to Candle.
 pub fn rms_norm(x: &Tensor, weight: &Tensor, eps: f32) -> Result<Tensor> {
     match rms_norm_path(x, weight) {
         KernelPath::CpuSimd => {
@@ -38,6 +49,7 @@ pub fn rms_norm(x: &Tensor, weight: &Tensor, eps: f32) -> Result<Tensor> {
     candle_nn::ops::rms_norm(x, weight, eps)
 }
 
+/// Return the RMSNorm kernel path that would be selected for the tensors.
 pub fn rms_norm_path(x: &Tensor, weight: &Tensor) -> KernelPath {
     if x.device().same_device(weight.device())
         && x.device().is_cpu()
@@ -61,6 +73,7 @@ pub fn rms_norm_path(x: &Tensor, weight: &Tensor) -> KernelPath {
     }
 }
 
+/// Run inference attention with the fastest available kernel and fall back to Candle.
 pub fn attention_forward(
     q: &Tensor,
     k: &Tensor,
@@ -85,6 +98,7 @@ pub fn attention_forward(
     attention_forward_candle(q, k, v, mask, scale)
 }
 
+/// Run training attention with the fastest available kernel and fall back to Candle.
 pub fn attention_forward_train(
     q: &Tensor,
     k: &Tensor,
@@ -101,6 +115,7 @@ pub fn attention_forward_train(
     attention_forward_candle(q, k, v, mask, scale)
 }
 
+/// Return the attention kernel path that would be selected for the tensors.
 pub fn attention_path(q: &Tensor, k: &Tensor, v: &Tensor, mask: Option<&Tensor>) -> KernelPath {
     let Some((&qb, &qh, &_qq, &qd)) = dims4(q).as_ref().map(|d| (&d[0], &d[1], &d[2], &d[3]))
     else {
@@ -156,6 +171,7 @@ pub fn attention_path(q: &Tensor, k: &Tensor, v: &Tensor, mask: Option<&Tensor>)
     }
 }
 
+/// Classify an attention mask for kernel dispatch.
 pub fn attention_mask_kind(q: &Tensor, k: &Tensor, mask: Option<&Tensor>) -> AttentionMaskKind {
     let Some(mask) = mask else {
         return AttentionMaskKind::None;
@@ -173,6 +189,7 @@ pub fn attention_mask_kind(q: &Tensor, k: &Tensor, mask: Option<&Tensor>) -> Att
     }
 }
 
+/// Candle implementation of scaled dot-product attention.
 pub fn attention_forward_candle(
     q: &Tensor,
     k: &Tensor,

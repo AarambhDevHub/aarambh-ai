@@ -23,13 +23,21 @@ use crate::verifier::{Verifier, VerifierKind};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+/// GRPO rollout and loss configuration.
 pub struct GrpoConfig {
+    /// Number of sampled completions per prompt.
     pub group_size: usize,
+    /// KL penalty coefficient.
     pub kl_coeff: f64,
+    /// Maximum new tokens per rollout.
     pub max_new_tokens: usize,
+    /// Sampling temperature.
     pub temperature: f32,
+    /// Optional nucleus sampling probability mass.
     pub top_p: Option<f32>,
+    /// Optional top-k candidate limit.
     pub top_k: Option<usize>,
+    /// Thinking mode used during rollout sampling.
     pub thinking: GrpoThinkingMode,
 }
 
@@ -48,6 +56,7 @@ impl Default for GrpoConfig {
 }
 
 impl GrpoConfig {
+    /// Validate rollout and loss hyperparameters.
     pub fn validate(&self) -> Result<()> {
         if self.group_size == 0 {
             return Err(AarambhError::Config(
@@ -80,15 +89,21 @@ impl GrpoConfig {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+/// Thinking mode used by GRPO rollout sampling.
 pub enum GrpoThinkingMode {
+    /// Disable thinking markers.
     None,
+    /// Low thinking budget.
     #[default]
     Low,
+    /// Medium thinking budget.
     Medium,
+    /// High thinking budget.
     High,
 }
 
 impl GrpoThinkingMode {
+    /// Return the nominal token budget for this mode.
     pub fn budget(self) -> usize {
         match self {
             Self::None => 0,
@@ -98,6 +113,7 @@ impl GrpoThinkingMode {
         }
     }
 
+    /// Return true when thinking is enabled.
     pub fn is_enabled(self) -> bool {
         !matches!(self, Self::None)
     }
@@ -120,33 +136,51 @@ impl std::str::FromStr for GrpoThinkingMode {
 }
 
 #[derive(Debug, Clone)]
+/// Configuration for one GRPO adapter training run.
 pub struct GrpoRunConfig {
+    /// Base model configuration.
     pub model_config: ModelConfig,
+    /// Training hyperparameters.
     pub train_config: TrainConfig,
+    /// GRPO rollout and loss configuration.
     pub grpo_config: GrpoConfig,
+    /// Path to the trainable base checkpoint.
     pub base_model_path: PathBuf,
+    /// Path to the frozen reference checkpoint.
     pub reference_model_path: PathBuf,
+    /// Path to tokenizer JSON.
     pub tokenizer_path: PathBuf,
+    /// Path to GRPO JSONL data.
     pub data_path: PathBuf,
+    /// Directory where adapter artifacts are saved.
     pub output_dir: PathBuf,
+    /// LoRA adapter configuration.
     pub lora_config: LoraConfig,
+    /// Reward verifier selector.
     pub verifier: VerifierKind,
+    /// Logical training device.
     pub device: Device,
+    /// Whether to shuffle prompts each epoch.
     pub shuffle: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Prompt and ground-truth answer for GRPO.
 pub struct GrpoExample {
+    /// User prompt or question.
     pub prompt: String,
+    /// Ground-truth answer used by verifiers.
     pub ground_truth: String,
 }
 
 #[derive(Debug, Clone)]
+/// In-memory GRPO dataset.
 pub struct GrpoDataset {
     examples: Vec<GrpoExample>,
 }
 
 impl GrpoDataset {
+    /// Load GRPO examples from JSONL.
     pub fn from_jsonl(path: impl AsRef<Path>) -> Result<Self> {
         let content = fs::read_to_string(path.as_ref())?;
         let mut examples = Vec::new();
@@ -193,6 +227,7 @@ impl GrpoDataset {
         Ok(Self { examples })
     }
 
+    /// Build a dataset from already loaded examples.
     pub fn from_examples(examples: Vec<GrpoExample>) -> Result<Self> {
         if examples.is_empty() {
             return Err(AarambhError::Config(
@@ -202,10 +237,12 @@ impl GrpoDataset {
         Ok(Self { examples })
     }
 
+    /// Return the number of examples.
     pub fn len(&self) -> usize {
         self.examples.len()
     }
 
+    /// Return true when no examples are available.
     pub fn is_empty(&self) -> bool {
         self.examples.is_empty()
     }
@@ -225,35 +262,57 @@ struct RawGrpoRecord {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+/// Reason a rollout stopped.
 pub enum RolloutFinish {
+    /// End-of-text token was produced.
     Eos,
+    /// Maximum token budget was exhausted.
     MaxTokens,
+    /// Context length was exhausted.
     ContextLimit,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// One sampled completion and its reward metadata.
 pub struct Rollout {
+    /// Prompt length in tokens.
     pub prompt_len: usize,
+    /// Sampled completion token ids.
     pub completion_token_ids: Vec<u32>,
+    /// Decoded completion text.
     pub completion_text: String,
+    /// Verifier reward score.
     pub score: f32,
+    /// Group-normalized advantage.
     pub advantage: f32,
+    /// Rollout stop reason.
     pub finish_reason: RolloutFinish,
 }
 
 #[derive(Debug, Clone)]
+/// Metrics emitted by a GRPO training step.
 pub struct GrpoMetrics {
+    /// Current optimizer step.
     pub step: usize,
+    /// GRPO loss.
     pub loss: f64,
+    /// Mean rollout reward.
     pub reward_mean: f64,
+    /// Standard deviation of rollout rewards.
     pub reward_std: f64,
+    /// Mean normalized advantage.
     pub advantage_mean: f64,
+    /// Mean KL term.
     pub kl: f64,
+    /// Learning rate.
     pub lr: f64,
+    /// Gradient norm when an optimizer step occurred.
     pub grad_norm: Option<f64>,
+    /// Whether the micro-step performed an optimizer update.
     pub did_optimizer_step: bool,
 }
 
+/// Trainer for GRPO adapter reinforcement learning.
 pub struct GrpoTrainer {
     model: LoraAarambhModel,
     varmap: VarMap,
@@ -280,6 +339,7 @@ pub struct GrpoTrainer {
 
 impl GrpoTrainer {
     #[allow(clippy::too_many_arguments)]
+    /// Create a GRPO trainer from model, reference, dataset, and optimizer state.
     pub fn new(
         model: LoraAarambhModel,
         varmap: VarMap,
@@ -344,14 +404,17 @@ impl GrpoTrainer {
         Ok(trainer)
     }
 
+    /// Return the trainable LoRA model.
     pub fn model(&self) -> &LoraAarambhModel {
         &self.model
     }
 
+    /// Return training state.
     pub fn state(&self) -> &TrainState {
         &self.state
     }
 
+    /// Run the full GRPO training loop and save final adapter artifacts.
     pub fn train(&mut self) -> Result<()> {
         while self.state.epoch < self.train_config.max_epochs
             && self.state.step < self.train_config.max_steps
@@ -362,6 +425,7 @@ impl GrpoTrainer {
         self.save_final()
     }
 
+    /// Train until the epoch or max-step boundary completes.
     pub fn train_epoch(&mut self) -> Result<()> {
         while self.state.step < self.train_config.max_steps {
             let example = match self.next_example() {
@@ -378,6 +442,7 @@ impl GrpoTrainer {
         Ok(())
     }
 
+    /// Run one GRPO prompt step.
     pub fn train_step(&mut self, example: &GrpoExample) -> Result<GrpoMetrics> {
         let mut rollouts = sample_group(
             &self.model,
@@ -474,6 +539,7 @@ impl GrpoTrainer {
         }
     }
 
+    /// Save final GRPO adapter artifacts.
     pub fn save_final(&self) -> Result<()> {
         save_adapter(&self.varmap, &self.metadata, &self.output_dir)?;
         write_json(self.output_dir.join("train_state.json"), &self.state)?;
@@ -595,13 +661,19 @@ impl GrpoTrainer {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Extra metadata saved with GRPO adapters.
 pub struct GrpoSaveMetadata {
+    /// GRPO configuration.
     pub grpo: GrpoConfig,
+    /// Training configuration.
     pub train: TrainConfig,
+    /// Verifier used for rewards.
     pub verifier: VerifierKind,
+    /// Reference model path or identifier.
     pub reference_model: String,
 }
 
+/// Build and run a GRPO trainer from a run configuration.
 pub fn run_grpo_from_config(config: GrpoRunConfig) -> Result<()> {
     config.lora_config.validate()?;
     config.grpo_config.validate()?;
@@ -661,6 +733,7 @@ pub fn run_grpo_from_config(config: GrpoRunConfig) -> Result<()> {
     trainer.train()
 }
 
+/// Sample a rollout group for one GRPO example.
 pub fn sample_group(
     model: &LoraAarambhModel,
     tokenizer: &BpeTokenizer,
@@ -736,6 +809,7 @@ pub fn sample_group(
     Ok(rollouts)
 }
 
+/// Compute standardized advantages from rollout scores.
 pub fn compute_advantages(scores: &[f32]) -> Vec<f32> {
     if scores.is_empty() {
         return Vec::new();
@@ -748,6 +822,7 @@ pub fn compute_advantages(scores: &[f32]) -> Vec<f32> {
     scores.iter().map(|score| (*score - mean) / std).collect()
 }
 
+/// Compute GRPO loss from selected policy and reference log-prob tensors.
 pub fn grpo_loss(
     policy_log_probs: &[Tensor],
     ref_log_probs: &[Tensor],
@@ -770,6 +845,7 @@ pub fn grpo_loss(
     grpo_loss_with_full_kl(policy_log_probs, &kl_terms, advantages, kl_coeff)
 }
 
+/// Compute GRPO loss from selected policy log-probs and full KL terms.
 pub fn grpo_loss_with_full_kl(
     policy_log_probs: &[Tensor],
     kl_terms: &[Tensor],

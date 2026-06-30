@@ -3,27 +3,39 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 #[derive(Debug, Clone)]
+/// Candidate token probability shown for prediction views.
 pub struct TokenCandidate {
+    /// Candidate token id.
     pub token_id: u32,
+    /// Candidate probability after filtering.
     pub probability: f32,
 }
 
 #[derive(Debug, Clone)]
+/// Token sampling strategy.
 pub enum Sampler {
+    /// Always pick the highest-logit token.
     Greedy,
+    /// Temperature sampling with optional top-k and top-p filters.
     TopKTopP {
+        /// Sampling temperature.
         temperature: f32,
+        /// Optional top-k candidate limit.
         top_k: Option<usize>,
+        /// Optional nucleus sampling probability mass.
         top_p: Option<f32>,
+        /// Random number generator used for sampling.
         rng: Box<StdRng>,
     },
 }
 
 impl Sampler {
+    /// Create a greedy sampler.
     pub fn greedy() -> Self {
         Self::Greedy
     }
 
+    /// Create a top-k/top-p sampler.
     pub fn top_k_top_p(
         temperature: f32,
         top_k: Option<usize>,
@@ -52,6 +64,7 @@ impl Sampler {
         })
     }
 
+    /// Sample one token id from logits.
     pub fn sample(&mut self, logits: &[f32]) -> Result<u32> {
         if logits.is_empty() {
             return Err(AarambhError::Shape("logits must be non-empty".into()));
@@ -74,6 +87,7 @@ impl Sampler {
         }
     }
 
+    /// Return the highest-probability candidate tokens for display.
     pub fn top_candidates(&self, logits: &[f32], n: usize) -> Result<Vec<TokenCandidate>> {
         if logits.is_empty() {
             return Err(AarambhError::Shape("logits must be non-empty".into()));

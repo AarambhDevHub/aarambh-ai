@@ -1,17 +1,22 @@
 use super::normalize_signal;
 
 #[derive(Debug, Clone, PartialEq)]
+/// Prompt-injection detector score.
 pub struct InjectionScore {
+    /// Normalized score in `[0, 1]`.
     pub score: f32,
+    /// Rule identifiers matched by the detector.
     pub matched_rules: Vec<String>,
 }
 
 impl InjectionScore {
+    /// Return true when the score meets `threshold`.
     pub fn is_triggered(&self, threshold: f32) -> bool {
         self.score >= threshold
     }
 }
 
+/// Detect prompt-injection patterns in a prompt.
 pub fn detect_injection(prompt: &str) -> InjectionScore {
     let text = normalize_signal(prompt);
     let mut score = 0.0f32;

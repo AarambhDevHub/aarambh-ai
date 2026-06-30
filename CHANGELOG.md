@@ -1,5 +1,45 @@
 # Changelog
 
+## [1.0.0] - 2026-06-30
+
+### Added
+
+- **Phase 15 Production Release v1.0**
+  - Added a GitHub source-release workflow for tag `v1.0.0`
+  - Added `.github/release-notes/v1.0.0.md` as the full GitHub Release body
+  - Added `RELEASE.md` with the v1.0.0 release checklist, validation commands, and release policy
+  - Added strict public API documentation coverage across library crates with missing-docs denied
+  - Added CLI version reporting through `aarambh-ai --version`
+
+### Changed
+
+- **Release policy**
+  - Set every package manifest to `version = "1.0.0"`
+  - Set every package manifest to `publish = false`; v1.0.0 does not publish to crates.io
+  - Documented v1.0.0 as a GitHub source release with no pretrained checkpoints, adapters, tokenizer artifacts, GGUF files, or binary release assets
+  - Removed YouTube and Discord launch items from the Phase 15 release scope
+
+- **Documentation**
+  - Updated README quickstart and production release sections for source builds and local install
+  - Updated ROADMAP Phase 15 to reflect strict docs, CI, release workflow, release notes, and source-only release policy
+  - Updated ARCHITECTURE distribution notes for source-built CLI usage from the GitHub v1.0 tag
+  - Updated SECURITY, CONTRIBUTING, and CODE_OF_CONDUCT to remove Discord reporting paths
+  - Updated contributor versioning guidance for the v1 release line
+
+- **CI**
+  - Expanded CI to run formatting, workspace check, clippy with all targets, tests, strict rustdoc, release binary build, and CLI help smoke checks
+  - Added a release workflow that validates the default CPU build before creating the GitHub Release from `.github/release-notes/v1.0.0.md`
+
+### Verified
+
+- `cargo fmt --check`
+- `cargo check --workspace`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace`
+- `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
+- `cargo build --release -p aarambh-ai`
+- CLI smoke checks for `--version`, `--help`, `train`, `infer`, `quantise`, `convert`, `finetune`, and `selflearn`
+
 ## [0.14.0] - 2026-06-30
 
 ### Added

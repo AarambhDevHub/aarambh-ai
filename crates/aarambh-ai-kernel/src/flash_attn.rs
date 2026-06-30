@@ -1,9 +1,11 @@
 use candle_core::{Error, Result, Tensor};
 
+/// Return true when CUDA PTX kernels were compiled into this crate.
 pub fn cuda_kernels_compiled() -> bool {
     cfg!(aarambh_cuda_kernels)
 }
 
+/// Run CUDA Flash Attention for inference.
 pub fn flash_attention_forward(
     q: &Tensor,
     k: &Tensor,
@@ -24,6 +26,7 @@ pub fn flash_attention_forward(
     }
 }
 
+/// Run CUDA Flash Attention through the training custom-op path.
 pub fn flash_attention_forward_train(
     q: &Tensor,
     k: &Tensor,

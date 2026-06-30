@@ -10,46 +10,61 @@ use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Supervised fine-tuning instruction example.
 pub struct SftExample {
+    /// User instruction.
     pub instruction: String,
     #[serde(default)]
+    /// Optional extra input context.
     pub input: Option<String>,
+    /// Assistant response.
     pub response: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Supervised fine-tuning example with explicit thinking text.
 pub struct ThinkingSftExample {
+    /// User instruction.
     pub instruction: String,
+    /// Thinking text placed inside thinking markers.
     pub thinking: String,
+    /// Assistant response.
     pub response: String,
 }
 
 #[derive(Debug, Clone, Default)]
+/// Chat template used by SFT and GRPO datasets.
 pub struct ChatTemplate;
 
 impl ChatTemplate {
+    /// Format a standard SFT example.
     pub fn format(&self, example: &SftExample) -> String {
         format_sft(example)
     }
 
+    /// Format an SFT example containing thinking text.
     pub fn format_with_thinking(&self, example: &ThinkingSftExample) -> String {
         format_thinking_sft(example)
     }
 
+    /// Format the prompt prefix before assistant target tokens.
     pub fn prefix(&self, instruction: &str, input: Option<&str>) -> String {
         let instruction = join_instruction_input(instruction, input);
         format!("{USER}\n{instruction}\n{ASSISTANT}\n")
     }
 
+    /// Format the assistant target text.
     pub fn target(&self, response: &str) -> String {
         format!("{response}{ENDOFTEXT}")
     }
 
+    /// Format a thinking target followed by final response text.
     pub fn thinking_target(&self, thinking: &str, response: &str) -> String {
         format!("{THINK_START}\n{thinking}\n{THINK_END}\n{response}{ENDOFTEXT}")
     }
 }
 
+/// Format a standard SFT example.
 pub fn format_sft(example: &SftExample) -> String {
     let template = ChatTemplate;
     format!(
@@ -59,6 +74,7 @@ pub fn format_sft(example: &SftExample) -> String {
     )
 }
 
+/// Format an SFT example with thinking markers.
 pub fn format_thinking_sft(example: &ThinkingSftExample) -> String {
     let template = ChatTemplate;
     format!(
@@ -76,12 +92,14 @@ struct SftSequence {
 }
 
 #[derive(Debug, Clone)]
+/// Tokenized supervised fine-tuning dataset.
 pub struct SftDataset {
     sequences: Vec<SftSequence>,
     max_seq_len: usize,
 }
 
 impl SftDataset {
+    /// Load tokenized SFT sequences from JSONL.
     pub fn from_jsonl(
         path: impl AsRef<Path>,
         tokenizer: &dyn TokenizerLike,
@@ -121,6 +139,7 @@ impl SftDataset {
         })
     }
 
+    /// Build a tokenized SFT dataset from examples.
     pub fn from_examples(
         examples: &[SftExample],
         tokenizer: &dyn TokenizerLike,
@@ -147,26 +166,34 @@ impl SftDataset {
         })
     }
 
+    /// Return the number of tokenized examples.
     pub fn len(&self) -> usize {
         self.sequences.len()
     }
 
+    /// Return true when the dataset has no examples.
     pub fn is_empty(&self) -> bool {
         self.sequences.is_empty()
     }
 
+    /// Return the configured maximum sequence length.
     pub fn max_seq_len(&self) -> usize {
         self.max_seq_len
     }
 }
 
 #[derive(Debug)]
+/// Tensor batch for SFT training.
 pub struct SftBatch {
+    /// Input token ids.
     pub input_ids: Tensor,
+    /// Next-token labels.
     pub labels: Tensor,
+    /// Mask selecting assistant target positions.
     pub loss_mask: Tensor,
 }
 
+/// Mini-batch loader for SFT datasets.
 pub struct SftDataLoader {
     sequences: Vec<SftSequence>,
     batch_size: usize,
@@ -178,6 +205,7 @@ pub struct SftDataLoader {
 }
 
 impl SftDataLoader {
+    /// Create an SFT data loader.
     pub fn new(
         dataset: &SftDataset,
         batch_size: usize,
@@ -199,6 +227,7 @@ impl SftDataLoader {
         })
     }
 
+    /// Reset iteration and reshuffle when enabled.
     pub fn reset(&mut self) {
         self.pos = 0;
         if self.shuffle {
@@ -206,10 +235,12 @@ impl SftDataLoader {
         }
     }
 
+    /// Return the number of full batches.
     pub fn len(&self) -> usize {
         self.sequences.len() / self.batch_size
     }
 
+    /// Return true when there are no full batches.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -288,6 +319,7 @@ fn encode_sft_sequence(
     })
 }
 
+/// Build a loss mask that ignores user/prefix tokens.
 pub fn build_loss_mask(prefix_len: usize, token_count: usize) -> Vec<u32> {
     if token_count < 2 {
         return Vec::new();

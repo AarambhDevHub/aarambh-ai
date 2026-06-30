@@ -1,9 +1,11 @@
 use candle_core::{Error, Result, Tensor};
 
+/// Return true when CUDA PTX kernels were compiled into this crate.
 pub fn cuda_kernels_compiled() -> bool {
     cfg!(aarambh_cuda_kernels)
 }
 
+/// Run the CUDA fused RoPE application kernel.
 pub fn fused_rope_apply(
     x: &Tensor,
     cos: &Tensor,

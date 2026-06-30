@@ -19,17 +19,31 @@ jobs:
           toolchain: stable
           components: clippy, rustfmt
 
+      - name: Format
+        run: cargo fmt --check
+
       - name: Check
         run: cargo check --workspace
 
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
-
-      - name: Format
-        run: cargo fmt --check
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test
         run: cargo test --workspace
 
+      - name: Documentation
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+
       - name: Build release
-        run: cargo build --release
+        run: cargo build --release -p aarambh-ai
+
+      - name: CLI smoke
+        run: |
+          cargo run -p aarambh-ai -- --version
+          cargo run -p aarambh-ai -- --help
+          cargo run -p aarambh-ai -- train --help
+          cargo run -p aarambh-ai -- infer --help
+          cargo run -p aarambh-ai -- quantise --help
+          cargo run -p aarambh-ai -- convert --help
+          cargo run -p aarambh-ai -- finetune --help
+          cargo run -p aarambh-ai -- selflearn --help

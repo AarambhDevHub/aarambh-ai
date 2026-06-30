@@ -67,6 +67,7 @@ impl MaskData {
     }
 }
 
+/// Compute scaled dot-product attention using Rayon parallelism across rows.
 pub fn cpu_parallel_attn(
     q: &Tensor,
     k: &Tensor,
@@ -77,6 +78,7 @@ pub fn cpu_parallel_attn(
     attention_impl(q, k, v, mask, scale, true)
 }
 
+/// Compute scaled dot-product attention sequentially for deterministic comparisons.
 pub fn cpu_sequential_attn(
     q: &Tensor,
     k: &Tensor,

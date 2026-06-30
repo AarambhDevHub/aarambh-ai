@@ -13,17 +13,29 @@ use crate::trainer::Trainer;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+/// Complete TOML configuration for a training run.
 pub struct TrainingRunConfig {
+    /// Path to plaintext training data.
     pub dataset_path: PathBuf,
+    /// Optional existing tokenizer JSON path.
     pub tokenizer_path: Option<PathBuf>,
+    /// Optional path where a newly trained tokenizer is saved.
     pub tokenizer_save_path: Option<PathBuf>,
+    /// Target tokenizer vocabulary size when training a tokenizer.
     pub vocab_size: usize,
+    /// Fraction of records reserved for validation.
     pub validation_split: f64,
+    /// Whether to shuffle training batches each epoch.
     pub shuffle: bool,
+    /// Whether to resume from the latest checkpoint.
     pub resume: bool,
+    /// Device selector string such as `cpu` or `cuda:0`.
     pub device: String,
+    /// Dtype selector string such as `f32`, `f16`, or `bf16`.
     pub dtype: String,
+    /// Model architecture configuration.
     pub model: ModelConfig,
+    /// Optimizer and schedule configuration.
     pub train: TrainConfig,
 }
 
@@ -46,6 +58,7 @@ impl Default for TrainingRunConfig {
 }
 
 impl TrainingRunConfig {
+    /// Load a training configuration from TOML.
     pub fn from_toml(path: impl AsRef<Path>) -> Result<Self> {
         let content = fs::read_to_string(path.as_ref())?;
         toml::from_str(&content).map_err(|err| {
@@ -56,6 +69,7 @@ impl TrainingRunConfig {
         })
     }
 
+    /// Parse the configured device selector.
     pub fn device(&self) -> Result<Device> {
         let value = self.device.trim().to_ascii_lowercase();
         match value.as_str() {
@@ -76,10 +90,12 @@ impl TrainingRunConfig {
         }
     }
 
+    /// Parse the configured dtype selector.
     pub fn dtype(&self) -> Result<AarambhDType> {
         self.dtype.parse()
     }
 
+    /// Parse dtype and validate that it is compatible with `device`.
     pub fn dtype_for_device(&self, device: &Device) -> Result<AarambhDType> {
         let dtype = self.dtype()?;
         if device.is_cpu() && dtype != AarambhDType::F32 {
@@ -90,6 +106,7 @@ impl TrainingRunConfig {
         Ok(dtype)
     }
 
+    /// Validate required paths and numeric ranges.
     pub fn validate(&self) -> Result<()> {
         if self.dataset_path.as_os_str().is_empty() {
             return Err(AarambhError::Config("dataset_path is required".into()));
@@ -108,6 +125,7 @@ impl TrainingRunConfig {
     }
 }
 
+/// Load a TOML config and execute the training run.
 pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
     let config = TrainingRunConfig::from_toml(path)?;
     config.validate()?;

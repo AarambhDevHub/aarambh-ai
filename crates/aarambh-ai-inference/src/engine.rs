@@ -10,27 +10,40 @@ use crate::sampler::{Sampler, TokenCandidate};
 use crate::thinking::{ThinkingController, ThinkingMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Reason generation stopped.
 pub enum FinishReason {
+    /// Requested token budget was exhausted.
     MaxTokens,
+    /// End-of-sequence token was sampled.
     EosToken,
+    /// Model context window left no room for more tokens.
     ContextLimit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Generation phase for a produced token.
 pub enum GenerationPhase {
+    /// Token belongs to the hidden thinking span.
     Thinking,
+    /// Token belongs to the final answer span.
     Answer,
 }
 
 #[derive(Debug, Clone)]
+/// Configuration for one generation request.
 pub struct GenerationConfig {
+    /// Maximum number of new tokens to generate.
     pub max_new_tokens: usize,
+    /// Sampling strategy.
     pub sampler: Sampler,
+    /// Thinking budget mode.
     pub thinking_mode: ThinkingMode,
+    /// Number of top candidates to capture per step.
     pub top_candidates: usize,
 }
 
 impl GenerationConfig {
+    /// Create a greedy generation configuration.
     pub fn greedy(max_new_tokens: usize) -> Self {
         Self {
             max_new_tokens,
@@ -42,29 +55,48 @@ impl GenerationConfig {
 }
 
 #[derive(Debug, Clone)]
+/// Metadata for one generated token.
 pub struct GenerationStep {
+    /// One-based generated token index.
     pub step: usize,
+    /// Generated token id.
     pub token_id: u32,
+    /// Decoded token text.
     pub token_text: String,
+    /// Top candidate tokens for this step.
     pub candidates: Vec<TokenCandidate>,
+    /// Thinking or answer phase.
     pub phase: GenerationPhase,
+    /// Whether the token was forced by the thinking controller.
     pub forced: bool,
 }
 
 #[derive(Debug, Clone)]
+/// Complete generation result.
 pub struct GenerationOutput {
+    /// User-visible answer text.
     pub text: String,
+    /// Raw generated text including thinking markers.
     pub raw_text: String,
+    /// Extracted thinking text.
     pub thinking_text: String,
+    /// Extracted answer text.
     pub answer_text: String,
+    /// All generated token ids.
     pub token_ids: Vec<u32>,
+    /// Generated thinking token ids excluding markers.
     pub thinking_token_ids: Vec<u32>,
+    /// Generated answer token ids.
     pub answer_token_ids: Vec<u32>,
+    /// Number of thinking content tokens.
     pub thinking_tokens: usize,
+    /// Reason generation stopped.
     pub finish_reason: FinishReason,
+    /// Per-token generation metadata.
     pub steps: Vec<GenerationStep>,
 }
 
+/// Stateful autoregressive inference engine.
 pub struct InferenceEngine {
     model: AarambhModel,
     tokenizer: BpeTokenizer,
@@ -72,6 +104,7 @@ pub struct InferenceEngine {
 }
 
 impl InferenceEngine {
+    /// Create an inference engine from loaded model and tokenizer.
     pub fn new(
         model: AarambhModel,
         tokenizer: BpeTokenizer,
@@ -85,6 +118,7 @@ impl InferenceEngine {
         })
     }
 
+    /// Load an f32 model and tokenizer from disk.
     pub fn from_paths(
         model_path: impl AsRef<Path>,
         model_config: &aarambh_ai_core::ModelConfig,
@@ -94,6 +128,7 @@ impl InferenceEngine {
         Self::from_paths_with_dtype(model_path, model_config, tokenizer_path, device, DType::F32)
     }
 
+    /// Load a model and tokenizer from disk using the requested dtype.
     pub fn from_paths_with_dtype(
         model_path: impl AsRef<Path>,
         model_config: &aarambh_ai_core::ModelConfig,
@@ -114,18 +149,22 @@ impl InferenceEngine {
         Self::new(model, tokenizer, device)
     }
 
+    /// Return the tokenizer.
     pub fn tokenizer(&self) -> &BpeTokenizer {
         &self.tokenizer
     }
 
+    /// Return the model.
     pub fn model(&self) -> &AarambhModel {
         &self.model
     }
 
+    /// Generate text without per-step callbacks.
     pub fn generate(&mut self, prompt: &str, config: GenerationConfig) -> Result<GenerationOutput> {
         self.generate_with_callback(prompt, config, |_| Ok(()))
     }
 
+    /// Generate text and invoke `on_step` after every produced token.
     pub fn generate_with_callback<F>(
         &mut self,
         prompt: &str,

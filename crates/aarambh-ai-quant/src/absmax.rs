@@ -3,6 +3,7 @@ use candle_core::Tensor;
 
 use crate::types::{I8QuantizedTensor, tensor_shape, tensor_to_f32_vec};
 
+/// Quantise a tensor to signed int8 using one absolute-maximum scale.
 pub fn quantise_absmax_i8(tensor: &Tensor) -> Result<I8QuantizedTensor> {
     let values = tensor_to_f32_vec(tensor)?;
     let max_abs = values.iter().copied().map(f32::abs).fold(0.0f32, f32::max);

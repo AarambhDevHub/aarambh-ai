@@ -19,29 +19,48 @@ use crate::model::LoraAarambhModel;
 use crate::sft::{SftDataLoader, SftDataset};
 
 #[derive(Debug, Clone)]
+/// Configuration for one SFT adapter training run.
 pub struct SftRunConfig {
+    /// Base model configuration.
     pub model_config: ModelConfig,
+    /// Training hyperparameters.
     pub train_config: TrainConfig,
+    /// Path to base safetensors or GGUF checkpoint.
     pub base_model_path: PathBuf,
+    /// Path to tokenizer JSON.
     pub tokenizer_path: PathBuf,
+    /// Path to SFT JSONL data.
     pub data_path: PathBuf,
+    /// Directory where adapter artifacts are saved.
     pub output_dir: PathBuf,
+    /// LoRA adapter configuration.
     pub lora_config: LoraConfig,
+    /// Logical training device.
     pub device: Device,
+    /// Whether to quantize base linear weights for QLoRA.
     pub qlora: bool,
+    /// Whether to shuffle examples each epoch.
     pub shuffle: bool,
 }
 
 #[derive(Debug, Clone)]
+/// Metrics emitted by an SFT training step.
 pub struct SftMetrics {
+    /// Current optimizer step.
     pub step: usize,
+    /// Batch loss.
     pub loss: f64,
+    /// Exponential of loss.
     pub perplexity: f64,
+    /// Learning rate.
     pub lr: f64,
+    /// Gradient norm when an optimizer step occurred.
     pub grad_norm: Option<f64>,
+    /// Whether the micro-step performed an optimizer update.
     pub did_optimizer_step: bool,
 }
 
+/// Trainer for LoRA/QLoRA supervised fine-tuning.
 pub struct SftTrainer {
     model: LoraAarambhModel,
     varmap: VarMap,
@@ -57,6 +76,7 @@ pub struct SftTrainer {
 }
 
 impl SftTrainer {
+    /// Create an SFT trainer.
     pub fn new(
         model: LoraAarambhModel,
         varmap: VarMap,
@@ -102,18 +122,22 @@ impl SftTrainer {
         })
     }
 
+    /// Return the LoRA model.
     pub fn model(&self) -> &LoraAarambhModel {
         &self.model
     }
 
+    /// Return trainable adapter variables.
     pub fn varmap(&self) -> &VarMap {
         &self.varmap
     }
 
+    /// Return training state.
     pub fn state(&self) -> &TrainState {
         &self.state
     }
 
+    /// Run one SFT training micro-step.
     pub fn train_step(&mut self, batch: crate::sft::SftBatch) -> Result<SftMetrics> {
         let logits = self.model.forward_train(&batch.input_ids)?;
         let loss = cross_entropy_loss(&logits, &batch.labels, &batch.loss_mask)?;
@@ -157,6 +181,7 @@ impl SftTrainer {
         }
     }
 
+    /// Train until the epoch or max-step boundary completes.
     pub fn train_epoch(&mut self) -> Result<()> {
         self.train_loader.reset();
         while self.state.step < self.train_config.max_steps {
@@ -173,6 +198,7 @@ impl SftTrainer {
         Ok(())
     }
 
+    /// Run the full SFT training loop and save final adapter artifacts.
     pub fn train(&mut self) -> Result<()> {
         while self.state.epoch < self.train_config.max_epochs
             && self.state.step < self.train_config.max_steps
@@ -182,6 +208,7 @@ impl SftTrainer {
         self.save_final()
     }
 
+    /// Save final adapter artifacts.
     pub fn save_final(&self) -> Result<()> {
         save_adapter(&self.varmap, &self.metadata, &self.output_dir)?;
         write_json(self.output_dir.join("train_state.json"), &self.state)?;
@@ -272,6 +299,7 @@ impl SftTrainer {
     }
 }
 
+/// Build and run an SFT trainer from a run configuration.
 pub fn run_sft_from_config(config: SftRunConfig) -> Result<()> {
     config.lora_config.validate()?;
     let candle_device = config.device.to_candle()?;
@@ -323,6 +351,7 @@ pub fn run_sft_from_config(config: SftRunConfig) -> Result<()> {
     trainer.train()
 }
 
+/// Merge a LoRA adapter into base model weights and save safetensors.
 pub fn merge_lora_from_paths(
     model_config: &ModelConfig,
     base_model_path: impl AsRef<Path>,

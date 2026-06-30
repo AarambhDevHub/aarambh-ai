@@ -1,5 +1,11 @@
+//! BPE tokenizer wrapper, vocabulary utilities, and Aarambh special tokens.
+#![deny(missing_docs)]
+
+/// Byte-pair-encoding tokenizer implementation.
 pub mod bpe;
+/// Reserved special token definitions.
 pub mod special;
+/// Vocabulary lookup table.
 pub mod vocab;
 
 pub use bpe::BpeTokenizer;

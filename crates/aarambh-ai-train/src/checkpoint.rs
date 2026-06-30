@@ -8,12 +8,19 @@ use serde::{Deserialize, Serialize};
 use crate::optim::AdamW;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Serializable training progress saved with each checkpoint.
 pub struct TrainState {
+    /// Completed optimizer steps.
     pub step: usize,
+    /// Completed training epochs.
     pub epoch: usize,
+    /// Completed micro-batches including gradient accumulation.
     pub micro_step: usize,
+    /// Most recent training loss.
     pub train_loss: Option<f64>,
+    /// Most recent validation loss.
     pub val_loss: Option<f64>,
+    /// Best validation loss observed so far.
     pub best_val_loss: Option<f64>,
 }
 
@@ -24,19 +31,23 @@ struct CheckpointPointer {
 }
 
 #[derive(Debug, Clone)]
+/// Saves and restores model, optimizer, and training state checkpoints.
 pub struct CheckpointManager {
     dir: PathBuf,
 }
 
 impl CheckpointManager {
+    /// Create a checkpoint manager rooted at `dir`.
     pub fn new(dir: impl Into<PathBuf>) -> Self {
         Self { dir: dir.into() }
     }
 
+    /// Return the checkpoint root directory.
     pub fn dir(&self) -> &Path {
         &self.dir
     }
 
+    /// Save a step checkpoint and update the latest pointer.
     pub fn save(&self, varmap: &VarMap, optimizer: &AdamW, state: &TrainState) -> Result<PathBuf> {
         self.save_named(
             varmap,
@@ -47,6 +58,7 @@ impl CheckpointManager {
         )
     }
 
+    /// Save the best checkpoint and update the best pointer.
     pub fn save_best(
         &self,
         varmap: &VarMap,
@@ -56,6 +68,7 @@ impl CheckpointManager {
         self.save_named(varmap, optimizer, state, "best".to_string(), "best.json")
     }
 
+    /// Load the checkpoint referenced by the latest pointer.
     pub fn load_latest(
         &self,
         varmap: &mut VarMap,
@@ -72,6 +85,7 @@ impl CheckpointManager {
         Ok(Some(state))
     }
 
+    /// Load model, optimizer, and state from a checkpoint directory.
     pub fn load_from_dir(
         &self,
         path: impl AsRef<Path>,

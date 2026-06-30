@@ -310,7 +310,7 @@ aarambh-ai/
 │           ├── critique.rs           ← critique_response() free function (replay-only)
 │           └── metrics.rs            ← track improvement per topic over time
 │
-└── aarambh-ai/                       ← LAYER 6: CLI binary (published to crates.io)
+└── aarambh-ai/                       ← LAYER 6: CLI binary (source-built from GitHub v1.0 tag)
     └── src/
         ├── main.rs
         ├── cmd/
@@ -973,7 +973,7 @@ Steps warmup_steps → max_steps:
 ### 9.7 Training Output
 
 ```
-$ cargo run --release -- train --config configs/tiny_shakespeare.toml
+$ cargo run --release -p aarambh-ai -- train --config configs/tiny_shakespeare.toml
 
 step=1 loss=9.0304 ppl=8352.87 lr=0.000250 grad_norm=0.7182
 step=10 loss=9.0241 ppl=8300.43 lr=0.000800 grad_norm=0.7221
@@ -983,7 +983,7 @@ step=1000 loss=2.8740 ppl=17.71 lr=0.000287 grad_norm=0.9123
 
 For a quick CPU validation, use:
 ```
-$ cargo run --release -- train --config configs/tiny_shakespeare_smoke.toml
+$ cargo run --release -p aarambh-ai -- train --config configs/tiny_shakespeare_smoke.toml
 ```
 
 Checkpoint directories contain:
@@ -1458,7 +1458,9 @@ The prompt text is **never** logged — only its hash. Enables audit trails with
 
 > **Roadmap placement:** This is **Phase 12** — after Safety (Phase 11) and before
 > GPU Scale-Up (Phase 13). Self-learning is a core v1.0 feature, not a post-release
-> addon. Every checkpoint released in Phase 15 supports `--self-learn` out of the box.
+> addon. Phase 15 ships no pretrained checkpoints; user-trained checkpoints can
+> use `--self-learn` when paired with the required config, tokenizer, and
+> self-learning adapter state.
 
 After pretraining and SFT, the model knows how to follow instructions. The
 self-learning loop lets it **keep getting better after deployment** — with no

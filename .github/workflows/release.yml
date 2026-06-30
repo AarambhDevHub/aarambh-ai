@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v1.0.0
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+
+      - name: Verify version
+        run: cargo run -p aarambh-ai -- --version
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Check
+        run: cargo check --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Documentation
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+
+      - name: Build release binary
+        run: cargo build --release -p aarambh-ai
+
+      - name: CLI smoke
+        run: |
+          target/release/aarambh-ai --version
+          target/release/aarambh-ai --help
+          target/release/aarambh-ai train --help
+          target/release/aarambh-ai infer --help
+          target/release/aarambh-ai quantise --help
+          target/release/aarambh-ai convert --help
+          target/release/aarambh-ai finetune --help
+          target/release/aarambh-ai selflearn --help
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: .github/release-notes/v1.0.0.md
+          generate_release_notes: true

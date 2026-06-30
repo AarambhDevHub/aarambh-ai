@@ -35,7 +35,7 @@ Phase 11 →  Safety layer                         (7–10 days)   [i3] ✅
 Phase 12 →  Self-learning loop                   (10–14 days)  [i3 + Kaggle] ✅
 Phase 13 →  GPU scale-up (Small → Large)         (5–7 days)    [Kaggle] ✅
 Phase 14 →  Flash Attention CUDA kernels         (7–10 days)   [Kaggle] ✅
-Phase 15 →  Production release v1.0              (7–10 days)   [all]  ← includes ALL 14 crates
+Phase 15 →  Production release v1.0              (7–10 days)   [all] ✅
 ```
 
 ---
@@ -327,7 +327,7 @@ The tokeniser encodes and decodes correctly including all special tokens.
 ### Milestone
 ```
 cargo test --workspace   →  all pass
-cargo clippy --workspace -- -D warnings   →  clean
+cargo clippy --workspace --all-targets -- -D warnings   →  clean
 git tag v0.1.0
 ```
 
@@ -823,7 +823,7 @@ Additional Phase 5 tests:
 ```bash
 # tiny_shakespeare.txt was already downloaded in Phase 1 setup
 
-cargo run --release -- train --config configs/tiny_shakespeare.toml
+cargo run --release -p aarambh-ai -- train --config configs/tiny_shakespeare.toml
 
 # Expected output:
 # step=1 loss≈9.0 ppl≈8000 lr=... grad_norm=...
@@ -834,7 +834,7 @@ cargo run --release -- train --config configs/tiny_shakespeare.toml
 
 Fast smoke check:
 ```bash
-cargo run --release -- train --config configs/tiny_shakespeare_smoke.toml
+cargo run --release -p aarambh-ai -- train --config configs/tiny_shakespeare_smoke.toml
 # Expected start: loss≈9.0, not ~80. Random 8K-vocab loss should be close to ln(8000).
 ```
 
@@ -1361,7 +1361,7 @@ fn sft_batch_pads_and_masks_prompt_tokens() {
 ### Fine-Tuning Commands
 ```bash
 # LoRA SFT on Tiny (runs on i3, ~200 MB)
-cargo run --release -- finetune sft \
+cargo run --release -p aarambh-ai -- finetune sft \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -1370,7 +1370,7 @@ cargo run --release -- finetune sft \
   --output adapters/tiny_sft
 
 # QLoRA SFT on Small (runs on i3, ~400 MB peak)
-cargo run --release -- finetune qlora \
+cargo run --release -p aarambh-ai -- finetune qlora \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/small_q4.gguf \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -1379,13 +1379,13 @@ cargo run --release -- finetune qlora \
   --output adapters/small_qlora
 
 # Merge and test
-cargo run --release -- finetune merge \
+cargo run --release -p aarambh-ai -- finetune merge \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --adapter adapters/tiny_sft \
   --output checkpoints/tiny_sft_merged
 
-cargo run --release -- infer \
+cargo run --release -p aarambh-ai -- infer \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_sft_merged/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -1530,7 +1530,7 @@ fn grpo_loss_naming_is_unambiguous() {
 
 ### GRPO Training Command
 ```bash
-cargo run --release -- finetune grpo \
+cargo run --release -p aarambh-ai -- finetune grpo \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_sft_merged/model.safetensors \
   --reference checkpoints/tiny_sft_merged/model.safetensors \
@@ -1699,9 +1699,9 @@ be complete so `SafetyGuard` is available to wrap the self-learning loop.
 ### Why Phase 12 (not after v1.0)
 Self-learning is a core feature of aarambh-ai — not a post-release addon.
 It is built and validated on Tiny/Small here, then automatically benefits from
-GPU scale-up in Phase 13 and faster kernels in Phase 14. Including it before
-v1.0 means every pre-trained checkpoint released in Phase 15 supports
-`--self-learn` out of the box.
+GPU scale-up in Phase 13 and faster kernels in Phase 14. Phase 15 does not ship
+pretrained checkpoints; any user-trained checkpoint can use `--self-learn` when
+paired with its tokenizer, config, and self-learning adapter state.
 
 ### Tasks
 
@@ -2158,42 +2158,47 @@ git tag v0.14.0
 **Duration:** 7–10 days | **Hardware:** all
 
 ### Goal
-Every crate is published to crates.io. Full docs. CI. Pre-trained checkpoints released.
-Self-learning is included — every checkpoint supports `--self-learn` out of the box.
+Production-quality v1.0 GitHub source release. Full docs, strict public API
+documentation, CI, release workflow, release notes, and source install support
+are complete. Crates are not published to crates.io, pretrained checkpoints are
+not released, and YouTube/Discord launch items are intentionally out of scope.
 
 ### Tasks
 
 ```
-[ ] Docs: every public API has /// doc comments
-[ ] README.md: installation, quickstart, examples for all four scales
-[ ] GitHub Actions CI:
-      cargo test --workspace --all-features
-      cargo clippy --workspace -- -D warnings
-      cargo fmt --all --check
-[ ] Publish all 13 library crates + 1 binary crate to crates.io (14 total):
-      aarambh-ai-core, aarambh-ai-tokenizer, aarambh-ai-data, aarambh-ai-nn,
-      aarambh-ai-kernel, aarambh-ai-model, aarambh-ai-weights, aarambh-ai-quant,
-      aarambh-ai-train, aarambh-ai-finetune, aarambh-ai-inference, aarambh-ai-safety,
-      aarambh-ai-selflearn,
-      aarambh-ai (binary crate — cargo-installable CLI)
-[ ] Pre-trained checkpoints released (all support --self-learn):
-      tiny-base           (pretraining on OpenWebText subset)
-      tiny-instruct       (SFT + GRPO)
-      tiny-instruct-q4.gguf (13 MB, runs everywhere, self-learn cpu)
-      small-base          (pretraining on WikiText-103)
-      small-instruct      (SFT + GRPO)
-      small-instruct-q4.gguf (61 MB, good quality)
-[ ] YouTube video series: one video per phase (AarambhDevHub)
-[ ] Discord study group walkthrough (Sundays 9:30 PM IST)
+[x] Package manifests: all 13 library crates + CLI set to version 1.0.0
+[x] Package manifests: publish=false for all crates; no crates.io release
+[x] CLI: `aarambh-ai --version` reports the package version
+[x] Docs: every public API has /// doc comments
+[x] Docs: library crates deny missing public docs
+[x] README.md: source install, quickstart, examples, and v1.0 release policy
+[x] ROADMAP.md and ARCHITECTURE.md: Phase 15 source-release scope
+[x] CHANGELOG.md: v1.0.0 release entry
+[x] SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md: no Discord dependency
+[x] RELEASE.md: v1.0.0 release runbook
+[x] .github/release-notes/v1.0.0.md: full GitHub Release body
+[x] GitHub Actions CI:
+      cargo fmt --check
+      cargo check --workspace
+      cargo clippy --workspace --all-targets -- -D warnings
+      cargo test --workspace
+      RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+      cargo build --release -p aarambh-ai
+      CLI smoke tests
+[x] GitHub Actions release workflow:
+      trigger on tag v1.0.0
+      validate default CPU build
+      create GitHub Release from .github/release-notes/v1.0.0.md
 ```
 
 ### Milestone ✅
 ```
-cargo install aarambh-ai   → works from crates.io
-aarambh-ai infer --model tiny-instruct --prompt "Hello" --self-learn cpu  → works
-
-git commit -m "chore: v1.0.0 production release — 14 crates, self-learning included"
+cargo install --path aarambh-ai
+aarambh-ai --version  → aarambh-ai 1.0.0
 git tag v1.0.0
+git push origin v1.0.0
+
+git commit -m "chore: v1.0.0 production source release"
 ```
 
 ---
@@ -2216,8 +2221,8 @@ git tag v1.0.0
 | 11 | Safety Layer | Injection / PII / toxicity guarded | i3 | 7–10 days ✅ |
 | 12 | Self-Learning | Model improves from own outputs, replay persists (Critique free function) | i3 + Kaggle | 10–14 days ✅ |
 | 13 | GPU Scale-Up | Small→Large train on Kaggle; self-learn on GPU verified | Kaggle | 5–7 days ✅ |
-| 14 | Flash Attention | CUDA kernels, 2× GPU speedup | Kaggle | 7–10 days |
-| 15 | Production v1.0 | 13 library + 1 binary = 14 crates on crates.io, all with self-learn | all | 7–10 days |
+| 14 | Flash Attention | CUDA kernels, 2× GPU speedup | Kaggle | 7–10 days ✅ |
+| 15 | Production v1.0 | GitHub source release, strict docs, CI/release workflow, no model artifacts | all | 7–10 days ✅ |
 
 **Total realistic estimate: 120–194 days (~4–6.5 months)**
 

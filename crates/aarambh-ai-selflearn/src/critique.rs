@@ -5,14 +5,21 @@ use serde::Deserialize;
 use crate::config::CritiqueConfig;
 
 #[derive(Debug, Clone, PartialEq)]
+/// Parsed critique result and optional rewrite.
 pub struct CritiqueResult {
+    /// Response selected by critique.
     pub response: String,
+    /// Critique score in `[0, 1]`.
     pub score: f32,
+    /// Critique reason string.
     pub reason: String,
+    /// Whether the response came from a rewrite attempt.
     pub was_rewritten: bool,
 }
 
+/// Generation interface used by critique helpers.
 pub trait CritiqueGenerator {
+    /// Generate text from a prompt and generation config.
     fn generate_text(&mut self, prompt: &str, config: GenerationConfig) -> Result<String>;
 }
 
@@ -22,6 +29,7 @@ impl CritiqueGenerator for InferenceEngine {
     }
 }
 
+/// Score a response and optionally rewrite it when below threshold.
 pub fn critique_response<G: CritiqueGenerator>(
     generator: &mut G,
     prompt: &str,
@@ -74,6 +82,7 @@ struct RawCritique {
     reason: String,
 }
 
+/// Parse critique JSON into a normalized result.
 pub fn parse_critique_response(text: &str) -> CritiqueResult {
     let json = extract_json_object(text).unwrap_or(text);
     let parsed = serde_json::from_str::<RawCritique>(json).ok();

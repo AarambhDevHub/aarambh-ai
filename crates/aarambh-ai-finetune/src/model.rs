@@ -9,6 +9,7 @@ use candle_nn::{Embedding, Module, VarMap};
 use crate::lora::{LoraConfig, LoraLinear, linear_forward};
 
 #[derive(Debug, Clone)]
+/// Aarambh model with LoRA adapters attached to selected linear layers.
 pub struct LoraAarambhModel {
     config: ModelConfig,
     embedding_weight: Tensor,
@@ -22,6 +23,7 @@ pub struct LoraAarambhModel {
 }
 
 impl LoraAarambhModel {
+    /// Build a LoRA model from base checkpoint tensors.
     pub fn from_tensors(
         config: &ModelConfig,
         tensors: &HashMap<String, Tensor>,
@@ -86,18 +88,22 @@ impl LoraAarambhModel {
         Ok((model, varmap))
     }
 
+    /// Return the model configuration.
     pub fn config(&self) -> &ModelConfig {
         &self.config
     }
 
+    /// Return the number of adapter parameters.
     pub fn adapter_param_count(&self) -> usize {
         self.adapter_param_count
     }
 
+    /// Return the number of base model parameters.
     pub fn base_param_count(&self) -> usize {
         self.base_param_count
     }
 
+    /// Return adapter parameters divided by base parameters.
     pub fn trainable_ratio(&self) -> f64 {
         if self.base_param_count == 0 {
             0.0
@@ -106,14 +112,17 @@ impl LoraAarambhModel {
         }
     }
 
+    /// Run the training forward path with adapters enabled.
     pub fn forward_train(&self, token_ids: &Tensor) -> Result<Tensor> {
         self.forward(token_ids, true)
     }
 
+    /// Run the evaluation forward path with adapters enabled.
     pub fn forward_eval(&self, token_ids: &Tensor) -> Result<Tensor> {
         self.forward(token_ids, false)
     }
 
+    /// Return checkpoint tensors with adapters merged into base weights.
     pub fn merged_tensors(&self) -> Result<HashMap<String, Tensor>> {
         let mut tensors = HashMap::new();
         tensors.insert(

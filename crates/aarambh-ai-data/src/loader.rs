@@ -8,12 +8,17 @@ use aarambh_ai_core::{Device, Result, TokenizerLike};
 use crate::dataset::TextDataset;
 use crate::preprocess::chunk_and_tokenize;
 
+/// Tensor batch emitted by [`DataLoader`].
 pub struct Batch {
+    /// Input token ids with shape `[batch, seq]`.
     pub input_ids: Tensor,
+    /// Next-token labels with shape `[batch, seq]`.
     pub labels: Tensor,
+    /// Attention mask with shape `[batch, seq]`.
     pub attention_mask: Tensor,
 }
 
+/// Mini-batch iterator over fixed-length token chunks.
 pub struct DataLoader {
     chunks: Vec<(Vec<u32>, Vec<u32>)>,
     batch_size: usize,
@@ -24,6 +29,7 @@ pub struct DataLoader {
 }
 
 impl DataLoader {
+    /// Build a loader by tokenizing and chunking a dataset.
     pub fn new(
         dataset: &dyn TextDataset,
         tokenizer: &dyn TokenizerLike,
@@ -45,6 +51,7 @@ impl DataLoader {
         }
     }
 
+    /// Reset iteration and reshuffle chunks when enabled.
     pub fn reset(&mut self) {
         self.pos = 0;
         if self.shuffle {
@@ -52,10 +59,12 @@ impl DataLoader {
         }
     }
 
+    /// Return the number of full batches.
     pub fn len(&self) -> usize {
         self.chunks.len() / self.batch_size
     }
 
+    /// Return true when the loader has no full batches.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

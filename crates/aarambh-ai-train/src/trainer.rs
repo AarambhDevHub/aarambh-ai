@@ -13,15 +13,23 @@ use crate::optim::{AdamW, AdamWConfig, GradMap, clip_gradients};
 use crate::schedule::CosineScheduleWithWarmup;
 
 #[derive(Debug, Clone)]
+/// Metrics emitted after a training micro-step.
 pub struct TrainingMetrics {
+    /// Current optimizer step.
     pub step: usize,
+    /// Unscaled loss for this batch.
     pub loss: f64,
+    /// Exponential of loss.
     pub perplexity: f64,
+    /// Learning rate used or scheduled for this step.
     pub lr: f64,
+    /// Gradient norm when an optimizer step occurred.
     pub grad_norm: Option<f64>,
+    /// Whether this micro-step performed an optimizer update.
     pub did_optimizer_step: bool,
 }
 
+/// Owns model, optimizer, loaders, checkpoints, and training state.
 pub struct Trainer {
     model: AarambhModel,
     varmap: VarMap,
@@ -40,6 +48,7 @@ pub struct Trainer {
 }
 
 impl Trainer {
+    /// Create a trainer from model config, training config, loaders, device, and dtype.
     pub fn new(
         model_config: ModelConfig,
         train_config: TrainConfig,
@@ -89,22 +98,27 @@ impl Trainer {
         })
     }
 
+    /// Return current training state.
     pub fn state(&self) -> &TrainState {
         &self.state
     }
 
+    /// Return the model.
     pub fn model(&self) -> &AarambhModel {
         &self.model
     }
 
+    /// Return the variable map.
     pub fn varmap(&self) -> &VarMap {
         &self.varmap
     }
 
+    /// Return the optimizer.
     pub fn optimizer(&self) -> &AdamW {
         &self.optimizer
     }
 
+    /// Load the latest checkpoint if one exists.
     pub fn load_latest_checkpoint(&mut self) -> Result<bool> {
         match self
             .checkpoint
@@ -118,6 +132,7 @@ impl Trainer {
         }
     }
 
+    /// Run one training micro-step.
     pub fn train_step(&mut self, batch: Batch) -> Result<TrainingMetrics> {
         let token_count = batch.input_ids.elem_count();
         let logits = self.model.forward_train(&batch.input_ids)?;
@@ -163,6 +178,7 @@ impl Trainer {
         }
     }
 
+    /// Train until the current epoch or max-step boundary completes.
     pub fn train_epoch(&mut self) -> Result<()> {
         self.train_loader.reset();
         while self.state.step < self.train_config.max_steps {
@@ -179,6 +195,7 @@ impl Trainer {
         Ok(())
     }
 
+    /// Run the full training loop and save a final checkpoint.
     pub fn train(&mut self) -> Result<()> {
         while self.state.epoch < self.train_config.max_epochs
             && self.state.step < self.train_config.max_steps
@@ -190,6 +207,7 @@ impl Trainer {
         Ok(())
     }
 
+    /// Evaluate the validation loader when present.
     pub fn validate(&mut self) -> Result<Option<f64>> {
         let Some(loader) = self.val_loader.as_mut() else {
             return Ok(None);

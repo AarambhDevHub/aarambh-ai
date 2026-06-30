@@ -4,6 +4,7 @@ use candle_core::Tensor;
 use crate::int4::quantise_affine_i4;
 use crate::types::{PackedInt4Tensor, tensor_from_f32_vec, tensor_to_f32_vec};
 
+/// Compute per-feature activation scales for AWQ.
 pub fn compute_activation_scales(activations: &Tensor) -> Result<Tensor> {
     let dims = activations.dims();
     let features = *dims.last().ok_or_else(|| {
@@ -39,6 +40,7 @@ pub fn compute_activation_scales(activations: &Tensor) -> Result<Tensor> {
     tensor_from_f32_vec(scales, &[features], activations.device())
 }
 
+/// Quantise a rank-2 weight tensor with AWQ int4 scaling.
 pub fn quantise_layer_awq(weight: &Tensor, act_scales: &Tensor) -> Result<PackedInt4Tensor> {
     let dims = weight.dims();
     if dims.len() != 2 {

@@ -11,20 +11,29 @@ use crate::replay::infer_topic;
 const HISTORY_LIMIT: usize = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Direction of a topic score trend.
 pub enum TrendDirection {
+    /// Scores are improving.
     Up,
+    /// Scores are approximately unchanged.
     Flat,
+    /// Scores are declining.
     Down,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// One persisted learning metric event.
 pub struct MetricsEvent {
+    /// Sequential step.
     pub step: usize,
+    /// Inferred topic label.
     pub topic: String,
+    /// Score in `[0, 1]`.
     pub score: f32,
 }
 
 #[derive(Debug, Clone, Default)]
+/// Tracks rolling self-learning scores by topic.
 pub struct LearningMetrics {
     per_topic_scores: HashMap<String, VecDeque<f32>>,
     total_steps: usize,
@@ -32,15 +41,18 @@ pub struct LearningMetrics {
 }
 
 impl LearningMetrics {
+    /// Create empty metrics.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Record a score and infer topic from the prompt.
     pub fn record(&mut self, score: f32, prompt: &str) {
         let topic = infer_topic(prompt);
         self.record_topic(score, &topic);
     }
 
+    /// Record a score under a specific topic.
     pub fn record_topic(&mut self, score: f32, topic: &str) {
         self.total_steps += 1;
         let scores = self.per_topic_scores.entry(topic.to_string()).or_default();
@@ -50,18 +62,22 @@ impl LearningMetrics {
         }
     }
 
+    /// Increment replay fine-tuning count.
     pub fn record_replay(&mut self) {
         self.replay_count += 1;
     }
 
+    /// Return total recorded response steps.
     pub fn total_steps(&self) -> usize {
         self.total_steps
     }
 
+    /// Return replay fine-tuning count.
     pub fn replay_count(&self) -> usize {
         self.replay_count
     }
 
+    /// Return late-minus-early trend for a topic.
     pub fn topic_trend(&self, topic: &str) -> Option<f32> {
         let scores = self.per_topic_scores.get(topic)?;
         if scores.len() < 4 {
@@ -74,6 +90,7 @@ impl LearningMetrics {
         Some(late - early)
     }
 
+    /// Return a coarse trend direction for a topic.
     pub fn trend_direction(&self, topic: &str) -> Option<TrendDirection> {
         let trend = self.topic_trend(topic)?;
         if trend > 0.02 {
@@ -85,6 +102,7 @@ impl LearningMetrics {
         }
     }
 
+    /// Return a compact text summary.
     pub fn summary(&self) -> String {
         let mut topics = self.per_topic_scores.keys().cloned().collect::<Vec<_>>();
         topics.sort();
@@ -106,6 +124,7 @@ impl LearningMetrics {
             .join(" | ")
     }
 
+    /// Save all metrics as JSONL.
     pub fn save_jsonl(&self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
         if let Some(parent) = path.parent()
@@ -136,6 +155,7 @@ impl LearningMetrics {
         Ok(())
     }
 
+    /// Append one metrics event to JSONL.
     pub fn append_event(path: impl AsRef<Path>, event: &MetricsEvent) -> Result<()> {
         let path = path.as_ref();
         if let Some(parent) = path.parent()
@@ -149,6 +169,7 @@ impl LearningMetrics {
         Ok(())
     }
 
+    /// Load metrics from JSONL.
     pub fn load_jsonl(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let mut metrics = Self::new();

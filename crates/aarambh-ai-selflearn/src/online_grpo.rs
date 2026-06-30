@@ -27,27 +27,44 @@ use crate::config::{OnlineGrpoConfig, SelfLearnMode};
 use crate::critique::CritiqueGenerator;
 
 #[derive(Debug, Clone)]
+/// Build configuration for the online GRPO updater.
 pub struct OnlineGrpoBuildConfig {
+    /// Model architecture configuration.
     pub model_config: ModelConfig,
+    /// Path to the base model checkpoint.
     pub base_model_path: PathBuf,
+    /// Path to the frozen reference model checkpoint.
     pub reference_model_path: PathBuf,
+    /// Path to tokenizer JSON.
     pub tokenizer_path: PathBuf,
+    /// Directory for adapter and optimizer state.
     pub state_dir: PathBuf,
+    /// Online GRPO configuration.
     pub config: OnlineGrpoConfig,
+    /// Self-learning runtime mode.
     pub mode: SelfLearnMode,
+    /// Candle device.
     pub device: CandleDevice,
+    /// Model dtype.
     pub dtype: DType,
+    /// Random seed.
     pub seed: u64,
 }
 
 #[derive(Debug)]
+/// Generated output and pending online update state.
 pub struct OnlineUpdate {
+    /// Generated output selected for the user.
     pub output: GenerationOutput,
+    /// Optional verifier score from GRPO.
     pub verifier_score: Option<f32>,
+    /// Pending LoRA gradients to apply or flush later.
     pub pending_grads: GradMap,
+    /// Whether this update used GRPO rollouts.
     pub used_grpo: bool,
 }
 
+/// Online LoRA updater used by the self-learning loop.
 pub struct OnlineGrpo {
     model: LoraAarambhModel,
     varmap: VarMap,
@@ -67,6 +84,7 @@ pub struct OnlineGrpo {
 }
 
 impl OnlineGrpo {
+    /// Build the updater from checkpoint and tokenizer paths.
     pub fn from_paths(mut build: OnlineGrpoBuildConfig) -> Result<Self> {
         let tokenizer = BpeTokenizer::from_pretrained(&build.tokenizer_path)?;
         tokenizer.validate_special_tokens()?;
@@ -160,26 +178,32 @@ impl OnlineGrpo {
         Ok(this)
     }
 
+    /// Return the tokenizer used by online generation.
     pub fn tokenizer(&self) -> &BpeTokenizer {
         &self.tokenizer
     }
 
+    /// Return committed online steps.
     pub fn step_count(&self) -> usize {
         self.step_count
     }
 
+    /// Return the number of parameter gradients waiting to be flushed.
     pub fn pending_grads_count(&self) -> usize {
         self.pending_grads.len()
     }
 
+    /// Return how many updates contributed to pending gradients.
     pub fn pending_grad_steps(&self) -> usize {
         self.pending_grad_steps
     }
 
+    /// Return the state directory.
     pub fn state_dir(&self) -> &Path {
         &self.state_dir
     }
 
+    /// Generate text and, when possible, prepare an online GRPO update.
     pub fn generate_update(
         &mut self,
         prompt: &str,
@@ -208,6 +232,7 @@ impl OnlineGrpo {
         })
     }
 
+    /// Generate text through the LoRA model without committing learning state.
     pub fn generate_text_with_lora(
         &mut self,
         prompt: &str,
@@ -224,6 +249,7 @@ impl OnlineGrpo {
         .text)
     }
 
+    /// Commit an online update to optimizer state or pending CPU gradients.
     pub fn commit_update(&mut self, update: OnlineUpdate) -> Result<Option<f64>> {
         if update.pending_grads.is_empty() {
             self.step_count += 1;
@@ -250,6 +276,7 @@ impl OnlineGrpo {
         }
     }
 
+    /// Apply pending CPU-mode gradients and return the gradient norm.
     pub fn flush_pending_gradients(&mut self) -> Result<Option<f64>> {
         if self.pending_grads.is_empty() {
             return Ok(None);
@@ -267,6 +294,7 @@ impl OnlineGrpo {
         Ok(Some(grad_norm))
     }
 
+    /// Run one replay SFT update batch.
     pub fn replay_sft_batch(
         &mut self,
         examples: &[SftExample],
@@ -313,6 +341,7 @@ impl OnlineGrpo {
         Ok(Some(norm_sum / steps as f64))
     }
 
+    /// Persist adapter, optimizer, pending gradients, and counters.
     pub fn save_state(&self) -> Result<()> {
         fs::create_dir_all(&self.state_dir)?;
         aarambh_ai_finetune::save_adapter(&self.varmap, &self.metadata, &self.state_dir)?;
@@ -445,6 +474,7 @@ impl CritiqueGenerator for OnlineGrpo {
     }
 }
 
+/// Generate text from a LoRA model using the inference sampling stack.
 pub fn generate_lora<F>(
     model: &LoraAarambhModel,
     tokenizer: &BpeTokenizer,

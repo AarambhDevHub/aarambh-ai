@@ -12,12 +12,14 @@ struct QuantisedKvLayer {
 }
 
 #[derive(Debug, Clone)]
+/// Per-layer int8-compressed KV cache.
 pub struct QuantisedKvCache {
     layers: Vec<QuantisedKvLayer>,
     device: Device,
 }
 
 impl QuantisedKvCache {
+    /// Create a quantised KV cache with one entry per transformer layer.
     pub fn new(n_layers: usize, _n_kv_heads: usize, _head_dim: usize, device: &Device) -> Self {
         Self {
             layers: vec![QuantisedKvLayer::default(); n_layers],
@@ -25,6 +27,7 @@ impl QuantisedKvCache {
         }
     }
 
+    /// Append key/value tensors for a layer and return the dequantised full cache.
     pub fn append_and_get(
         &mut self,
         layer: usize,
@@ -52,6 +55,7 @@ impl QuantisedKvCache {
         Ok((k_full, v_full))
     }
 
+    /// Clear all cached layer entries.
     pub fn clear(&mut self) {
         for layer in &mut self.layers {
             layer.k = None;
@@ -59,6 +63,7 @@ impl QuantisedKvCache {
         }
     }
 
+    /// Return the cached sequence length for a layer.
     pub fn seq_len(&self, layer: usize) -> usize {
         self.layers
             .get(layer)

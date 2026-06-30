@@ -4,18 +4,25 @@ use rayon::prelude::*;
 use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// SIMD implementation selected for CPU RMSNorm.
 pub enum SimdKind {
+    /// AVX-512 implementation.
     Avx512,
+    /// AVX2 implementation with FMA.
     Avx2Fma,
+    /// AVX2 implementation without FMA-specific path.
     Avx2,
+    /// Portable scalar fallback.
     Scalar,
 }
 
+/// Return the cached runtime SIMD selection.
 pub fn selected_simd() -> SimdKind {
     static SELECTED: OnceLock<SimdKind> = OnceLock::new();
     *SELECTED.get_or_init(selected_simd_impl)
 }
 
+/// Run RMSNorm through the selected CPU SIMD custom op.
 pub fn cpu_rms_norm_simd(x: &Tensor, weight: &Tensor, eps: f32) -> Result<Tensor> {
     let dims = x.dims();
     let Some(&hidden) = dims.last() else {
@@ -40,6 +47,7 @@ pub fn cpu_rms_norm_simd(x: &Tensor, weight: &Tensor, eps: f32) -> Result<Tensor
     )
 }
 
+/// Portable scalar RMSNorm implementation over one row.
 pub fn cpu_rms_norm_scalar(input: &[f32], weight: &[f32], eps: f32, output: &mut [f32]) {
     let sum_sq = sum_squares_scalar(input);
     let inv_rms = (sum_sq / input.len() as f32 + eps).sqrt().recip();

@@ -3,25 +3,32 @@ use std::path::Path;
 
 use aarambh_ai_core::Result;
 
+/// Common interface for text datasets consumed by training loaders.
 pub trait TextDataset {
+    /// Return the number of text records.
     fn len(&self) -> usize;
+    /// Return text record `i`.
     fn get(&self, i: usize) -> &str;
+    /// Return true when the dataset has no records.
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }
 
+/// Dataset backed by newline-separated plaintext.
 pub struct PlaintextDataset {
     lines: Vec<String>,
 }
 
 impl PlaintextDataset {
+    /// Load a plaintext dataset from a UTF-8 file.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
         let content = fs::read_to_string(path.as_ref())?;
         let lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
         Ok(Self { lines })
     }
 
+    /// Build a plaintext dataset from already loaded lines.
     pub fn from_lines(lines: Vec<String>) -> Self {
         Self { lines }
     }
@@ -37,11 +44,13 @@ impl TextDataset for PlaintextDataset {
     }
 }
 
+/// Dataset backed by JSONL rows containing a `text` field.
 pub struct JsonlDataset {
     texts: Vec<String>,
 }
 
 impl JsonlDataset {
+    /// Load a JSONL dataset from a UTF-8 file, skipping malformed rows.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
         let content = fs::read_to_string(path.as_ref())?;
         let texts: Vec<String> = content
@@ -59,6 +68,7 @@ impl JsonlDataset {
         Ok(Self { texts })
     }
 
+    /// Build a JSONL-style dataset from already extracted text records.
     pub fn from_texts(texts: Vec<String>) -> Self {
         Self { texts }
     }

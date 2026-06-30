@@ -1,5 +1,8 @@
+/// Prompt-injection detector.
 pub mod injection;
+/// Jailbreak detector.
 pub mod jailbreak;
+/// PII detector and redactor.
 pub mod pii;
 
 pub use injection::{InjectionScore, detect_injection};
