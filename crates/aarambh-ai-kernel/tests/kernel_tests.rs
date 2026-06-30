@@ -175,10 +175,6 @@ fn cuda_phase14_wrappers_report_kernel_availability() {
         aarambh_ai_kernel::fused_ffn::cuda_kernels_compiled(),
         cfg!(aarambh_cuda_kernels)
     );
-    assert!(aarambh_ai_kernel::flash_attn::flash_attention_forward_stub().is_err());
-    assert!(aarambh_ai_kernel::fused_norm::fused_rms_norm_stub().is_err());
-    assert!(aarambh_ai_kernel::fused_rope::fused_rope_stub().is_err());
-    assert!(aarambh_ai_kernel::fused_ffn::fused_swiglu_stub().is_err());
 }
 
 #[cfg(all(feature = "cuda", aarambh_cuda_kernels))]

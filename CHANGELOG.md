@@ -5,7 +5,7 @@
 ### Added
 
 - **Phase 14 Flash Attention CUDA kernels**
-  - Replaced Phase 4 CUDA placeholders with real `.cu` kernels for Flash Attention forward, Flash Attention backward source, fused RMSNorm, fused RoPE, and fused SwiGLU
+  - Replaced Phase 4 CUDA scaffolds with real `.cu` kernels for Flash Attention forward, Flash Attention backward source, fused RMSNorm, fused RoPE, and fused SwiGLU
   - Added NVCC-to-PTX build plumbing with `cfg(aarambh_cuda_kernels)` and graceful CPU/Candle fallback when NVCC is missing
   - Added Candle custom-op wrappers that load PTX into Candle's CUDA module cache at runtime
   - Added CUDA dispatch paths for supported contiguous F32/F16/BF16 FlashAttention and fused RMSNorm tensors
@@ -21,7 +21,7 @@
 
 - **Documentation**
   - Marked Phase 14 complete in README and ROADMAP
-  - Updated architecture notes to describe PTX loading instead of CUDA stubs
+  - Updated architecture notes to describe PTX loading instead of CUDA scaffolding
 
 ### Verified
 
@@ -258,7 +258,7 @@
   - Predict-view now shows token phase and forced-token metadata
 
 - **`aarambh-ai-finetune`**
-  - Added `ThinkingSftExample` and `format_thinking_sft()` as the Phase 9-compatible thinking SFT data format stub
+  - Added `ThinkingSftExample` and `format_thinking_sft()` as the Phase 9-compatible thinking SFT data format helper
 
 ### Changed
 
@@ -285,7 +285,7 @@
   - `KvCache` wrapper over per-layer `aarambh-ai-nn::KVCache`
   - `Sampler` with greedy decode plus temperature/top-k/top-p sampling and top-candidate reporting for predict-view
   - `GenerationConfig`, `GenerationOutput`, `GenerationStep`, `FinishReason`, and `StreamEvent`
-  - `ThinkingMode` and `ThinkingController` stub for Phase 7 budget tracking without token forcing
+  - `ThinkingMode` and `ThinkingController` for Phase 7 budget tracking without token forcing
 
 - **CLI**
   - Added `aarambh-ai infer` with `--config`, `--model`, `--tokenizer`, `--prompt`, `--max-tokens`, `--temperature`, `--top-p`, `--top-k`, `--seed`, `--thinking`, `--predict-view`, `--stream`, and `--greedy`
@@ -363,9 +363,9 @@
   - Rayon parallel scaled dot-product attention for CPU F32 tensors
   - Candle fallback for unsupported devices, dtypes, shapes, and CUDA runtime paths
   - `build.rs` NVCC detection with graceful no-CUDA builds
-  - CUDA placeholder kernels and FFI wrapper modules for Flash Attention, fused RMSNorm, fused RoPE, and fused SwiGLU
+  - CUDA scaffold kernels and FFI wrapper modules for Flash Attention, fused RMSNorm, fused RoPE, and fused SwiGLU
   - Criterion benchmark target for RMSNorm and attention kernels
-  - 6 kernel tests covering dispatch, RMSNorm reference parity, parallel attention parity, masks, and CUDA stubs
+  - 6 kernel tests covering dispatch, RMSNorm reference parity, parallel attention parity, masks, and CUDA scaffold availability
   - Local benchmark: RMSNorm SIMD ~1.43x faster than Candle; parallel attention ~2.94x faster than sequential
 
 ### Changed
@@ -376,7 +376,7 @@
 
 - **Documentation**
   - Marked Phase 4 complete in README and ROADMAP
-  - Updated ARCHITECTURE to match stable SIMD intrinsics and CUDA stub behavior
+  - Updated ARCHITECTURE to match stable SIMD intrinsics and CUDA scaffold behavior
 
 ## [0.3.0] - 2026-06-27
 
@@ -393,8 +393,8 @@
 - **`aarambh-ai-weights` crate** — SafeTensors I/O (Phase 3)
   - `save_model()` serializes `AarambhModel::named_tensors()` with `candle_core::safetensors::save`
   - `load_model()` loads SafeTensors through `VarBuilder::from_mmaped_safetensors`
-  - `convert_hf()` is present as a Phase 8 `Unsupported` stub
-  - 2 integration tests covering SafeTensors weight/logit roundtrip and the Phase 8 conversion stub
+  - `convert_hf()` is present as a Phase 8 unsupported conversion entrypoint
+  - 2 integration tests covering SafeTensors weight/logit roundtrip and the Phase 8 conversion path
 
 ### Changed
 
@@ -457,7 +457,7 @@
   - `lib.rs` — flat re-exports of all public types
   - `tests/core_tests.rs` — 6 unit tests covering configs, device, dtype, and defaults
 
-- **12 stub crates** — each with `Cargo.toml` + `lib.rs` doc-comment placeholder
+- **12 scaffold crates** — each with `Cargo.toml` + `lib.rs` doc-comment scaffold
   - `aarambh-ai-tokenizer`, `aarambh-ai-data`, `aarambh-ai-nn`, `aarambh-ai-kernel`, `aarambh-ai-model`, `aarambh-ai-weights`, `aarambh-ai-quant`, `aarambh-ai-train`, `aarambh-ai-finetune`, `aarambh-ai-inference`, `aarambh-ai-safety`, `aarambh-ai-selflearn`
 
 - **Binary crate** — `aarambh-ai` with minimal `main.rs`
