@@ -1,4 +1,5 @@
 use candle_core::{Error, Result, Tensor};
+use candle_core::backend::BackendStorage;
 
 /// Return true when CUDA PTX kernels were compiled into this crate.
 pub fn cuda_kernels_compiled() -> bool {
