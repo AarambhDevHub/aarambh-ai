@@ -40,7 +40,7 @@ __device__ inline __nv_bfloat16 store_value<__nv_bfloat16>(float value) {
 }
 
 template <typename T>
-__global__ void rope_apply_kernel(
+__device__ void rope_apply_kernel(
     T *out,
     const T *x,
     const T *cos,

@@ -41,7 +41,7 @@ __device__ inline __nv_bfloat16 store_value<__nv_bfloat16>(float value) {
 }
 
 template <typename T>
-__global__ void swiglu_kernel(T *out, const T *gate, const T *up, int total) {
+__device__ void swiglu_kernel(T *out, const T *gate, const T *up, int total) {
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= total) {
         return;

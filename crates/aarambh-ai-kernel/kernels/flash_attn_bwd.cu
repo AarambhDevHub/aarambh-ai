@@ -48,7 +48,7 @@ __device__ inline float attention_score(
 
 } // namespace
 
-extern "C" __global__ void aarambh_flash_attention_bwd_f32(
+extern "C" __device__ void aarambh_flash_attention_bwd_f32(
     float *dq,
     float *dk,
     float *dv,

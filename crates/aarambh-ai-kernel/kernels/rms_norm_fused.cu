@@ -54,7 +54,7 @@ __device__ inline float block_reduce_sum(float value, float *shared) {
 }
 
 template <typename T>
-__global__ void rms_norm_kernel(
+__device__ void rms_norm_kernel(
     T *out,
     const T *x,
     const T *weight,
