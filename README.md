@@ -154,6 +154,10 @@ scripts/phase13_prepare_wikitext103.sh data
 cargo run --release -p aarambh-ai --features cuda -- train \
   --config configs/wikitext103_cuda_smoke.toml
 
+# Tiny on Kaggle GPU.
+cargo run --release -p aarambh-ai --features cuda -- train \
+  --config configs/wikitext103_tiny.toml
+
 # Small on T4.
 cargo run --release -p aarambh-ai --features cuda -- train \
   --config configs/wikitext103_small.toml

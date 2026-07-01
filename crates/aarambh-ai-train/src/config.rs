@@ -133,6 +133,7 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
     let device = config.device()?;
     let dtype = config.dtype_for_device(&device)?.to_candle();
     let candle_device = device.to_candle()?;
+    println!("training run: device={device:?} dtype={dtype:?}");
     let tokenizer = prepare_tokenizer(&config)?;
     let mut model_config = config.model.clone();
     model_config.vocab_size = tokenizer.vocab_size();
@@ -243,6 +244,24 @@ mod tests {
     fn parses_cpu_device() {
         let config = TrainingRunConfig::default();
         assert_eq!(config.device().unwrap(), Device::Cpu);
+    }
+
+    #[test]
+    fn parses_cuda_alias_as_device_zero() {
+        let config = TrainingRunConfig {
+            device: "cuda".into(),
+            ..TrainingRunConfig::default()
+        };
+        assert_eq!(config.device().unwrap(), Device::Cuda(0));
+    }
+
+    #[test]
+    fn parses_explicit_cuda_device_index() {
+        let config = TrainingRunConfig {
+            device: "cuda:1".into(),
+            ..TrainingRunConfig::default()
+        };
+        assert_eq!(config.device().unwrap(), Device::Cuda(1));
     }
 
     #[test]
