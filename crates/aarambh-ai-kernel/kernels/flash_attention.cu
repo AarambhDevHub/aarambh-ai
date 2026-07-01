@@ -88,7 +88,7 @@ __device__ inline float attention_score(
 }
 
 template <typename T>
-__global__ void flash_attention_forward_kernel(
+__device__ void flash_attention_forward_kernel(
     T *out,
     float *lse,
     const T *q,
