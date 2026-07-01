@@ -1,5 +1,4 @@
-use candle_core::{Error, Result, Tensor};
-use candle_core::backend::BackendStorage;
+use candle_core::{Result, Tensor};
 
 /// Return true when CUDA PTX kernels were compiled into this crate.
 pub fn cuda_kernels_compiled() -> bool {
@@ -20,7 +19,7 @@ pub fn fused_rope_apply(
     #[cfg(not(all(feature = "cuda", aarambh_cuda_kernels)))]
     {
         let _ = (x, cos, sin, seqlen_offset);
-        Err(Error::msg(
+        Err(candle_core::Error::msg(
             "Fused CUDA RoPE is unavailable because aarambh-ai-kernel was built without CUDA PTX kernels",
         ))
     }
@@ -28,6 +27,7 @@ pub fn fused_rope_apply(
 
 #[cfg(all(feature = "cuda", aarambh_cuda_kernels))]
 mod cuda {
+    use candle_core::backend::BackendStorage;
     use candle_core::cuda_backend::cudarc::driver::{LaunchConfig, PushKernelArg};
     use candle_core::cuda_backend::{CudaStorage, WrapErr};
     use candle_core::{CpuStorage, CustomOp3, DType, Error, Layout, Result, Shape, Tensor};

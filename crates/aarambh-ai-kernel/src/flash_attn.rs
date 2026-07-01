@@ -1,5 +1,4 @@
-use candle_core::{Error, Result, Tensor};
-use candle_core::backend::BackendStorage;
+use candle_core::{Result, Tensor};
 
 /// Return true when CUDA PTX kernels were compiled into this crate.
 pub fn cuda_kernels_compiled() -> bool {
@@ -21,7 +20,7 @@ pub fn flash_attention_forward(
     #[cfg(not(all(feature = "cuda", aarambh_cuda_kernels)))]
     {
         let _ = (q, k, v, causal, scale);
-        Err(Error::msg(
+        Err(candle_core::Error::msg(
             "Flash Attention CUDA is unavailable because aarambh-ai-kernel was built without CUDA PTX kernels",
         ))
     }
@@ -42,7 +41,7 @@ pub fn flash_attention_forward_train(
     #[cfg(not(all(feature = "cuda", aarambh_cuda_kernels)))]
     {
         let _ = (q, k, v, causal, scale);
-        Err(Error::msg(
+        Err(candle_core::Error::msg(
             "Flash Attention CUDA is unavailable because aarambh-ai-kernel was built without CUDA PTX kernels",
         ))
     }
@@ -50,6 +49,7 @@ pub fn flash_attention_forward_train(
 
 #[cfg(all(feature = "cuda", aarambh_cuda_kernels))]
 mod cuda {
+    use candle_core::backend::BackendStorage;
     use candle_core::cuda_backend::cudarc::driver::{LaunchConfig, PushKernelArg};
     use candle_core::cuda_backend::{CudaStorage, WrapErr};
     use candle_core::{CpuStorage, CustomOp3, DType, Error, Layout, Result, Shape, Tensor};

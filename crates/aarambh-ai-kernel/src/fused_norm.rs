@@ -1,5 +1,4 @@
-use candle_core::{Error, Result, Tensor};
-use candle_core::backend::BackendStorage;
+use candle_core::{Result, Tensor};
 
 /// Return true when CUDA PTX kernels were compiled into this crate.
 pub fn cuda_kernels_compiled() -> bool {
@@ -15,7 +14,7 @@ pub fn fused_rms_norm(x: &Tensor, weight: &Tensor, eps: f32) -> Result<Tensor> {
     #[cfg(not(all(feature = "cuda", aarambh_cuda_kernels)))]
     {
         let _ = (x, weight, eps);
-        Err(Error::msg(
+        Err(candle_core::Error::msg(
             "Fused CUDA RMSNorm is unavailable because aarambh-ai-kernel was built without CUDA PTX kernels",
         ))
     }
@@ -23,6 +22,7 @@ pub fn fused_rms_norm(x: &Tensor, weight: &Tensor, eps: f32) -> Result<Tensor> {
 
 #[cfg(all(feature = "cuda", aarambh_cuda_kernels))]
 mod cuda {
+    use candle_core::backend::BackendStorage;
     use candle_core::cuda_backend::cudarc::driver::{LaunchConfig, PushKernelArg};
     use candle_core::cuda_backend::{CudaStorage, WrapErr};
     use candle_core::{CpuStorage, CustomOp2, DType, Error, Layout, Result, Shape, Tensor};
