@@ -13,7 +13,10 @@ use candle_core::{Device as CandleDevice, Tensor};
 use candle_nn::VarMap;
 use serde::Serialize;
 
-use crate::adapter::{AdapterMetadata, load_adapter_metadata, load_adapter_weights, save_adapter};
+use crate::adapter::{
+    AdapterMetadata, AdapterMethod, load_adapter_metadata, load_adapter_weights, save_adapter,
+};
+use crate::dora::DoraAarambhModel;
 use crate::lora::LoraConfig;
 use crate::model::LoraAarambhModel;
 use crate::sft::{SftDataLoader, SftDataset};
@@ -60,9 +63,67 @@ pub struct SftMetrics {
     pub did_optimizer_step: bool,
 }
 
-/// Trainer for LoRA/QLoRA supervised fine-tuning.
-pub struct SftTrainer {
-    model: LoraAarambhModel,
+/// Model interface required by the shared SFT adapter trainer.
+pub trait AdapterSftModel {
+    /// Run the training forward path.
+    fn forward_train(&self, token_ids: &Tensor) -> Result<Tensor>;
+    /// Return the number of trainable adapter parameters.
+    fn adapter_param_count(&self) -> usize;
+    /// Return the number of frozen base parameters.
+    fn base_param_count(&self) -> usize;
+    /// Return trainable adapter parameters divided by base parameters.
+    fn trainable_ratio(&self) -> f64;
+    /// Return normal model tensors with adapter weights merged.
+    fn merged_tensors(&self) -> Result<std::collections::HashMap<String, Tensor>>;
+}
+
+impl AdapterSftModel for LoraAarambhModel {
+    fn forward_train(&self, token_ids: &Tensor) -> Result<Tensor> {
+        self.forward_train(token_ids)
+    }
+
+    fn adapter_param_count(&self) -> usize {
+        self.adapter_param_count()
+    }
+
+    fn base_param_count(&self) -> usize {
+        self.base_param_count()
+    }
+
+    fn trainable_ratio(&self) -> f64 {
+        self.trainable_ratio()
+    }
+
+    fn merged_tensors(&self) -> Result<std::collections::HashMap<String, Tensor>> {
+        self.merged_tensors()
+    }
+}
+
+impl AdapterSftModel for DoraAarambhModel {
+    fn forward_train(&self, token_ids: &Tensor) -> Result<Tensor> {
+        self.forward_train(token_ids)
+    }
+
+    fn adapter_param_count(&self) -> usize {
+        self.adapter_param_count()
+    }
+
+    fn base_param_count(&self) -> usize {
+        self.base_param_count()
+    }
+
+    fn trainable_ratio(&self) -> f64 {
+        self.trainable_ratio()
+    }
+
+    fn merged_tensors(&self) -> Result<std::collections::HashMap<String, Tensor>> {
+        self.merged_tensors()
+    }
+}
+
+/// Trainer for LoRA, QLoRA, DoRA, and QDoRA supervised fine-tuning.
+pub struct AdapterSftTrainer<M: AdapterSftModel> {
+    model: M,
     varmap: VarMap,
     optimizer: AdamW,
     schedule: CosineScheduleWithWarmup,
@@ -75,10 +136,16 @@ pub struct SftTrainer {
     last_loss: Option<f64>,
 }
 
-impl SftTrainer {
-    /// Create an SFT trainer.
+/// Trainer for LoRA/QLoRA supervised fine-tuning.
+pub type SftTrainer = AdapterSftTrainer<LoraAarambhModel>;
+
+/// Trainer for DoRA/QDoRA supervised fine-tuning.
+pub type DoraTrainer = AdapterSftTrainer<DoraAarambhModel>;
+
+impl<M: AdapterSftModel> AdapterSftTrainer<M> {
+    /// Create an adapter SFT trainer.
     pub fn new(
-        model: LoraAarambhModel,
+        model: M,
         varmap: VarMap,
         train_loader: SftDataLoader,
         train_config: TrainConfig,
@@ -103,7 +170,7 @@ impl SftTrainer {
         let optimizer = AdamW::from_varmap(&varmap, AdamWConfig::from(&train_config))?;
         if optimizer.parameters().is_empty() {
             return Err(AarambhError::Config(
-                "LoRA target_modules produced zero trainable adapter tensors".into(),
+                "adapter target_modules produced zero trainable tensors".into(),
             ));
         }
         let schedule = CosineScheduleWithWarmup::from_train_config(&train_config);
@@ -122,8 +189,8 @@ impl SftTrainer {
         })
     }
 
-    /// Return the LoRA model.
-    pub fn model(&self) -> &LoraAarambhModel {
+    /// Return the adapter model.
+    pub fn model(&self) -> &M {
         &self.model
     }
 
@@ -241,7 +308,7 @@ impl SftTrainer {
 
         if updates.is_empty() {
             return Err(AarambhError::Config(
-                "SFT backward produced no LoRA parameter gradients".into(),
+                "SFT backward produced no adapter parameter gradients".into(),
             ));
         }
         for (name, grad) in updates {
@@ -283,8 +350,9 @@ impl SftTrainer {
                 .is_multiple_of(self.train_config.log_every_n_steps)
         {
             let grad_norm = metrics.grad_norm.unwrap_or(0.0);
+            let method = adapter_method_label(self.metadata.method);
             println!(
-                "sft step={} loss={:.4} ppl={:.2} lr={:.6} grad_norm={:.4}",
+                "{method} step={} loss={:.4} ppl={:.2} lr={:.6} grad_norm={:.4}",
                 metrics.step, metrics.loss, metrics.perplexity, metrics.lr, grad_norm
             );
         }
@@ -351,6 +419,83 @@ pub fn run_sft_from_config(config: SftRunConfig) -> Result<()> {
     trainer.train()
 }
 
+/// Build and run a DoRA SFT trainer from a run configuration.
+pub fn run_dora_from_config(config: SftRunConfig) -> Result<()> {
+    config.lora_config.validate()?;
+    let candle_device = config.device.to_candle()?;
+    let tokenizer = BpeTokenizer::from_pretrained(&config.tokenizer_path)?;
+    tokenizer.validate_special_tokens()?;
+    let mut model_config = config.model_config.clone();
+    model_config.vocab_size = tokenizer.vocab_size();
+
+    let base = load_any_model(&config.base_model_path, &model_config, &candle_device)?;
+    let base_tensors = base.named_tensors();
+    drop(base);
+
+    let (model, varmap) = DoraAarambhModel::from_tensors(
+        &model_config,
+        &base_tensors,
+        &config.lora_config,
+        config.qlora,
+        &candle_device,
+    )?;
+    eprintln!(
+        "adapter params: {} / {} ({:.3}%)",
+        model.adapter_param_count(),
+        model.base_param_count(),
+        model.trainable_ratio() * 100.0
+    );
+
+    let dataset = SftDataset::from_jsonl(&config.data_path, &tokenizer, model_config.max_seq_len)?;
+    let loader = SftDataLoader::new(
+        &dataset,
+        config.train_config.batch_size,
+        config.shuffle,
+        config.train_config.seed,
+        config.device.clone(),
+    )?;
+    let metadata = AdapterMetadata::new_with_method(
+        model_config,
+        config.lora_config.clone(),
+        Some(config.base_model_path.display().to_string()),
+        config.qlora,
+        AdapterMethod::Dora,
+    );
+    let mut trainer = DoraTrainer::new(
+        model,
+        varmap,
+        loader,
+        config.train_config,
+        config.output_dir,
+        metadata,
+    )?;
+    trainer.train()
+}
+
+/// Merge an adapter into base model weights by reading the adapter method.
+pub fn merge_adapter_from_paths(
+    model_config: &ModelConfig,
+    base_model_path: impl AsRef<Path>,
+    adapter_dir: impl AsRef<Path>,
+    output: impl AsRef<Path>,
+    device: &CandleDevice,
+    method_override: Option<AdapterMethod>,
+) -> Result<PathBuf> {
+    let base_model_path = base_model_path.as_ref();
+    let adapter_dir = adapter_dir.as_ref();
+    let output = output.as_ref();
+    let metadata = load_adapter_metadata(adapter_dir)?;
+    let method = method_override.unwrap_or(metadata.method);
+    match method {
+        AdapterMethod::Lora => {
+            merge_lora_from_paths(model_config, base_model_path, adapter_dir, output, device)
+        }
+        AdapterMethod::Dora => {
+            merge_dora_from_paths(model_config, base_model_path, adapter_dir, output, device)
+        }
+    }
+}
+
 /// Merge a LoRA adapter into base model weights and save safetensors.
 pub fn merge_lora_from_paths(
     model_config: &ModelConfig,
@@ -360,6 +505,12 @@ pub fn merge_lora_from_paths(
     device: &CandleDevice,
 ) -> Result<PathBuf> {
     let metadata = load_adapter_metadata(adapter_dir.as_ref())?;
+    if metadata.method != AdapterMethod::Lora {
+        return Err(AarambhError::Config(format!(
+            "adapter method is {:?}, expected lora",
+            metadata.method
+        )));
+    }
     let config = if model_config.vocab_size == metadata.model.vocab_size {
         model_config.clone()
     } else {
@@ -372,7 +523,43 @@ pub fn merge_lora_from_paths(
     let (model, mut varmap) =
         LoraAarambhModel::from_tensors(&config, &tensors, &metadata.lora, false, device)?;
     load_adapter_weights(&mut varmap, adapter_dir.as_ref())?;
-    let merged = model.merged_tensors()?;
+    save_merged_tensors(model.merged_tensors()?, output)
+}
+
+/// Merge a DoRA adapter into base model weights and save safetensors.
+pub fn merge_dora_from_paths(
+    model_config: &ModelConfig,
+    base_model_path: impl AsRef<Path>,
+    adapter_dir: impl AsRef<Path>,
+    output: impl AsRef<Path>,
+    device: &CandleDevice,
+) -> Result<PathBuf> {
+    let metadata = load_adapter_metadata(adapter_dir.as_ref())?;
+    if metadata.method != AdapterMethod::Dora {
+        return Err(AarambhError::Config(format!(
+            "adapter method is {:?}, expected dora",
+            metadata.method
+        )));
+    }
+    let config = if model_config.vocab_size == metadata.model.vocab_size {
+        model_config.clone()
+    } else {
+        metadata.model.clone()
+    };
+    let base = load_any_model(base_model_path.as_ref(), &config, device)?;
+    let tensors = base.named_tensors();
+    drop(base);
+
+    let (model, mut varmap) =
+        DoraAarambhModel::from_tensors(&config, &tensors, &metadata.lora, false, device)?;
+    load_adapter_weights(&mut varmap, adapter_dir.as_ref())?;
+    save_merged_tensors(model.merged_tensors()?, output)
+}
+
+fn save_merged_tensors(
+    merged: std::collections::HashMap<String, Tensor>,
+    output: impl AsRef<Path>,
+) -> Result<PathBuf> {
     let output = model_output_path(output);
     if let Some(parent) = output.parent()
         && !parent.as_os_str().is_empty()
@@ -396,6 +583,13 @@ fn write_json(path: impl AsRef<Path>, value: &impl Serialize) -> Result<()> {
     let file = fs::File::create(path.as_ref())?;
     serde_json::to_writer_pretty(file, value).map_err(AarambhError::Json)?;
     Ok(())
+}
+
+fn adapter_method_label(method: AdapterMethod) -> &'static str {
+    match method {
+        AdapterMethod::Lora => "sft",
+        AdapterMethod::Dora => "dora",
+    }
 }
 
 #[allow(dead_code)]

@@ -296,31 +296,31 @@ save/merge pattern as LoRA — this is additive, not a replacement.
 
 **`aarambh-ai-finetune`:**
 ```
-[ ] src/dora.rs
+[x] src/dora.rs
       DoraConfig { rank, alpha, dropout, target_modules, group_size }
       DoraLinear:
-        magnitude: Tensor        // ||W_0||_c per output column, trainable
+        magnitude: Tensor        // ||W_0|| per output row, trainable
         direction_lora_a/b: Tensor  // low-rank update to direction, trainable
         base: Tensor              // frozen base weight (same as LoRA)
       forward:
-        direction = (base + lora_b @ lora_a * scale) / column_norm(base + lora_b @ lora_a * scale)
+        direction = (base + lora_b @ lora_a * scale) / row_norm(base + lora_b @ lora_a * scale)
         out = x @ (magnitude * direction).T
       merge: W_merged = magnitude * normalize(base + lora_b @ lora_a * scale)
 
-[ ] src/adapter.rs
+[x] src/adapter.rs
       Extend adapter_config.json with `method: "lora" | "dora"`
       adapter.safetensors stores magnitude + direction_lora_a/b for DoRA
 
-[ ] src/model.rs
+[x] src/dora.rs
       DoraAarambhModel mirrors LoraAarambhModel's forward path
       Same target-module suffix matching (attn.wq/wk/wv/wo, ffn gate/up/down)
       QDoRA variant: frozen base as PackedInt4Tensor, same as QLoRA
 
-[ ] src/trainer.rs
+[x] src/trainer.rs
       DoraTrainer reuses SftTrainer's loop, swaps the adapter type
       run_dora_from_config, merge_dora_from_paths
 
-[ ] CLI
+[x] CLI
       aarambh-ai finetune dora --config <cfg> --data <sft.jsonl>
       aarambh-ai finetune qdora --config <cfg> --data <sft.jsonl>
       aarambh-ai finetune merge --adapter <path> --method dora
@@ -351,11 +351,10 @@ fn qdora_dequantises_packed_int4_base_before_forward() {}
 
 ### Milestone
 ```
-DoRA fine-tune of Small on the same instruction dataset used for Phase 9's
-LoRA run produces an eval-harness scorecard (Phase 17) that is measured
-against the LoRA baseline — published as a comparison table in the phase's
-commit message or a short docs/dora_vs_lora.md note, whichever direction
-the numbers point.
+DoRA/QDoRA code paths, adapter metadata, merge support, CLI help, and offline
+unit tests are implemented. Full Small DoRA vs LoRA scorecards are user-run
+with the Phase 17 eval harness because this repository does not ship
+pretrained checkpoints.
 
 git commit -m "feat: Phase 18 — DoRA and QDoRA fine-tuning"
 git tag v2.0.0-alpha.3

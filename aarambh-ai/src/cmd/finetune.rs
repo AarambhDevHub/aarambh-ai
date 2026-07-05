@@ -2,8 +2,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use aarambh_ai_finetune::{
-    GrpoConfig, GrpoRunConfig, GrpoThinkingMode, LoraConfig, SftRunConfig, VerifierKind,
-    merge_lora_from_paths, run_grpo_from_config, run_sft_from_config,
+    AdapterMethod, GrpoConfig, GrpoRunConfig, GrpoThinkingMode, LoraConfig, SftRunConfig,
+    VerifierKind, merge_adapter_from_paths, run_dora_from_config, run_grpo_from_config,
+    run_sft_from_config,
 };
 use aarambh_ai_train::TrainingRunConfig;
 use clap::{Args, Subcommand};
@@ -18,6 +19,8 @@ pub struct FinetuneArgs {
 pub enum FinetuneCommand {
     Sft(FinetuneRunArgs),
     Qlora(FinetuneRunArgs),
+    Dora(FinetuneRunArgs),
+    Qdora(FinetuneRunArgs),
     Grpo(GrpoArgs),
     Merge(MergeArgs),
 }
@@ -72,6 +75,8 @@ pub struct MergeArgs {
     pub adapter: PathBuf,
     #[arg(long)]
     pub output: PathBuf,
+    #[arg(long, default_value = "auto")]
+    pub method: String,
 }
 
 #[derive(Debug, Args)]
@@ -132,14 +137,16 @@ pub struct GrpoArgs {
 
 pub fn run(args: FinetuneArgs) -> anyhow::Result<()> {
     match args.command {
-        FinetuneCommand::Sft(args) => run_finetune(args, false),
-        FinetuneCommand::Qlora(args) => run_finetune(args, true),
+        FinetuneCommand::Sft(args) => run_lora_finetune(args, false),
+        FinetuneCommand::Qlora(args) => run_lora_finetune(args, true),
+        FinetuneCommand::Dora(args) => run_dora_finetune(args, false),
+        FinetuneCommand::Qdora(args) => run_dora_finetune(args, true),
         FinetuneCommand::Grpo(args) => run_grpo(args),
         FinetuneCommand::Merge(args) => run_merge(args),
     }
 }
 
-fn run_finetune(args: FinetuneRunArgs, qlora: bool) -> anyhow::Result<()> {
+fn run_lora_finetune(args: FinetuneRunArgs, qlora: bool) -> anyhow::Result<()> {
     let run_config = TrainingRunConfig::from_toml(&args.config)?;
     let device = run_config.device()?;
     let tokenizer_path = tokenizer_path(args.tokenizer.as_ref(), &run_config);
@@ -168,6 +175,38 @@ fn run_finetune(args: FinetuneRunArgs, qlora: bool) -> anyhow::Result<()> {
         shuffle: !args.no_shuffle && run_config.shuffle,
     };
     run_sft_from_config(config)?;
+    Ok(())
+}
+
+fn run_dora_finetune(args: FinetuneRunArgs, qdora: bool) -> anyhow::Result<()> {
+    let run_config = TrainingRunConfig::from_toml(&args.config)?;
+    let device = run_config.device()?;
+    let tokenizer_path = tokenizer_path(args.tokenizer.as_ref(), &run_config);
+    let mut train_config = run_config.train.clone();
+    apply_train_overrides(&mut train_config, &args);
+    train_config.checkpoint_dir = args.output.clone();
+
+    let lora_config = LoraConfig {
+        rank: args.lora_rank,
+        alpha: args.lora_alpha.unwrap_or(args.lora_rank as f64 * 2.0),
+        dropout: args.lora_dropout,
+        target_modules: LoraConfig::from_target_csv(&args.target_modules),
+        ..Default::default()
+    };
+
+    let config = SftRunConfig {
+        model_config: run_config.model.clone(),
+        train_config,
+        base_model_path: args.base,
+        tokenizer_path,
+        data_path: args.data,
+        output_dir: args.output,
+        lora_config,
+        device,
+        qlora: qdora,
+        shuffle: !args.no_shuffle && run_config.shuffle,
+    };
+    run_dora_from_config(config)?;
     Ok(())
 }
 
@@ -237,15 +276,28 @@ fn run_grpo(args: GrpoArgs) -> anyhow::Result<()> {
 fn run_merge(args: MergeArgs) -> anyhow::Result<()> {
     let run_config = TrainingRunConfig::from_toml(&args.config)?;
     let device = run_config.device()?.to_candle()?;
-    let output = merge_lora_from_paths(
+    let method = parse_merge_method(&args.method)?;
+    let output = merge_adapter_from_paths(
         &run_config.model,
         args.base,
         args.adapter,
         args.output,
         &device,
+        method,
     )?;
-    eprintln!("merged LoRA adapter written to {}", output.display());
+    eprintln!("merged adapter written to {}", output.display());
     Ok(())
+}
+
+fn parse_merge_method(value: &str) -> anyhow::Result<Option<AdapterMethod>> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(None),
+        "lora" | "qlora" => Ok(Some(AdapterMethod::Lora)),
+        "dora" | "qdora" => Ok(Some(AdapterMethod::Dora)),
+        other => Err(anyhow::anyhow!(
+            "unsupported merge method '{other}', expected auto|lora|dora"
+        )),
+    }
 }
 
 fn tokenizer_path(tokenizer: Option<&PathBuf>, run_config: &TrainingRunConfig) -> PathBuf {

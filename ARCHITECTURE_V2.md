@@ -236,8 +236,11 @@ W₀ = m · (V / ||V||_c)        where m = column-wise magnitude, V/||V||_c = un
 DoRA update:
   direction' = (V + BA) / ||V + BA||_c     ← LoRA-style low-rank update, but only to direction
   m'         = trainable magnitude vector   ← trained independently, full rank
-  W'         = m' · direction'
+W'         = m' · direction'
 ```
+
+In this codebase, Candle linear weights are stored as `[out_dim, in_dim]`,
+so the implementation computes the DoRA magnitude and norm per output row.
 
 This decoupling is the whole point: magnitude and direction can now move
 independently, which published results show consistently outperforms
@@ -248,8 +251,8 @@ magnitude vector per adapted layer).
 `target_modules` matching (`attn.wq/wk/wv/wo`, FFN gate/up/down), same
 adapter save/merge pattern, same `QDoRA` variant pairing a frozen INT4 base
 with trainable BF16 adapter + magnitude. It is a genuine drop-in alternative,
-not a replacement — `aarambh-ai finetune lora` and `aarambh-ai finetune
-dora` both remain available, and Phase 18's milestone is an honest
+not a replacement — `aarambh-ai finetune sft`, `qlora`, `dora`, and `qdora`
+all remain available, and Phase 18's milestone is an honest
 side-by-side comparison via the eval harness rather than an assumed win.
 
 DoRA/QDoRA's memory profile is essentially identical to LoRA/QLoRA's (one

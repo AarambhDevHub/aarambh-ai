@@ -2,10 +2,13 @@
 //!
 //! Phase 9 implements LoRA, QLoRA, SFT loss masking, and adapter merge support.
 //! Phase 10 adds deterministic-verifier GRPO for adapter-only RL fine-tuning.
+//! Phase 18 adds DoRA and QDoRA supervised fine-tuning.
 #![deny(missing_docs)]
 
 /// Adapter metadata and serialization helpers.
 pub mod adapter;
+/// DoRA adapter layers and DoRA-wrapped model implementation.
+pub mod dora;
 /// Group Relative Policy Optimization data loading, rollout, and training.
 pub mod grpo;
 /// LoRA adapter layers and configuration.
@@ -19,7 +22,8 @@ pub mod trainer;
 /// Rule-based verifiers used by GRPO and self-learning.
 pub mod verifier;
 
-pub use adapter::{AdapterMetadata, load_adapter_metadata, save_adapter};
+pub use adapter::{AdapterMetadata, AdapterMethod, load_adapter_metadata, save_adapter};
+pub use dora::{DoraAarambhModel, DoraConfig, DoraLinear};
 pub use grpo::{
     GrpoConfig, GrpoDataset, GrpoExample, GrpoMetrics, GrpoRunConfig, GrpoThinkingMode,
     GrpoTrainer, Rollout, RolloutFinish, compute_advantages, grpo_loss, run_grpo_from_config,
@@ -31,7 +35,10 @@ pub use sft::{
     ChatTemplate, SftBatch, SftDataLoader, SftDataset, SftExample, ThinkingSftExample,
     format_thinking_sft,
 };
-pub use trainer::{SftRunConfig, SftTrainer, merge_lora_from_paths, run_sft_from_config};
+pub use trainer::{
+    AdapterSftModel, DoraTrainer, SftRunConfig, SftTrainer, merge_adapter_from_paths,
+    merge_dora_from_paths, merge_lora_from_paths, run_dora_from_config, run_sft_from_config,
+};
 pub use verifier::{
     CodeVerifier, CompositeVerifier, FormatVerifier, MathVerifier, Verifier, VerifierKind,
     extract_final_number,

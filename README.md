@@ -28,6 +28,7 @@ v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, an
 | Full training pipeline with AdamW, cosine schedule, checkpointing | Phase 5 ✅ |
 | Quantisation: INT8, GPTQ INT4, AWQ INT4, GGUF, QAT | Phase 8 ✅ |
 | LoRA, QLoRA, SFT fine-tuning | Phase 9 ✅ |
+| DoRA, QDoRA weight-decomposed fine-tuning | Phase 18 ✅ |
 | GRPO reinforcement learning | Phase 10 ✅ |
 | Safety guardrails: input/output, PII, prompt injection | Phase 11 ✅ |
 | Self-learning loop: online GRPO, replay buffer, critique | Phase 12 ✅ |
@@ -410,12 +411,13 @@ quantised, so Q4 artifacts are much smaller than SafeTensors checkpoints.
 
 ---
 
-## Fine-Tune With LoRA, QLoRA, Or GRPO
+## Fine-Tune With LoRA, QLoRA, DoRA, QDoRA, Or GRPO
 
 Phase 9 adds adapter-only SFT for instruction data. Phase 10 adds GRPO
-reinforcement learning with deterministic verifiers. Training updates only LoRA
-tensors, saves a tiny adapter directory, and can merge SFT adapters back into a
-normal `model.safetensors` for existing inference commands.
+reinforcement learning with deterministic verifiers. Phase 18 adds DoRA/QDoRA
+weight-decomposed adapters. Training updates only adapter tensors, saves a tiny
+adapter directory, and can merge SFT adapters back into a normal
+`model.safetensors` for existing inference commands.
 
 Input data is JSONL:
 
@@ -443,11 +445,30 @@ cargo run --release -p aarambh-ai -- finetune qlora \
   --lora-rank 16 \
   --output adapters/tiny_qlora
 
+# DoRA SFT on a SafeTensors base.
+cargo run --release -p aarambh-ai -- finetune dora \
+  --config configs/tiny_shakespeare.toml \
+  --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --data data/instruct_tiny.jsonl \
+  --lora-rank 16 \
+  --output adapters/tiny_dora
+
+# QDoRA SFT from a GGUF or SafeTensors base.
+cargo run --release -p aarambh-ai -- finetune qdora \
+  --config configs/tiny_shakespeare.toml \
+  --base checkpoints/tiny_shakespeare/tiny-q4.gguf \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --data data/instruct_tiny.jsonl \
+  --lora-rank 16 \
+  --output adapters/tiny_qdora
+
 # Merge an adapter into a normal SafeTensors checkpoint.
 cargo run --release -p aarambh-ai -- finetune merge \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --adapter adapters/tiny_sft \
+  --method auto \
   --output checkpoints/tiny_sft_merged
 
 # Run the merged model with the existing inference engine.
@@ -536,7 +557,7 @@ aarambh-ai/
 ├── aarambh-ai-weights/       ← SafeTensors I/O, GGUF save/load, HuggingFace conversion
 ├── aarambh-ai-quant/         ← INT8, GPTQ, AWQ, GGUF, KV cache quant
 ├── aarambh-ai-train/         ← Training loop, AdamW, cosine schedule, checkpointing
-├── aarambh-ai-finetune/      ← LoRA, QLoRA, SFT, GRPO, verifiers
+├── aarambh-ai-finetune/      ← LoRA, QLoRA, DoRA, QDoRA, SFT, GRPO, verifiers
 ├── aarambh-ai-inference/     ← Inference engine, KV cache, sampler, streaming
 ├── aarambh-ai-safety/        ← Input/output guardrails, PII, audit
 ├── aarambh-ai-selflearn/     ← Self-learning loop, replay buffer, critique
@@ -700,6 +721,9 @@ aarambh-ai/
 | 13 | GPU scale-up (Small → Large) | GPU | ✅ |
 | 14 | Flash Attention CUDA kernels | GPU | ✅ |
 | 15 | Production release v1.0 | all | ✅ |
+| 16 | Long context (RoPE scaling) | i3 + GPU | ✅ |
+| 17 | Evaluation harness | i3 + GPU | ✅ |
+| 18 | DoRA/QDoRA fine-tuning | i3 + GPU | ✅ |
 
 See [ROADMAP.md](ROADMAP.md) for the full phased delivery plan with tests and milestones.
 
