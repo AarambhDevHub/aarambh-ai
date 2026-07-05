@@ -1,4 +1,4 @@
-use aarambh_ai_core::ModelConfig;
+use aarambh_ai_core::{ModelConfig, RopeScalingConfig, RopeScalingMethod};
 use aarambh_ai_model::AarambhModel;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{VarBuilder, VarMap};
@@ -13,6 +13,7 @@ fn mini_config() -> ModelConfig {
         n_kv_heads: 1,
         max_seq_len: 16,
         rope_theta: 10000.0,
+        rope_scaling: None,
         norm_eps: 1e-5,
         tie_embeddings: true,
     }
@@ -23,6 +24,21 @@ fn mini_model(device: &Device) -> AarambhModel {
     let varmap = VarMap::new();
     let vb = VarBuilder::from_varmap(&varmap, DType::F32, device);
     AarambhModel::new(&cfg, vb).unwrap()
+}
+
+fn scaled_mini_config() -> ModelConfig {
+    ModelConfig {
+        rope_scaling: Some(RopeScalingConfig {
+            method: RopeScalingMethod::Linear,
+            factor: 2.0,
+            original_max_seq_len: 8,
+            beta_fast: 32.0,
+            beta_slow: 1.0,
+            attn_factor: 1.0,
+        }),
+        max_seq_len: 16,
+        ..mini_config()
+    }
 }
 
 #[test]
@@ -93,6 +109,34 @@ fn cached_forward_matches_full_forward_for_next_token() {
         .to_scalar::<f32>()
         .unwrap();
     assert!(max_diff < 1e-4, "cached/full mismatch: {max_diff}");
+}
+
+#[test]
+fn scaled_model_forwards_beyond_original_context() {
+    let device = Device::Cpu;
+    let cfg = scaled_mini_config();
+    let varmap = VarMap::new();
+    let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
+    let model = AarambhModel::new(&cfg, vb).unwrap();
+    let ids = Tensor::from_vec(
+        (0..12).map(|id| id as u32).collect::<Vec<_>>(),
+        (1, 12),
+        &device,
+    )
+    .unwrap();
+    let logits = model.forward(&ids).unwrap();
+    assert_eq!(logits.shape().dims(), &[1, 12, cfg.vocab_size]);
+}
+
+#[test]
+fn kv_cache_preallocates_to_scaled_max_seq_len() {
+    let device = Device::Cpu;
+    let cfg = scaled_mini_config();
+    let varmap = VarMap::new();
+    let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
+    let model = AarambhModel::new(&cfg, vb).unwrap();
+    let caches = model.empty_kv_cache();
+    assert_eq!(caches[0].capacity(), Some(cfg.max_seq_len));
 }
 
 #[test]

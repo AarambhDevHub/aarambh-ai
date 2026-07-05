@@ -4,7 +4,7 @@ use aarambh_ai_core::{AarambhError, Configurable, Forward, ModelConfig, Result};
 use aarambh_ai_nn::{
     GroupedQueryAttention, KVCache, RMSNorm, RopeCache, SwiGluFfn, TransformerBlock,
 };
-use candle_core::{DType, Device, Tensor};
+use candle_core::Tensor;
 use candle_nn::{Init, VarBuilder, linear_no_bias};
 
 use crate::embedding::TokenEmbedding;
@@ -19,7 +19,6 @@ pub struct AarambhModel {
     final_norm: RMSNorm,
     lm_head: LmHead,
     rope_cache: RopeCache,
-    causal_mask: Tensor,
 }
 
 impl AarambhModel {
@@ -79,14 +78,7 @@ impl AarambhModel {
         };
 
         let dtype = embedding.weight().dtype();
-        let rope_cache = RopeCache::new(
-            cfg.max_seq_len,
-            cfg.head_dim(),
-            cfg.rope_theta,
-            dtype,
-            vb.device(),
-        )?;
-        let causal_mask = create_causal_mask(cfg.max_seq_len, dtype, vb.device())?;
+        let rope_cache = RopeCache::from_config(cfg, dtype, vb.device())?;
 
         Ok(Self {
             config: cfg.clone(),
@@ -95,7 +87,6 @@ impl AarambhModel {
             final_norm,
             lm_head,
             rope_cache,
-            causal_mask,
         })
     }
 
@@ -132,17 +123,19 @@ impl AarambhModel {
                 "head_dim must be 64 for aarambh-ai Phase 3 model scales".into(),
             ));
         }
+        if let Some(rope_scaling) = &cfg.rope_scaling {
+            rope_scaling.validate(cfg.max_seq_len, cfg.head_dim())?;
+        }
         Ok(())
     }
 
     /// Run a full causal forward pass over token ids.
     pub fn forward(&self, token_ids: &Tensor) -> Result<Tensor> {
-        let (_, seq_len) = self.check_token_ids(token_ids, 0)?;
-        let mask = self.causal_mask(seq_len, 0)?;
+        self.check_token_ids(token_ids, 0)?;
         let mut x = self.embedding.forward(token_ids)?;
 
         for block in &self.blocks {
-            x = block.forward(&x, &self.rope_cache, Some(&mask), None, 0)?;
+            x = block.forward(&x, &self.rope_cache, None, None, 0)?;
         }
 
         let x = self.final_norm.forward(&x)?;
@@ -151,12 +144,11 @@ impl AarambhModel {
 
     /// Run the training forward path over token ids.
     pub fn forward_train(&self, token_ids: &Tensor) -> Result<Tensor> {
-        let (_, seq_len) = self.check_token_ids(token_ids, 0)?;
-        let mask = self.causal_mask(seq_len, 0)?;
+        self.check_token_ids(token_ids, 0)?;
         let mut x = self.embedding.forward(token_ids)?;
 
         for block in &self.blocks {
-            x = block.forward_train(&x, &self.rope_cache, Some(&mask), 0)?;
+            x = block.forward_train(&x, &self.rope_cache, None, 0)?;
         }
 
         let x = self.final_norm.forward_train(&x)?;
@@ -165,19 +157,12 @@ impl AarambhModel {
 
     /// Capture inputs to linear layers for calibration and quantisation.
     pub fn linear_inputs(&self, token_ids: &Tensor) -> Result<HashMap<String, Tensor>> {
-        let (_, seq_len) = self.check_token_ids(token_ids, 0)?;
-        let mask = self.causal_mask(seq_len, 0)?;
+        self.check_token_ids(token_ids, 0)?;
         let mut capture = HashMap::new();
         let mut x = self.embedding.forward(token_ids)?;
 
         for (layer_idx, block) in self.blocks.iter().enumerate() {
-            x = block.forward_with_capture(
-                &x,
-                &self.rope_cache,
-                Some(&mask),
-                layer_idx,
-                &mut capture,
-            )?;
+            x = block.forward_with_capture(&x, &self.rope_cache, None, layer_idx, &mut capture)?;
         }
 
         let x = self.final_norm.forward(&x)?;
@@ -202,18 +187,11 @@ impl AarambhModel {
             )));
         }
 
-        let (_, seq_len) = self.check_token_ids(token_ids, seqlen_offset)?;
-        let mask = self.causal_mask(seq_len, seqlen_offset)?;
+        self.check_token_ids(token_ids, seqlen_offset)?;
         let mut x = self.embedding.forward(token_ids)?;
 
         for (block, cache) in self.blocks.iter().zip(kv_caches.iter_mut()) {
-            x = block.forward(
-                &x,
-                &self.rope_cache,
-                Some(&mask),
-                Some(cache),
-                seqlen_offset,
-            )?;
+            x = block.forward(&x, &self.rope_cache, None, Some(cache), seqlen_offset)?;
         }
 
         let x = self.final_norm.forward(&x)?;
@@ -222,7 +200,9 @@ impl AarambhModel {
 
     /// Create one empty KV cache per transformer block.
     pub fn empty_kv_cache(&self) -> Vec<KVCache> {
-        (0..self.blocks.len()).map(|_| KVCache::new()).collect()
+        (0..self.blocks.len())
+            .map(|_| KVCache::with_capacity(self.config.max_seq_len))
+            .collect()
     }
 
     /// Return a map of model tensor names to tensors.
@@ -353,15 +333,6 @@ impl AarambhModel {
         }
         Ok((batch, seq_len))
     }
-
-    fn causal_mask(&self, seq_len: usize, seqlen_offset: usize) -> Result<Tensor> {
-        let total_len = seqlen_offset + seq_len;
-        let mask = self
-            .causal_mask
-            .narrow(0, seqlen_offset, seq_len)?
-            .narrow(1, 0, total_len)?;
-        Ok(mask.unsqueeze(0)?.unsqueeze(0)?)
-    }
 }
 
 impl Configurable for AarambhModel {
@@ -374,15 +345,4 @@ impl Forward for AarambhModel {
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
         AarambhModel::forward(self, xs)
     }
-}
-
-fn create_causal_mask(
-    seq_len: usize,
-    dtype: DType,
-    device: &Device,
-) -> candle_core::Result<Tensor> {
-    let tril = Tensor::tril2(seq_len, DType::U32, device)?;
-    let zeros = Tensor::zeros((seq_len, seq_len), DType::F32, device)?;
-    let neg_inf = Tensor::full(f32::NEG_INFINITY, (seq_len, seq_len), device)?;
-    tril.where_cond(&zeros, &neg_inf)?.to_dtype(dtype)
 }

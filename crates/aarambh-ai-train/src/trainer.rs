@@ -132,6 +132,12 @@ impl Trainer {
         }
     }
 
+    /// Replace train/validation loaders while preserving model, optimizer, and schedule state.
+    pub fn replace_loaders(&mut self, train_loader: DataLoader, val_loader: Option<DataLoader>) {
+        self.train_loader = train_loader;
+        self.val_loader = val_loader;
+    }
+
     /// Run one training micro-step.
     pub fn train_step(&mut self, batch: Batch) -> Result<TrainingMetrics> {
         let token_count = batch.input_ids.elem_count();
@@ -180,10 +186,18 @@ impl Trainer {
 
     /// Train until the current epoch or max-step boundary completes.
     pub fn train_epoch(&mut self) -> Result<()> {
+        let _ = self.train_epoch_until(self.train_config.max_steps)?;
+        Ok(())
+    }
+
+    /// Train until a target optimizer step or epoch boundary is reached.
+    pub fn train_epoch_until(&mut self, target_step: usize) -> Result<bool> {
         self.train_loader.reset();
-        while self.state.step < self.train_config.max_steps {
+        while self.state.step < target_step {
             let Some(batch) = self.train_loader.next() else {
-                break;
+                self.flush_pending_step()?;
+                self.state.epoch += 1;
+                return Ok(true);
             };
             let metrics = self.train_step(batch?)?;
             if metrics.did_optimizer_step {
@@ -191,17 +205,28 @@ impl Trainer {
             }
         }
         self.flush_pending_step()?;
-        self.state.epoch += 1;
-        Ok(())
+        Ok(false)
     }
 
     /// Run the full training loop and save a final checkpoint.
     pub fn train(&mut self) -> Result<()> {
-        while self.state.epoch < self.train_config.max_epochs
-            && self.state.step < self.train_config.max_steps
-        {
-            self.train_epoch()?;
+        self.train_until(self.train_config.max_steps)?;
+        self.save_checkpoint()
+    }
+
+    /// Run training until `target_step` without resetting model or optimizer state.
+    pub fn train_until(&mut self, target_step: usize) -> Result<()> {
+        while self.state.epoch < self.train_config.max_epochs && self.state.step < target_step {
+            let completed_epoch = self.train_epoch_until(target_step)?;
+            if !completed_epoch {
+                break;
+            }
         }
+        Ok(())
+    }
+
+    /// Save a checkpoint for the current training state.
+    pub fn save_checkpoint(&mut self) -> Result<()> {
         self.checkpoint
             .save(&self.varmap, &self.optimizer, &self.state)?;
         Ok(())
@@ -403,6 +428,7 @@ mod tests {
             n_kv_heads: 1,
             max_seq_len: 4,
             rope_theta: 10000.0,
+            rope_scaling: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };

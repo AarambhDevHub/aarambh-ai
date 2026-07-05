@@ -80,7 +80,12 @@ impl GroupedQueryAttention {
         let k = k.transpose(1, 2)?.contiguous()?;
         let v = v.transpose(1, 2)?.contiguous()?;
 
-        let out = aarambh_ai_kernel::dispatch::attention_forward(&q, &k, &v, mask, self.scale)?;
+        let out = match mask {
+            Some(mask) => {
+                aarambh_ai_kernel::dispatch::attention_forward(&q, &k, &v, Some(mask), self.scale)?
+            }
+            None => aarambh_ai_kernel::dispatch::attention_forward_causal(&q, &k, &v, self.scale)?,
+        };
 
         let out = out.transpose(1, 2)?;
         let out = out.reshape((b, seq_len, self.n_heads * self.head_dim))?;
@@ -118,8 +123,18 @@ impl GroupedQueryAttention {
         let k = k.transpose(1, 2)?.contiguous()?;
         let v = v.transpose(1, 2)?.contiguous()?;
 
-        let out =
-            aarambh_ai_kernel::dispatch::attention_forward_train(&q, &k, &v, mask, self.scale)?;
+        let out = match mask {
+            Some(mask) => aarambh_ai_kernel::dispatch::attention_forward_train(
+                &q,
+                &k,
+                &v,
+                Some(mask),
+                self.scale,
+            )?,
+            None => {
+                aarambh_ai_kernel::dispatch::attention_forward_train_causal(&q, &k, &v, self.scale)?
+            }
+        };
 
         let out = out.transpose(1, 2)?;
         let out = out.reshape((b, seq_len, self.n_heads * self.head_dim))?;
@@ -162,7 +177,12 @@ impl GroupedQueryAttention {
         let k = k.transpose(1, 2)?.contiguous()?;
         let v = v.transpose(1, 2)?.contiguous()?;
 
-        let out = aarambh_ai_kernel::dispatch::attention_forward(&q, &k, &v, mask, self.scale)?;
+        let out = match mask {
+            Some(mask) => {
+                aarambh_ai_kernel::dispatch::attention_forward(&q, &k, &v, Some(mask), self.scale)?
+            }
+            None => aarambh_ai_kernel::dispatch::attention_forward_causal(&q, &k, &v, self.scale)?,
+        };
 
         let out = out.transpose(1, 2)?;
         let out = out.reshape((b, seq_len, self.n_heads * self.head_dim))?;

@@ -13,6 +13,8 @@ pub mod kvcache;
 pub mod norm;
 /// Rotary-position embedding cache.
 pub mod rope;
+/// RoPE long-context scaling helpers.
+pub mod rope_scaling;
 
 pub use attention::GroupedQueryAttention;
 pub use block::TransformerBlock;

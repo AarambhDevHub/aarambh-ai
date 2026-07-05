@@ -53,6 +53,54 @@ fn rope_preserves_vector_magnitude() {
 }
 
 #[test]
+fn rope_scaling_none_matches_v1_output_exactly() {
+    let device = Device::Cpu;
+    let cfg = ModelConfig {
+        vocab_size: 128,
+        hidden_dim: 64,
+        ffn_dim: 128,
+        n_layers: 1,
+        n_heads: 1,
+        n_kv_heads: 1,
+        max_seq_len: 16,
+        rope_theta: 10000.0,
+        rope_scaling: None,
+        norm_eps: 1e-5,
+        tie_embeddings: true,
+    };
+    let old = RopeCache::new(
+        cfg.max_seq_len,
+        cfg.head_dim(),
+        cfg.rope_theta,
+        DType::F32,
+        &device,
+    )
+    .unwrap();
+    let new = RopeCache::from_config(&cfg, DType::F32, &device).unwrap();
+    let q = Tensor::randn(0f32, 1f32, (1, 4, 1, 64), &device).unwrap();
+    let (old_q, old_k) = old.apply(&q, &q, 2).unwrap();
+    let (new_q, new_k) = new.apply(&q, &q, 2).unwrap();
+    let q_diff = (old_q - new_q)
+        .unwrap()
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    let k_diff = (old_k - new_k)
+        .unwrap()
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    assert_eq!(q_diff, 0.0);
+    assert_eq!(k_diff, 0.0);
+}
+
+#[test]
 fn swiglu_ffn_shape_unchanged() {
     let device = Device::Cpu;
     let cfg = ModelConfig::tiny();

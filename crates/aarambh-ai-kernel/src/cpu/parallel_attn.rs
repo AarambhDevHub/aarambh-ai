@@ -75,7 +75,12 @@ pub fn cpu_parallel_attn(
     mask: Option<&Tensor>,
     scale: f64,
 ) -> Result<Tensor> {
-    attention_impl(q, k, v, mask, scale, true)
+    attention_impl(q, k, v, mask, false, scale, true)
+}
+
+/// Compute causal scaled dot-product attention using Rayon parallelism across rows.
+pub fn cpu_parallel_attn_causal(q: &Tensor, k: &Tensor, v: &Tensor, scale: f64) -> Result<Tensor> {
+    attention_impl(q, k, v, None, true, scale, true)
 }
 
 /// Compute scaled dot-product attention sequentially for deterministic comparisons.
@@ -86,7 +91,7 @@ pub fn cpu_sequential_attn(
     mask: Option<&Tensor>,
     scale: f64,
 ) -> Result<Tensor> {
-    attention_impl(q, k, v, mask, scale, false)
+    attention_impl(q, k, v, mask, false, scale, false)
 }
 
 fn attention_impl(
@@ -94,6 +99,7 @@ fn attention_impl(
     k: &Tensor,
     v: &Tensor,
     mask: Option<&Tensor>,
+    causal: bool,
     scale: f64,
     parallel: bool,
 ) -> Result<Tensor> {
@@ -132,6 +138,7 @@ fn attention_impl(
         k_data: &k_data,
         v_data: &v_data,
         mask: mask_data.as_ref(),
+        causal,
         shape: AttentionShape {
             heads,
             q_seq,
@@ -174,6 +181,7 @@ struct AttentionRowContext<'a> {
     k_data: &'a [f32],
     v_data: &'a [f32],
     mask: Option<&'a MaskData>,
+    causal: bool,
     shape: AttentionShape,
     scale: f32,
 }
@@ -198,7 +206,17 @@ impl AttentionRowContext<'_> {
                 .mask
                 .map(|mask| mask.value(batch_idx, head_idx, q_idx, kv_idx))
                 .unwrap_or(0.0);
-            *score = dot * self.scale + mask_value;
+            let causal_value = if self.causal {
+                let shift = self.shape.kv_seq.saturating_sub(self.shape.q_seq);
+                if kv_idx <= shift + q_idx {
+                    0.0
+                } else {
+                    f32::NEG_INFINITY
+                }
+            } else {
+                0.0
+            };
+            *score = dot * self.scale + mask_value + causal_value;
         }
 
         let max_score = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);

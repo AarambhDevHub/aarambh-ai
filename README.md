@@ -33,6 +33,7 @@ v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, an
 | Self-learning loop: online GRPO, replay buffer, critique | Phase 12 ✅ |
 | GPU scale-up: CUDA feature, BF16 train/infer, Kaggle configs/notebooks | Phase 13 ✅ |
 | Custom CUDA kernels: Flash Attention v2, fused RMSNorm, RoPE, SwiGLU | Phase 14 ✅ |
+| Long context: YaRN/NTK/linear RoPE scaling, 16K configs, staged continuation | Phase 16 ✅ |
 | CPU SIMD kernels: AVX2/FMA RMSNorm, AVX512 override, parallel attention via rayon | Phase 4 ✅ |
 | CUDA kernel build prep | Phase 4 ✅ |
 | CLI binary with predict-view, streaming, thinking modes | Phase 6 ✅ |
@@ -184,6 +185,35 @@ and packaged checkpoint downloads.
 # Package a trained checkpoint directory for download.
 scripts/phase13_pack_checkpoint.sh checkpoints/wikitext103_small phase13_small_checkpoint.zip
 ```
+
+---
+
+## Long Context 16K
+
+Phase 16 adds RoPE scaling for continued pretraining at longer context lengths.
+The default v1 configs keep `rope_scaling = None`, so unscaled outputs remain
+compatible. Long-context configs set `model.rope_scaling` and use staged loader
+growth so training warms up at 4K, then 8K, then 16K.
+
+```sh
+# Prepare WikiText-103 and concatenate it into longer documents.
+scripts/phase16_prepare_longdoc.sh data
+
+# Fast long-context CUDA smoke test.
+cargo run --release -p aarambh-ai --features cuda -- train \
+  --config configs/wikitext103_long_smoke.toml
+
+# Medium 16K continued pretraining.
+cargo run --release -p aarambh-ai --features cuda -- train \
+  --config configs/medium_16k.toml
+
+# Large 16K continued pretraining.
+cargo run --release -p aarambh-ai --features cuda -- train \
+  --config configs/large_16k.toml
+```
+
+The long-context configs do not ship pretrained checkpoints. They are recipes
+for user-run continuation from locally trained or converted model weights.
 
 ---
 
@@ -507,6 +537,10 @@ Every crate depends only on crates in the same or lower layer. This is enforced 
 | Large | 1.3B | 2,048 | 24 | 32 | 8 | 6,656 | 4,096 | 500,000 |
 
 All scales share `vocab_size=32000`, `norm_eps=1e-5`, and weight-tied embeddings.
+
+Long-context variants keep the same parameter counts and set scaled context
+through config: Medium 16K uses YaRN factor `8.0` from 2K, and Large 16K uses
+YaRN factor `4.0` from 4K.
 
 **Which scale to use:**
 

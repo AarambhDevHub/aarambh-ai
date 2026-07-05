@@ -119,33 +119,34 @@ frequency interpolation. Short-context quality does not regress.
 
 **`aarambh-ai-nn`:**
 ```
-[ ] src/rope_scaling.rs
-      RopeScalingConfig { method: Yarn | Ntk | Linear, factor, original_max_seq_len,
-                           beta_fast, beta_slow, attn_factor }
+[x] src/rope_scaling.rs
+      RopeScalingConfig lives in aarambh-ai-core because ModelConfig owns it;
+      aarambh-ai-nn implements method: Yarn | Ntk | Linear, factor,
+      original_max_seq_len, beta_fast, beta_slow, attn_factor
       yarn_frequencies() — per-dimension interpolation between original and
         scaled inverse frequencies, ramp function over beta_fast/beta_slow
       ntk_aware_theta() — simple alternative: rescale rope_theta by factor^(d/(d-2))
-      apply_scaled_rope() — drop-in replacement for existing rope::apply()
+      RopeCache::from_config() — drop-in scaled cache builder for existing apply()
 
-[ ] src/attention.rs
-      Extend GQA attention mask construction to configurable max_seq_len
+[x] src/attention.rs
+      Causal attention dispatch avoids preallocating a max_seq_len x max_seq_len mask
       KV cache preallocation now takes scaled max_seq_len as a parameter
 ```
 
 **`aarambh-ai-model`:**
 ```
-[ ] Model config gains `rope_scaling: Option<RopeScalingConfig>`
-[ ] Backward compatible: rope_scaling = None reproduces exact v1.0.0 output
-[ ] New long-context variants of Medium/Large configs with rope_scaling set
+[x] Model config gains `rope_scaling: Option<RopeScalingConfig>`
+[x] Backward compatible: rope_scaling = None reproduces exact v1.0.0 output
+[x] New long-context variants of Medium/Large configs with rope_scaling set
       configs/medium_16k.toml
       configs/large_16k.toml
 ```
 
 **`aarambh-ai-train`:**
 ```
-[ ] Short continued-pretraining recipe: fine-tune an existing checkpoint on
+[x] Short continued-pretraining recipe: fine-tune an existing checkpoint on
     long-document data at the new context length (not from-scratch training)
-[ ] Progressive context growth: warm up at 4K, then 8K, then 16K over the run
+[x] Progressive context growth: warm up at 4K, then 8K, then 16K over the run
 ```
 
 ### Data Setup
@@ -181,10 +182,10 @@ fn attention_mask_handles_positions_beyond_original_max_seq_len() {}
 
 ### Milestone
 ```
-Medium/Large checkpoints continue-trained with rope_scaling produce coherent
-completions at 8K and 16K token contexts (manual spot-check + eval harness
-PPL-on-long-holdout once Phase 17 lands). Short-context PPL does not regress
-by more than 2% vs the un-scaled baseline.
+Code/config support for Medium/Large continued pretraining with rope_scaling is
+implemented. Actual 8K/16K checkpoint quality validation remains a user-run
+training task and Phase 17 eval-harness task; no pretrained checkpoint is
+released in this phase.
 
 git commit -m "feat: Phase 16 — YaRN/NTK RoPE scaling, 16K+ context"
 git tag v2.0.0-alpha.1

@@ -13,6 +13,8 @@ pub mod error;
 pub mod traits;
 
 pub use config::ModelConfig;
+pub use config::RopeScalingConfig;
+pub use config::RopeScalingMethod;
 pub use config::TrainConfig;
 pub use device::Device;
 pub use dtype::DType;

@@ -11,6 +11,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::trainer::Trainer;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// One progressive context-length training stage.
+pub struct ContextScheduleStage {
+    /// Sequence length used when rebuilding train and validation loaders.
+    pub max_seq_len: usize,
+    /// Optimizer step at which this stage finishes.
+    pub until_step: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 /// Complete TOML configuration for a training run.
@@ -37,6 +46,8 @@ pub struct TrainingRunConfig {
     pub model: ModelConfig,
     /// Optimizer and schedule configuration.
     pub train: TrainConfig,
+    /// Optional progressive sequence-length schedule for long-context continuation.
+    pub context_schedule: Vec<ContextScheduleStage>,
 }
 
 impl Default for TrainingRunConfig {
@@ -53,6 +64,7 @@ impl Default for TrainingRunConfig {
             dtype: "f32".to_string(),
             model: ModelConfig::tiny(),
             train: TrainConfig::default(),
+            context_schedule: Vec::new(),
         }
     }
 }
@@ -121,6 +133,45 @@ impl TrainingRunConfig {
         }
         let device = self.device()?;
         self.dtype_for_device(&device)?;
+        self.validate_context_schedule()?;
+        Ok(())
+    }
+
+    fn validate_context_schedule(&self) -> Result<()> {
+        if self.context_schedule.is_empty() {
+            return Ok(());
+        }
+        let mut prev_step = 0usize;
+        for stage in &self.context_schedule {
+            if stage.max_seq_len == 0 {
+                return Err(AarambhError::Config(
+                    "context_schedule.max_seq_len must be non-zero".into(),
+                ));
+            }
+            if stage.max_seq_len > self.model.max_seq_len {
+                return Err(AarambhError::Config(format!(
+                    "context_schedule.max_seq_len {} exceeds model.max_seq_len {}",
+                    stage.max_seq_len, self.model.max_seq_len
+                )));
+            }
+            if stage.until_step <= prev_step {
+                return Err(AarambhError::Config(
+                    "context_schedule.until_step values must be strictly increasing".into(),
+                ));
+            }
+            prev_step = stage.until_step;
+        }
+        let final_step = self
+            .context_schedule
+            .last()
+            .map(|stage| stage.until_step)
+            .unwrap_or(0);
+        if final_step != self.train.max_steps {
+            return Err(AarambhError::Config(format!(
+                "final context_schedule.until_step {final_step} must equal train.max_steps {}",
+                self.train.max_steps
+            )));
+        }
         Ok(())
     }
 }
@@ -139,24 +190,19 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
     model_config.vocab_size = tokenizer.vocab_size();
 
     let (train_dataset, val_dataset) = load_datasets(&config)?;
-    let train_loader = DataLoader::new(
+    let initial_seq_len = config
+        .context_schedule
+        .first()
+        .map(|stage| stage.max_seq_len)
+        .unwrap_or(model_config.max_seq_len);
+    let (train_loader, val_loader) = build_loaders(
         &train_dataset,
+        val_dataset.as_ref(),
         &tokenizer,
-        config.train.batch_size,
-        model_config.max_seq_len,
-        config.shuffle,
+        &config,
+        initial_seq_len,
         device.clone(),
     );
-    let val_loader = val_dataset.map(|dataset| {
-        DataLoader::new(
-            &dataset,
-            &tokenizer,
-            config.train.batch_size,
-            model_config.max_seq_len,
-            false,
-            device.clone(),
-        )
-    });
 
     let mut trainer = Trainer::new(
         model_config,
@@ -169,7 +215,30 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
     if config.resume && trainer.load_latest_checkpoint()? {
         println!("resumed checkpoint at step={}", trainer.state().step);
     }
-    trainer.train()
+    if config.context_schedule.is_empty() {
+        trainer.train()
+    } else {
+        for stage in &config.context_schedule {
+            if trainer.state().step >= stage.until_step {
+                continue;
+            }
+            let (train_loader, val_loader) = build_loaders(
+                &train_dataset,
+                val_dataset.as_ref(),
+                &tokenizer,
+                &config,
+                stage.max_seq_len,
+                device.clone(),
+            );
+            trainer.replace_loaders(train_loader, val_loader);
+            println!(
+                "context stage: max_seq_len={} until_step={}",
+                stage.max_seq_len, stage.until_step
+            );
+            trainer.train_until(stage.until_step)?;
+        }
+        trainer.save_checkpoint()
+    }
 }
 
 fn prepare_tokenizer(config: &TrainingRunConfig) -> Result<BpeTokenizer> {
@@ -230,6 +299,35 @@ fn load_datasets(
     Ok((train, val))
 }
 
+fn build_loaders(
+    train_dataset: &PlaintextDataset,
+    val_dataset: Option<&PlaintextDataset>,
+    tokenizer: &BpeTokenizer,
+    config: &TrainingRunConfig,
+    max_seq_len: usize,
+    device: Device,
+) -> (DataLoader, Option<DataLoader>) {
+    let train_loader = DataLoader::new(
+        train_dataset,
+        tokenizer,
+        config.train.batch_size,
+        max_seq_len,
+        config.shuffle,
+        device.clone(),
+    );
+    let val_loader = val_dataset.map(|dataset| {
+        DataLoader::new(
+            dataset,
+            tokenizer,
+            config.train.batch_size,
+            max_seq_len,
+            false,
+            device,
+        )
+    });
+    (train_loader, val_loader)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +380,19 @@ mod tests {
         };
         let err = config.validate().unwrap_err().to_string();
         assert!(err.contains("requires a GPU device"), "{err}");
+    }
+
+    #[test]
+    fn context_schedule_must_end_at_max_steps() {
+        let config = TrainingRunConfig {
+            dataset_path: "data.txt".into(),
+            context_schedule: vec![ContextScheduleStage {
+                max_seq_len: 4,
+                until_step: 1,
+            }],
+            ..TrainingRunConfig::default()
+        };
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("train.max_steps"), "{err}");
     }
 }

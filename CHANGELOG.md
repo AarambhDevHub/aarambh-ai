@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.0.0-alpha.1] - 2026-07-05
+
+### Added
+
+- **Phase 16 Long Context (RoPE Scaling)**
+  - Added `RopeScalingConfig` and `RopeScalingMethod` to `aarambh-ai-core`
+  - Added YaRN, NTK-aware, and linear RoPE inverse-frequency helpers in `aarambh-ai-nn`
+  - Added `RopeCache::from_config()` for scaled and unscaled RoPE cache construction
+  - Added Medium 16K, Large 16K, and long-context CUDA smoke training configs
+  - Added `context_schedule` support for staged 4K to 8K to 16K continued pretraining
+  - Added `scripts/phase16_prepare_longdoc.sh` for WikiText-103 long-document preparation
+
+### Changed
+
+- Main and LoRA model paths now use causal attention dispatch instead of storing a full max-size causal mask
+- Inference KV caches now support preallocated fixed-capacity storage sized to the configured context length
+- `rope_scaling = None` remains backward compatible with v1.0.0 unscaled RoPE behavior
+- README, ROADMAP_V2, and ARCHITECTURE_V2 now document the Phase 16 workflow
+
+### Verified
+
+- `cargo check --workspace`
+- `cargo fmt --check`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace`
+
 ## [1.0.0] - 2026-06-30
 
 ### Added
