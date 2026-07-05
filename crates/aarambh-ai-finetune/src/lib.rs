@@ -33,5 +33,6 @@ pub use sft::{
 };
 pub use trainer::{SftRunConfig, SftTrainer, merge_lora_from_paths, run_sft_from_config};
 pub use verifier::{
-    CompositeVerifier, FormatVerifier, MathVerifier, Verifier, VerifierKind, extract_final_number,
+    CodeVerifier, CompositeVerifier, FormatVerifier, MathVerifier, Verifier, VerifierKind,
+    extract_final_number,
 };

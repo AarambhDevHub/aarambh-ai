@@ -43,6 +43,7 @@ jobs:
           cargo run -p aarambh-ai -- --help
           cargo run -p aarambh-ai -- train --help
           cargo run -p aarambh-ai -- infer --help
+          cargo run -p aarambh-ai -- eval --help
           cargo run -p aarambh-ai -- quantise --help
           cargo run -p aarambh-ai -- convert --help
           cargo run -p aarambh-ai -- finetune --help

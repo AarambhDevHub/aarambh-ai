@@ -1,0 +1,167 @@
+use std::cell::Cell;
+use std::path::PathBuf;
+
+use aarambh_ai_core::{AarambhError, Configurable, Result};
+use aarambh_ai_model::AarambhModel;
+use aarambh_ai_tokenizer::BpeTokenizer;
+use candle_core::{DType, Device};
+
+use crate::report::{Scorecard, TaskScore};
+use crate::tasks::{Gsm8kSubsetTask, HellaSwagTask, HumanEvalLiteTask, MmluLiteTask, PplTask};
+
+/// Evaluation run configuration.
+#[derive(Debug, Clone)]
+pub struct EvalConfig {
+    /// Task selectors such as `ppl`, `mmlu`, `hellaswag`, `gsm8k`, `humaneval`, or `all`.
+    pub tasks: Vec<String>,
+    /// Root directory containing normalized eval data.
+    pub data_dir: PathBuf,
+    /// Optional maximum number of examples per task.
+    pub max_examples: Option<usize>,
+    /// Maximum generated tokens for generative tasks.
+    pub max_new_tokens: usize,
+    /// Whether HumanEval-lite may execute generated Python code.
+    pub allow_code_exec: bool,
+    /// Optional model path stored in scorecards.
+    pub model_path: Option<String>,
+    /// Optional tokenizer path stored in scorecards.
+    pub tokenizer_path: Option<String>,
+    /// Optional config path stored in scorecards.
+    pub config_path: Option<String>,
+}
+
+impl Default for EvalConfig {
+    fn default() -> Self {
+        Self {
+            tasks: vec!["ppl".into()],
+            data_dir: PathBuf::from("data/eval"),
+            max_examples: None,
+            max_new_tokens: 128,
+            allow_code_exec: false,
+            model_path: None,
+            tokenizer_path: None,
+            config_path: None,
+        }
+    }
+}
+
+/// Loaded model/tokenizer/device context shared by eval tasks.
+pub struct EvalContext {
+    model: AarambhModel,
+    tokenizer: BpeTokenizer,
+    device: Device,
+    dtype: DType,
+    max_seq_len: usize,
+    context_len_used: Cell<usize>,
+}
+
+impl EvalContext {
+    /// Create an evaluation context from loaded components.
+    pub fn new(model: AarambhModel, tokenizer: BpeTokenizer, device: Device, dtype: DType) -> Self {
+        let max_seq_len = model.config().max_seq_len;
+        Self {
+            model,
+            tokenizer,
+            device,
+            dtype,
+            max_seq_len,
+            context_len_used: Cell::new(0),
+        }
+    }
+
+    /// Return the loaded model.
+    pub fn model(&self) -> &AarambhModel {
+        &self.model
+    }
+
+    /// Return the tokenizer.
+    pub fn tokenizer(&self) -> &BpeTokenizer {
+        &self.tokenizer
+    }
+
+    /// Return the Candle device.
+    pub fn device(&self) -> &Device {
+        &self.device
+    }
+
+    /// Return the evaluation dtype.
+    pub fn dtype(&self) -> DType {
+        self.dtype
+    }
+
+    /// Return the configured model context length.
+    pub fn max_seq_len(&self) -> usize {
+        self.max_seq_len
+    }
+
+    /// Record a context length used by a task.
+    pub fn record_context_len(&self, len: usize) {
+        self.context_len_used
+            .set(self.context_len_used.get().max(len));
+    }
+
+    /// Return the largest context length used by this run.
+    pub fn context_len_used(&self) -> usize {
+        self.context_len_used.get()
+    }
+}
+
+/// A runnable evaluation task.
+pub trait EvalTask {
+    /// Stable task name.
+    fn name(&self) -> &'static str;
+
+    /// Execute the task and return a score.
+    fn run(&self, context: &EvalContext, config: &EvalConfig) -> Result<TaskScore>;
+}
+
+/// Run all selected tasks and produce a scorecard.
+pub fn run_all(context: &EvalContext, config: &EvalConfig) -> Result<Scorecard> {
+    let tasks = selected_tasks(&config.tasks, config.allow_code_exec)?;
+    let mut scores = Vec::with_capacity(tasks.len());
+    for task in tasks {
+        scores.push(task.run(context, config)?);
+    }
+    Ok(Scorecard::new(
+        scores,
+        context.context_len_used(),
+        config.max_new_tokens,
+        config.model_path.clone(),
+        config.tokenizer_path.clone(),
+        config.config_path.clone(),
+    ))
+}
+
+fn selected_tasks(selectors: &[String], allow_code_exec: bool) -> Result<Vec<Box<dyn EvalTask>>> {
+    let expanded = if selectors
+        .iter()
+        .any(|task| task.eq_ignore_ascii_case("all"))
+    {
+        vec!["ppl", "mmlu", "hellaswag", "gsm8k", "humaneval"]
+    } else {
+        selectors.iter().map(String::as_str).collect::<Vec<_>>()
+    };
+    let mut tasks: Vec<Box<dyn EvalTask>> = Vec::new();
+    for selector in expanded {
+        match selector.trim().to_ascii_lowercase().as_str() {
+            "ppl" | "perplexity" => tasks.push(Box::new(PplTask)),
+            "mmlu" | "mmlu-lite" | "mmlu_lite" => tasks.push(Box::new(MmluLiteTask)),
+            "hellaswag" => tasks.push(Box::new(HellaSwagTask)),
+            "gsm8k" | "gsm8k-subset" | "gsm8k_subset" => tasks.push(Box::new(Gsm8kSubsetTask)),
+            "humaneval" | "humaneval-lite" | "humaneval_lite" => {
+                if !allow_code_exec {
+                    return Err(AarambhError::Config(
+                        "HumanEval-lite requires --allow-code-exec".into(),
+                    ));
+                }
+                tasks.push(Box::new(HumanEvalLiteTask));
+            }
+            other => {
+                return Err(AarambhError::Config(format!(
+                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,humaneval,all"
+                )));
+            }
+        }
+    }
+    Ok(tasks)
+}

@@ -1,0 +1,73 @@
+use std::fs;
+use std::path::Path;
+
+use aarambh_ai_core::{AarambhError, Result};
+use serde::de::DeserializeOwned;
+
+/// GSM8K subset task.
+pub mod gsm8k_subset;
+/// HellaSwag task.
+pub mod hellaswag;
+/// HumanEval-lite task.
+pub mod humaneval_lite;
+/// MMLU-lite task.
+pub mod mmlu_lite;
+/// Perplexity task wrapper.
+pub mod ppl_task;
+
+pub use gsm8k_subset::Gsm8kSubsetTask;
+pub use hellaswag::HellaSwagTask;
+pub use humaneval_lite::HumanEvalLiteTask;
+pub use mmlu_lite::MmluLiteTask;
+pub use ppl_task::PplTask;
+
+fn read_jsonl<T: DeserializeOwned>(path: &Path, max_examples: Option<usize>) -> Result<Vec<T>> {
+    let content = fs::read_to_string(path).map_err(|err| {
+        AarambhError::Io(std::io::Error::new(
+            err.kind(),
+            format!("failed to read {}: {err}", path.display()),
+        ))
+    })?;
+    let mut out = Vec::new();
+    for (line_idx, line) in content.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let value = serde_json::from_str(line).map_err(|err| {
+            AarambhError::Config(format!(
+                "failed to parse {} line {}: {err}",
+                path.display(),
+                line_idx + 1
+            ))
+        })?;
+        out.push(value);
+        if max_examples.is_some_and(|max| out.len() >= max) {
+            break;
+        }
+    }
+    if out.is_empty() {
+        return Err(AarambhError::Config(format!(
+            "{} contains no examples",
+            path.display()
+        )));
+    }
+    Ok(out)
+}
+
+fn first_existing(paths: &[std::path::PathBuf]) -> Result<std::path::PathBuf> {
+    paths
+        .iter()
+        .find(|path| path.exists())
+        .cloned()
+        .ok_or_else(|| {
+            AarambhError::Config(format!(
+                "none of the expected eval data files exist: {}",
+                paths
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        })
+}

@@ -16,6 +16,7 @@ struct Cli {
 enum Command {
     Train(cmd::train::TrainArgs),
     Infer(cmd::infer::InferArgs),
+    Eval(cmd::eval::EvalArgs),
     Quantise(cmd::quantise::QuantiseArgs),
     Convert(cmd::convert::ConvertArgs),
     Finetune(Box<cmd::finetune::FinetuneArgs>),
@@ -27,6 +28,7 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Train(args) => cmd::train::run(args),
         Command::Infer(args) => cmd::infer::run(args),
+        Command::Eval(args) => cmd::eval::run(args),
         Command::Quantise(args) => cmd::quantise::run(args),
         Command::Convert(args) => cmd::convert::run(args),
         Command::Finetune(args) => cmd::finetune::run(*args),

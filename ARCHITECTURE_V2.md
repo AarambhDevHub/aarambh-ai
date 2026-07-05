@@ -200,11 +200,17 @@ Each task implements a shared `EvalTask` trait so new tasks (like Phase
 
 ```rust
 trait EvalTask {
-    fn name(&self) -> &str;
-    fn load_examples(&self) -> Vec<Example>;
-    fn run(&self, model: &AarambhModel, tokenizer: &Tokenizer) -> TaskScore;
+    fn name(&self) -> &'static str;
+    fn run(&self, context: &EvalContext, config: &EvalConfig) -> TaskScore;
 }
 ```
+
+The CLI entrypoint is `aarambh-ai eval`. It loads the same TOML config,
+tokenizer, SafeTensors/GGUF checkpoint, device, and dtype plumbing used by
+training and inference, then writes a JSON scorecard and/or Markdown table.
+`--compare before.json after.json` is pure scorecard comparison and does not
+load a model. HumanEval-lite is intentionally opt-in with `--allow-code-exec`
+because it executes generated Python tests through `CodeVerifier`.
 
 **Design principle:** every phase from 16 onward that changes model
 behaviour reports a before/after `Scorecard` (`aarambh-ai eval --compare
