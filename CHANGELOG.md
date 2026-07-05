@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.0.0-alpha.3] - 2026-07-05
+
+### Added
+
+- **Phase 18 DoRA and QDoRA fine-tuning**
+  - Added `DoraLinear`, `DoraConfig`, and `DoraAarambhModel` to `aarambh-ai-finetune`
+  - Added row-normalized DoRA forward and merge math with trainable magnitude vectors
+  - Added QDoRA support by reusing the existing packed INT4 base-weight path
+  - Added `AdapterMethod` metadata with backward-compatible default loading for existing LoRA adapters
+  - Added shared SFT adapter training over LoRA/QLoRA/DoRA/QDoRA models
+  - Added `aarambh-ai finetune dora`, `aarambh-ai finetune qdora`, and merge method auto-detection
+  - Added `docs/dora_vs_lora.md` with Phase 17 scorecard comparison commands
+
+### Changed
+
+- `finetune merge` can now merge LoRA or DoRA adapters through `--method auto|lora|dora`
+- CI smoke checks now cover `finetune dora`, `finetune qdora`, and `finetune merge`
+- README, ROADMAP_V2, and ARCHITECTURE_V2 now document the Phase 18 workflow
+
+### Verified
+
+- `cargo fmt --all --check`
+- `cargo check -p aarambh-ai-finetune -p aarambh-ai`
+- `cargo check --workspace`
+- `cargo test -p aarambh-ai-finetune`
+- `cargo run -p aarambh-ai -- finetune dora --help`
+- `cargo run -p aarambh-ai -- finetune qdora --help`
+- `cargo run -p aarambh-ai -- finetune merge --help`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace`
+- `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
+
 ## [2.0.0-alpha.2] - 2026-07-05
 
 ### Added
