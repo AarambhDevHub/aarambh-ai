@@ -207,32 +207,32 @@ before/after number.
 
 **New crate `aarambh-ai-eval`:**
 ```
-[ ] src/ppl.rs
+[x] src/ppl.rs
       compute_ppl(model, tokenizer, holdout_path) -> f32
       Reuses existing masked cross-entropy from aarambh-ai-train, eval-only
       (no gradient, no optimizer state)
 
-[ ] src/harness.rs
-      EvalTask trait { name(), load_examples(), run(model) -> TaskScore }
-      run_all(model, tasks: &[Box<dyn EvalTask>]) -> Scorecard
+[x] src/harness.rs
+      EvalTask trait { name(), run(context, config) -> TaskScore }
+      run_all(context, config) -> Scorecard
 
-[ ] src/tasks/mmlu_lite.rs
+[x] src/tasks/mmlu_lite.rs
       Small free subset of MMLU (public, HuggingFace `cais/mmlu`)
       Multiple-choice via next-token logprob comparison over A/B/C/D
 
-[ ] src/tasks/hellaswag.rs
+[x] src/tasks/hellaswag.rs
       Public HellaSwag validation subset
       Multiple-choice completion scoring via logprob ranking
 
-[ ] src/tasks/gsm8k_subset.rs
+[x] src/tasks/gsm8k_subset.rs
       Small free subset of GSM8K, exact-match on final numeric answer
       Reuses MathVerifier from aarambh-ai-finetune (Phase 10's GRPO verifier)
 
-[ ] src/tasks/humaneval_lite.rs
+[x] src/tasks/humaneval_lite.rs
       Small free subset of HumanEval, pass@1 via sandboxed execution
-      Reuses CodeVerifier from aarambh-ai-finetune
+      Adds and reuses CodeVerifier from aarambh-ai-finetune
 
-[ ] src/report.rs
+[x] src/report.rs
       Scorecard { ppl, mmlu, hellaswag, gsm8k, humaneval, context_len_used }
       to_markdown() — writes a comparable table for CHANGELOG-style tracking
       to_json() — machine-readable for CI regression checks
@@ -240,9 +240,9 @@ before/after number.
 
 **CLI (`aarambh-ai`):**
 ```
-[ ] aarambh-ai eval --config <cfg> --model <ckpt> --tasks ppl,mmlu,hellaswag
-[ ] aarambh-ai eval --config <cfg> --model <ckpt> --tasks all --out scorecard.json
-[ ] aarambh-ai eval --compare scorecard_before.json scorecard_after.json
+[x] aarambh-ai eval --config <cfg> --model <ckpt> --tasks ppl,mmlu,hellaswag
+[x] aarambh-ai eval --config <cfg> --model <ckpt> --tasks all --out scorecard.json
+[x] aarambh-ai eval --compare scorecard_before.json scorecard_after.json
 ```
 
 ### Data Setup
@@ -271,10 +271,9 @@ fn scorecard_json_roundtrips_and_compare_reports_deltas() {}
 
 ### Milestone
 ```
-aarambh-ai eval --tasks all runs end-to-end on a Tiny checkpoint on the i3
-in under 10 minutes, and on Small/Medium on Kaggle in under 30 minutes.
-A baseline scorecard.json is generated for the current best checkpoint —
-every phase from here on records a before/after scorecard.
+`aarambh-ai eval` code/config support is implemented with offline unit tests
+and fixture-safe CI. Full Tiny/Small/Medium benchmark scorecards are user-run
+because this repository does not ship pretrained checkpoints.
 
 git commit -m "feat: Phase 17 — evaluation harness (PPL, MMLU-lite, HellaSwag, GSM8K, HumanEval-lite)"
 git tag v2.0.0-alpha.2

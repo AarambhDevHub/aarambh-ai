@@ -1,4 +1,7 @@
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::str::FromStr;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use aarambh_ai_tokenizer::{THINK_END, THINK_START};
 use serde::{Deserialize, Serialize};
@@ -138,6 +141,39 @@ impl Verifier for CompositeVerifier {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+/// Verifies generated Python code by executing a test suffix in an isolated subprocess.
+pub struct CodeVerifier {
+    timeout: Duration,
+}
+
+impl Default for CodeVerifier {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(2),
+        }
+    }
+}
+
+impl CodeVerifier {
+    /// Create a code verifier with a timeout in milliseconds.
+    pub fn with_timeout_ms(timeout_ms: u64) -> Self {
+        Self {
+            timeout: Duration::from_millis(timeout_ms),
+        }
+    }
+}
+
+impl Verifier for CodeVerifier {
+    fn score(&self, completion: &str, ground_truth: &str) -> f32 {
+        if run_python_test(completion, ground_truth, self.timeout).unwrap_or(false) {
+            1.0
+        } else {
+            0.0
+        }
+    }
+}
+
 /// Extract the final numeric answer from text.
 pub fn extract_final_number(text: &str) -> Option<f64> {
     let source = text
@@ -179,6 +215,54 @@ fn parse_number(value: &str) -> Option<f64> {
         return None;
     }
     normalized.parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+fn run_python_test(completion: &str, test: &str, timeout: Duration) -> std::io::Result<bool> {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!(
+        "aarambh_code_eval_{}_{}",
+        std::process::id(),
+        stamp
+    ));
+    std::fs::create_dir_all(&dir)?;
+    let file_path = dir.join("candidate.py");
+    let mut file = std::fs::File::create(&file_path)?;
+    file.write_all(completion.as_bytes())?;
+    file.write_all(b"\n\n")?;
+    file.write_all(test.as_bytes())?;
+    drop(file);
+
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let mut child = Command::new("python3")
+        .arg("-I")
+        .arg("-B")
+        .arg(&file_path)
+        .env_clear()
+        .env("PATH", path)
+        .current_dir(&dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    let started = Instant::now();
+    let passed = loop {
+        if let Some(status) = child.try_wait()? {
+            break status.success();
+        }
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let _ = std::fs::remove_file(&file_path);
+    let _ = std::fs::remove_dir(&dir);
+    Ok(passed)
 }
 
 #[cfg(test)]
@@ -228,5 +312,20 @@ mod tests {
         assert!((score - 1.0).abs() < 1e-6);
         let score = verifier.score("Answer: 4", "#### 4");
         assert!((score - 0.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn code_verifier_passes_simple_python_test() {
+        let verifier = CodeVerifier::with_timeout_ms(1000);
+        assert_eq!(
+            verifier.score("def add(a, b):\n    return a + b", "assert add(2, 2) == 4"),
+            1.0
+        );
+    }
+
+    #[test]
+    fn code_verifier_times_out_infinite_loop() {
+        let verifier = CodeVerifier::with_timeout_ms(100);
+        assert_eq!(verifier.score("while True:\n    pass", ""), 0.0);
     }
 }

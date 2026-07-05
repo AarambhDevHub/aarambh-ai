@@ -13,6 +13,7 @@ members = [
     "crates/aarambh-ai-inference",
     "crates/aarambh-ai-safety",
     "crates/aarambh-ai-selflearn",
+    "crates/aarambh-ai-eval",
     "aarambh-ai",
 ]
 resolver = "2"

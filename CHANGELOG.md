@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.0.0-alpha.2] - 2026-07-05
+
+### Added
+
+- **Phase 17 Evaluation Harness**
+  - Added the `aarambh-ai-eval` crate with PPL, MMLU-lite, HellaSwag, GSM8K-subset, and HumanEval-lite task support
+  - Added JSON and Markdown scorecards plus before/after scorecard comparison
+  - Added `aarambh-ai eval` CLI with `--tasks`, `--data-dir`, `--out`, `--markdown`, and `--compare`
+  - Added explicit `--allow-code-exec` gating for HumanEval-lite
+  - Added `CodeVerifier` to `aarambh-ai-finetune` for sandboxed Python pass@1 checks
+  - Added `scripts/phase17_prepare_eval_sets.sh` for preparing normalized public evaluation subsets
+
+### Changed
+
+- CI smoke checks now include `aarambh-ai eval --help`
+- README, ROADMAP_V2, and ARCHITECTURE_V2 now document the Phase 17 workflow and scorecard contract
+
+### Verified
+
+- `cargo fmt --all --check`
+- `cargo check --workspace`
+- `cargo test -p aarambh-ai-eval -p aarambh-ai-finetune`
+- `cargo run -p aarambh-ai -- eval --help`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace`
+- `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
+
 ## [2.0.0-alpha.1] - 2026-07-05
 
 ### Added
