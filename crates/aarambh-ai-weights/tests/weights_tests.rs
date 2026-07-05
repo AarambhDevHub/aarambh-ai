@@ -16,6 +16,7 @@ fn mini_config() -> ModelConfig {
         n_kv_heads: 1,
         max_seq_len: 16,
         rope_theta: 10000.0,
+        rope_scaling: None,
         norm_eps: 1e-5,
         tie_embeddings: true,
     }

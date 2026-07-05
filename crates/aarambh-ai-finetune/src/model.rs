@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use aarambh_ai_core::{AarambhError, ModelConfig, Result};
 use aarambh_ai_model::AarambhModel;
 use aarambh_ai_nn::RopeCache;
-use candle_core::{DType, Device, Tensor};
+use candle_core::{Device, Tensor};
 use candle_nn::{Embedding, Module, VarMap};
 
 use crate::lora::{LoraConfig, LoraLinear, linear_forward};
@@ -17,7 +17,6 @@ pub struct LoraAarambhModel {
     final_norm_weight: Tensor,
     lm_head: Option<LoraLinear>,
     rope_cache: RopeCache,
-    causal_mask: Tensor,
     adapter_param_count: usize,
     base_param_count: usize,
 }
@@ -63,14 +62,7 @@ impl LoraAarambhModel {
             )?)
         };
         let dtype = embedding_weight.dtype();
-        let rope_cache = RopeCache::new(
-            config.max_seq_len,
-            config.head_dim(),
-            config.rope_theta,
-            dtype,
-            device,
-        )?;
-        let causal_mask = create_causal_mask(config.max_seq_len, dtype, device)?;
+        let rope_cache = RopeCache::from_config(config, dtype, device)?;
         let adapter_param_count = adapter_param_count(&blocks, lm_head.as_ref());
         let base_param_count = tensors.values().map(tensor_elem_count).sum();
 
@@ -81,7 +73,6 @@ impl LoraAarambhModel {
             final_norm_weight,
             lm_head,
             rope_cache,
-            causal_mask,
             adapter_param_count,
             base_param_count,
         };
@@ -180,13 +171,12 @@ impl LoraAarambhModel {
     }
 
     fn forward(&self, token_ids: &Tensor, train: bool) -> Result<Tensor> {
-        let (_, seq_len) = self.check_token_ids(token_ids)?;
-        let mask = self.causal_mask(seq_len)?;
+        self.check_token_ids(token_ids)?;
         let embedding = Embedding::new(self.embedding_weight.clone(), self.config.hidden_dim);
         let mut x = embedding.forward(token_ids)?;
 
         for block in &self.blocks {
-            x = block.forward(&x, &self.rope_cache, Some(&mask), train)?;
+            x = block.forward(&x, &self.rope_cache, None, train)?;
         }
 
         let x = candle_nn::ops::rms_norm_slow(
@@ -221,15 +211,6 @@ impl LoraAarambhModel {
             )));
         }
         Ok((batch, seq_len))
-    }
-
-    fn causal_mask(&self, seq_len: usize) -> Result<Tensor> {
-        Ok(self
-            .causal_mask
-            .narrow(0, 0, seq_len)?
-            .narrow(1, 0, seq_len)?
-            .unsqueeze(0)?
-            .unsqueeze(0)?)
     }
 }
 
@@ -387,8 +368,21 @@ impl LoraAttention {
         let q = q.transpose(1, 2)?.contiguous()?;
         let k = k.transpose(1, 2)?.contiguous()?;
         let v = v.transpose(1, 2)?.contiguous()?;
-        let out =
-            aarambh_ai_kernel::dispatch::attention_forward_candle(&q, &k, &v, mask, self.scale)?;
+        let out = match (mask, train) {
+            (Some(mask), _) => aarambh_ai_kernel::dispatch::attention_forward_candle(
+                &q,
+                &k,
+                &v,
+                Some(mask),
+                self.scale,
+            )?,
+            (None, true) => {
+                aarambh_ai_kernel::dispatch::attention_forward_train_causal(&q, &k, &v, self.scale)?
+            }
+            (None, false) => {
+                aarambh_ai_kernel::dispatch::attention_forward_causal(&q, &k, &v, self.scale)?
+            }
+        };
 
         let out = out.transpose(1, 2)?;
         let out = out.reshape((b, seq_len, self.n_heads * self.head_dim))?;
@@ -477,17 +471,6 @@ fn required_ref<'a>(tensors: &'a HashMap<String, Tensor>, name: &str) -> Result<
         .ok_or_else(|| AarambhError::Checkpoint(format!("missing tensor {name}")))
 }
 
-fn create_causal_mask(
-    seq_len: usize,
-    dtype: DType,
-    device: &Device,
-) -> candle_core::Result<Tensor> {
-    let tril = Tensor::tril2(seq_len, DType::U32, device)?;
-    let zeros = Tensor::zeros((seq_len, seq_len), DType::F32, device)?;
-    let neg_inf = Tensor::full(f32::NEG_INFINITY, (seq_len, seq_len), device)?;
-    tril.where_cond(&zeros, &neg_inf)?.to_dtype(dtype)
-}
-
 fn repeat_heads(x: &Tensor, n_repeats: usize) -> Result<Tensor> {
     if n_repeats == 1 {
         return Ok(x.clone());
@@ -527,7 +510,7 @@ fn tensor_elem_count(tensor: &Tensor) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use candle_core::Device;
+    use candle_core::{DType, Device};
     use candle_nn::{VarBuilder, VarMap};
 
     #[test]
@@ -542,6 +525,7 @@ mod tests {
             n_kv_heads: 1,
             max_seq_len: 8,
             rope_theta: 10000.0,
+            rope_scaling: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -573,6 +557,7 @@ mod tests {
             n_kv_heads: 1,
             max_seq_len: 8,
             rope_theta: 10000.0,
+            rope_scaling: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };

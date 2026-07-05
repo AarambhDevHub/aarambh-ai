@@ -1,6 +1,6 @@
 use candle_core::{DType, Result, Tensor};
 
-use crate::cpu::parallel_attn::cpu_parallel_attn;
+use crate::cpu::parallel_attn::{cpu_parallel_attn, cpu_parallel_attn_causal};
 use crate::cpu::simd_norm::cpu_rms_norm_simd;
 use crate::flash_attn::{flash_attention_forward, flash_attention_forward_train};
 use crate::fused_norm::fused_rms_norm;
@@ -98,6 +98,24 @@ pub fn attention_forward(
     attention_forward_candle(q, k, v, mask, scale)
 }
 
+/// Run causal inference attention with the fastest available kernel.
+pub fn attention_forward_causal(q: &Tensor, k: &Tensor, v: &Tensor, scale: f64) -> Result<Tensor> {
+    match attention_path(q, k, v, None) {
+        KernelPath::CpuParallel => {
+            if let Ok(out) = cpu_parallel_attn_causal(q, k, v, scale) {
+                return Ok(out);
+            }
+        }
+        KernelPath::CudaFlashAttention => {
+            if let Ok(out) = flash_attention_forward(q, k, v, true, scale) {
+                return Ok(out);
+            }
+        }
+        _ => {}
+    }
+    attention_forward_candle_causal(q, k, v, scale)
+}
+
 /// Run training attention with the fastest available kernel and fall back to Candle.
 pub fn attention_forward_train(
     q: &Tensor,
@@ -113,6 +131,21 @@ pub fn attention_forward_train(
         }
     }
     attention_forward_candle(q, k, v, mask, scale)
+}
+
+/// Run causal training attention with CUDA Flash Attention when available.
+pub fn attention_forward_train_causal(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    scale: f64,
+) -> Result<Tensor> {
+    if attention_path(q, k, v, None) == KernelPath::CudaFlashAttention
+        && let Ok(out) = flash_attention_forward_train(q, k, v, true, scale)
+    {
+        return Ok(out);
+    }
+    attention_forward_candle_causal(q, k, v, scale)
 }
 
 /// Return the attention kernel path that would be selected for the tensors.
@@ -204,6 +237,39 @@ pub fn attention_forward_candle(
     };
     let attn_weights = candle_nn::ops::softmax_last_dim(&attn_weights)?;
     attn_weights.matmul(v)
+}
+
+/// Candle implementation of causal scaled dot-product attention.
+pub fn attention_forward_candle_causal(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    scale: f64,
+) -> Result<Tensor> {
+    let mask = causal_mask(q, k)?;
+    attention_forward_candle(q, k, v, Some(&mask), scale)
+}
+
+fn causal_mask(q: &Tensor, k: &Tensor) -> Result<Tensor> {
+    let Some([_, _, q_len, _]) = dims4(q) else {
+        return Err(candle_core::Error::msg("causal mask requires rank-4 q"));
+    };
+    let Some([_, _, kv_len, _]) = dims4(k) else {
+        return Err(candle_core::Error::msg("causal mask requires rank-4 k"));
+    };
+    let shift = kv_len.saturating_sub(q_len);
+    let values = (0..q_len)
+        .flat_map(|q_idx| {
+            (0..kv_len).map(move |kv_idx| {
+                if kv_idx <= shift + q_idx {
+                    0.0f32
+                } else {
+                    f32::NEG_INFINITY
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    Tensor::from_vec(values, (1, 1, q_len, kv_len), q.device())?.to_dtype(q.dtype())
 }
 
 fn dims4(tensor: &Tensor) -> Option<[usize; 4]> {

@@ -155,6 +155,21 @@ generalises better. Both are implemented; `RopeScalingConfig.method`
 selects between them. `method: None` reproduces v1.0.0's RoPE exactly —
 this is enforced by a regression test (`rope_scaling_none_matches_v1_output_exactly`).
 
+Implementation notes:
+
+- `RopeScalingConfig` is defined in `aarambh-ai-core` because `ModelConfig`
+  owns the serialized schema. `aarambh-ai-nn::rope_scaling` owns the YaRN,
+  NTK-aware, and linear frequency math.
+- `AarambhModel` no longer stores a full `[max_seq_len, max_seq_len]` causal
+  mask. Causal attention is passed to kernel dispatch directly, so CUDA
+  FlashAttention can run with `causal = true` and CPU/Candle fallback only
+  materializes the per-call mask it needs.
+- Inference KV caches are created with `KVCache::with_capacity(max_seq_len)`
+  so long-context autoregressive decoding writes into fixed cache storage
+  instead of concatenating tensors on every token.
+- `aarambh-ai-train` accepts an optional `context_schedule` for progressive
+  loader rebuilds at 4K, 8K, and 16K while preserving model and optimizer state.
+
 **Why continued pretraining, not from scratch:** the model already knows
 how to use short-range RoPE angles. Continued pretraining on long documents
 at progressively increasing context (4K → 8K → 16K) teaches it to make use

@@ -1,0 +1,59 @@
+dataset_path = "data/long_context/wikitext103_longdoc.txt"
+tokenizer_save_path = "checkpoints/large_16k/tokenizer.json"
+vocab_size = 32000
+validation_split = 0.01
+shuffle = true
+resume = true
+device = "cuda:0"
+dtype = "bf16"
+
+[model]
+vocab_size = 32000
+hidden_dim = 2048
+ffn_dim = 6656
+n_layers = 24
+n_heads = 32
+n_kv_heads = 8
+max_seq_len = 16384
+rope_theta = 500000.0
+norm_eps = 0.00001
+tie_embeddings = true
+
+[model.rope_scaling]
+method = "yarn"
+factor = 4.0
+original_max_seq_len = 4096
+beta_fast = 32.0
+beta_slow = 1.0
+attn_factor = 1.138629436
+
+[train]
+lr = 0.00003
+batch_size = 1
+grad_accum_steps = 64
+max_epochs = 1
+max_steps = 30000
+warmup_steps = 1000
+min_lr_ratio = 0.1
+weight_decay = 0.1
+beta1 = 0.9
+beta2 = 0.95
+epsilon = 0.00000001
+clip_grad_norm = 1.0
+save_every_n_steps = 2500
+log_every_n_steps = 10
+eval_steps = 1000
+seed = 42
+checkpoint_dir = "checkpoints/large_16k"
+
+[[context_schedule]]
+max_seq_len = 4096
+until_step = 5000
+
+[[context_schedule]]
+max_seq_len = 8192
+until_step = 15000
+
+[[context_schedule]]
+max_seq_len = 16384
+until_step = 30000
