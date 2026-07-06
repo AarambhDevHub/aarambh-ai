@@ -1,0 +1,48 @@
+tokenizer_path = "checkpoints/tiny_shakespeare/tokenizer.json"
+vocab_size = 32000
+validation_split = 0.0
+shuffle = true
+resume = false
+device = "cuda"
+dtype = "f16"
+
+[model]
+vocab_size = 32000
+hidden_dim = 384
+ffn_dim = 1024
+n_layers = 8
+n_heads = 6
+n_kv_heads = 2
+max_seq_len = 512
+rope_theta = 10000.0
+norm_eps = 0.00001
+tie_embeddings = true
+
+[train]
+lr = 0.00005
+batch_size = 1
+grad_accum_steps = 8
+max_epochs = 1
+max_steps = 5000
+warmup_steps = 200
+min_lr_ratio = 0.1
+weight_decay = 0.01
+beta1 = 0.9
+beta2 = 0.95
+epsilon = 0.00000001
+clip_grad_norm = 1.0
+save_every_n_steps = 500
+log_every_n_steps = 10
+eval_steps = 0
+seed = 42
+checkpoint_dir = "adapters/vision_vqa_dora"
+
+[vision]
+mode = "vlm_instruction"
+base_model_path = "checkpoints/tiny_shakespeare/step_000050/model.safetensors"
+clip_config_path = "data/vision/clip_b32_config.json"
+clip_weights_path = "data/vision/clip_b32.safetensors"
+projector_path = "adapters/vision_vqa_dora/projector.safetensors"
+image_root = "data/llava/images"
+projector_hidden_mult = 4
+max_caption_tokens = 128

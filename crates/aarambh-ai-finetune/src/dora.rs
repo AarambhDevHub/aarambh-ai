@@ -276,6 +276,23 @@ impl DoraAarambhModel {
         self.forward(token_ids, false)
     }
 
+    /// Convert token ids into frozen base token embeddings.
+    pub fn embed_tokens(&self, token_ids: &Tensor) -> Result<Tensor> {
+        self.check_token_ids(token_ids)?;
+        let embedding = Embedding::new(self.embedding_weight.clone(), self.config.hidden_dim);
+        Ok(embedding.forward(token_ids)?)
+    }
+
+    /// Run the training forward path over precomputed token embeddings.
+    pub fn forward_embeddings_train(&self, embeddings: &Tensor) -> Result<Tensor> {
+        self.forward_embeddings(embeddings, true)
+    }
+
+    /// Run the evaluation forward path over precomputed token embeddings.
+    pub fn forward_embeddings_eval(&self, embeddings: &Tensor) -> Result<Tensor> {
+        self.forward_embeddings(embeddings, false)
+    }
+
     /// Return checkpoint tensors with adapters merged into base weights.
     pub fn merged_tensors(&self) -> Result<HashMap<String, Tensor>> {
         let mut tensors = HashMap::new();
@@ -335,8 +352,13 @@ impl DoraAarambhModel {
 
     fn forward(&self, token_ids: &Tensor, train: bool) -> Result<Tensor> {
         self.check_token_ids(token_ids)?;
-        let embedding = Embedding::new(self.embedding_weight.clone(), self.config.hidden_dim);
-        let mut x = embedding.forward(token_ids)?;
+        let x = self.embed_tokens(token_ids)?;
+        self.forward_embeddings(&x, train)
+    }
+
+    fn forward_embeddings(&self, embeddings: &Tensor, train: bool) -> Result<Tensor> {
+        self.check_embeddings(embeddings)?;
+        let mut x = embeddings.clone();
 
         for block in &self.blocks {
             x = block.forward(&x, &self.rope_cache, None, train)?;
@@ -351,6 +373,36 @@ impl DoraAarambhModel {
             Some(lm_head) => lm_head.forward(&x, train),
             None => linear_forward(&x, &self.embedding_weight),
         }
+    }
+
+    fn check_embeddings(&self, embeddings: &Tensor) -> Result<(usize, usize)> {
+        let dims = embeddings.dims();
+        if dims.len() != 3 {
+            return Err(AarambhError::Shape(format!(
+                "embeddings must have shape [batch, seq, hidden_dim], got {dims:?}"
+            )));
+        }
+        let batch = dims[0];
+        let seq_len = dims[1];
+        let hidden_dim = dims[2];
+        if batch == 0 || seq_len == 0 {
+            return Err(AarambhError::Shape(
+                "batch and sequence length must be non-zero".into(),
+            ));
+        }
+        if hidden_dim != self.config.hidden_dim {
+            return Err(AarambhError::Shape(format!(
+                "embedding hidden_dim {hidden_dim} does not match model hidden_dim {}",
+                self.config.hidden_dim
+            )));
+        }
+        if seq_len > self.config.max_seq_len {
+            return Err(AarambhError::Shape(format!(
+                "sequence length {seq_len} exceeds max_seq_len {}",
+                self.config.max_seq_len
+            )));
+        }
+        Ok((batch, seq_len))
     }
 
     fn check_token_ids(&self, token_ids: &Tensor) -> Result<(usize, usize)> {

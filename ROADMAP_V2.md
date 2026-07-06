@@ -29,7 +29,7 @@ Phase 16 →  Long context (RoPE scaling)        (7–10 days)   [Kaggle, free]
 Phase 17 →  Evaluation harness                 (7–10 days)   [i3 + Kaggle]
 Phase 18 →  DoRA fine-tuning                    (7–10 days)   [i3 + Kaggle]
 Phase 19 →  Vision encoder + projector          (10–14 days)  [Kaggle] ✅
-Phase 20 →  Vision-language training            (10–14 days)  [Kaggle]
+Phase 20 →  Vision-language training            (10–14 days)  [Kaggle] ✅
 Phase 21 →  Vision-aware self-learning          (7–10 days)   [Kaggle only]
 Phase 22 →  Mixture of Experts                  (10–14 days)  [Kaggle]
 Phase 23 →  Multi-GPU training                  (7–10 days)   [Kaggle 2×T4]
@@ -482,7 +482,7 @@ questions about an image, not just caption it.
 
 **`aarambh-ai-vision`:**
 ```
-[ ] src/instruct_data.rs
+[x] src/instruct_data.rs
       VqaExample { image_path, question, answer, thinking: Option<String> }
       JSONL schema compatible with existing SFT loss-masking conventions
       from Phase 9 (build_loss_mask reused unmodified)
@@ -490,7 +490,7 @@ questions about an image, not just caption it.
 
 **`aarambh-ai-finetune`:**
 ```
-[ ] src/vlm_dora.rs
+[x] src/vlm_dora.rs
       VlmDoraTrainer combines: frozen vision encoder, frozen-or-tunable
       projector (config flag), DoRA-adapted LLM attention/FFN
       Only DoRA adapter params + optionally projector params enter AdamW
@@ -498,9 +498,9 @@ questions about an image, not just caption it.
 
 **`aarambh-ai-inference`:**
 ```
-[ ] Extend existing infer path: --image flag prepends vision tokens before
+[x] Existing infer path: --image flag prepends vision tokens before
     the KV-cache prefill step, otherwise inference is unchanged
-[ ] Thinking engine (Phase 7) composes normally: <think> budget applies to
+[x] Thinking engine (Phase 7) composes normally: <think> budget applies to
     the text generated after image tokens, unchanged from text-only behavior
 ```
 
@@ -509,6 +509,19 @@ questions about an image, not just caption it.
 ```bash
 # LLaVA-Instruct-150K (free, public): image + multi-turn instruction pairs
 scripts/phase20_prepare_llava_instruct.sh data
+```
+
+Local smoke data:
+```bash
+python3 scripts/phase20_make_vqa_smoke_fixture.py
+cargo run --release -p aarambh-ai -- finetune vlm-dora \
+  --config configs/vision_vqa_smoke.toml \
+  --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --tokenizer checkpoints/vision_projector_smoke/tokenizer.json \
+  --data data/vision_smoke/vqa_smoke_4.jsonl \
+  --output adapters/vision_vqa_smoke \
+  --lora-rank 4 \
+  --max-steps 2
 ```
 
 ### Tests
@@ -1060,7 +1073,7 @@ git commit -m "chore: v2.0.0 — crates.io publish, source release"
 | 17 | Evaluation Harness | `aarambh-ai eval`, PPL + MMLU-lite/HellaSwag/GSM8K/HumanEval-lite | i3 + Kaggle | 7–10 days |
 | 18 | DoRA | Weight-decomposed LoRA in `aarambh-ai-finetune` | i3 + Kaggle | 7–10 days |
 | 19 | Vision Encoder + Projector | ✅ New `aarambh-ai-vision` crate, frozen ViT + trainable projector | Kaggle | 10–14 days |
-| 20 | Vision-Language Training | VQA instruction tuning via DoRA-adapted VLM | Kaggle | 10–14 days |
+| 20 | Vision-Language Training | ✅ VQA instruction tuning via DoRA-adapted VLM | Kaggle | 10–14 days |
 | 21 | Vision-Aware Self-Learning | Image-grounded replay + verifier, Kaggle-only | Kaggle only | 7–10 days |
 | 22 | Mixture of Experts | Top-k router, load-balancing loss | Kaggle | 10–14 days |
 | 23 | Multi-GPU Training | Data-parallel training via NCCL | Kaggle 2×T4 | 7–10 days |

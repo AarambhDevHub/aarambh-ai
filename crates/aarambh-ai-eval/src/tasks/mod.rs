@@ -16,6 +16,8 @@ pub mod image_caption;
 pub mod mmlu_lite;
 /// Perplexity task wrapper.
 pub mod ppl_task;
+/// Vision-question-answering task.
+pub mod vqa;
 
 pub use gsm8k_subset::Gsm8kSubsetTask;
 pub use hellaswag::HellaSwagTask;
@@ -23,6 +25,7 @@ pub use humaneval_lite::HumanEvalLiteTask;
 pub use image_caption::ImageCaptionTask;
 pub use mmlu_lite::MmluLiteTask;
 pub use ppl_task::PplTask;
+pub use vqa::VqaTask;
 
 fn read_jsonl<T: DeserializeOwned>(path: &Path, max_examples: Option<usize>) -> Result<Vec<T>> {
     let content = fs::read_to_string(path).map_err(|err| {

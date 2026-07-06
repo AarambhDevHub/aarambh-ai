@@ -5,6 +5,8 @@
 pub mod encoder;
 /// LLaVA-style image token fusion helpers.
 pub mod fusion;
+/// Vision-language instruction data loading.
+pub mod instruct_data;
 /// Image decode, resize, crop, and normalization.
 pub mod preprocess;
 /// Trainable projector from vision width to language-model width.
@@ -12,6 +14,7 @@ pub mod projector;
 
 pub use encoder::{ClipVisionEncoder, VisionEncoderConfig};
 pub use fusion::interleave_image_tokens;
+pub use instruct_data::{VqaExample, load_vqa_jsonl};
 pub use preprocess::{ImagePreprocessor, VisionPreprocessConfig};
 pub use projector::{ProjectorConfig, VisionProjector};
 
