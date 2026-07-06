@@ -4,8 +4,9 @@ use aarambh_ai_core::TokenizerLike;
 use aarambh_ai_tokenizer::{
     BpeTokenizer, Vocab,
     special::{
-        ASSISTANT, ASSISTANT_ID, BOS, BOS_ID, ENDOFTEXT, ENDOFTEXT_ID, PAD, PAD_ID,
-        SPECIAL_TOKEN_COUNT, THINK_END, THINK_END_ID, THINK_START, THINK_START_ID, USER, USER_ID,
+        ASSISTANT, ASSISTANT_ID, BOS, BOS_ID, ENDOFTEXT, ENDOFTEXT_ID, IMAGE, IMAGE_END,
+        IMAGE_END_ID, IMAGE_ID, PAD, PAD_ID, SPECIAL_TOKEN_COUNT, THINK_END, THINK_END_ID,
+        THINK_START, THINK_START_ID, USER, USER_ID,
     },
 };
 
@@ -18,6 +19,8 @@ fn special_token_ids_are_correct() {
     assert_eq!(THINK_END_ID, 4);
     assert_eq!(USER_ID, 5);
     assert_eq!(ASSISTANT_ID, 6);
+    assert_eq!(IMAGE_ID, 7);
+    assert_eq!(IMAGE_END_ID, 8);
     assert_eq!(ENDOFTEXT, "<|endoftext|>");
     assert_eq!(PAD, "<|pad|>");
     assert_eq!(BOS, "<|bos|>");
@@ -25,6 +28,8 @@ fn special_token_ids_are_correct() {
     assert_eq!(THINK_END, "</think>");
     assert_eq!(USER, "<|user|>");
     assert_eq!(ASSISTANT, "<|assistant|>");
+    assert_eq!(IMAGE, "<image>");
+    assert_eq!(IMAGE_END, "<image_end>");
 }
 
 #[test]

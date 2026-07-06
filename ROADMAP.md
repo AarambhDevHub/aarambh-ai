@@ -36,6 +36,10 @@ Phase 12 →  Self-learning loop                   (10–14 days)  [i3 + Kaggle]
 Phase 13 →  GPU scale-up (Small → Large)         (5–7 days)    [Kaggle] ✅
 Phase 14 →  Flash Attention CUDA kernels         (7–10 days)   [Kaggle] ✅
 Phase 15 →  Production release v1.0              (7–10 days)   [all] ✅
+Phase 16 →  Long context (RoPE scaling)          (7–10 days)   [i3 + Kaggle] ✅
+Phase 17 →  Evaluation harness                   (7–10 days)   [i3 + Kaggle] ✅
+Phase 18 →  DoRA / QDoRA fine-tuning             (7–10 days)   [i3 + Kaggle] ✅
+Phase 19 →  Vision encoder + projector           (10–14 days)  [Kaggle] ✅
 ```
 
 ---
@@ -58,6 +62,8 @@ members = [
     "crates/aarambh-ai-inference",
     "crates/aarambh-ai-safety",
     "crates/aarambh-ai-selflearn",
+    "crates/aarambh-ai-eval",
+    "crates/aarambh-ai-vision",
     "aarambh-ai",
 ]
 resolver = "2"
@@ -82,6 +88,8 @@ rayon              = "1"
 cc                 = "1"
 which              = "6"
 criterion          = "0.5"
+sha2               = "0.10"
+image              = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 ```
 
 > **Note on `tokenizers` vs custom BPE:** The `tokenizers` crate is used for **both** loading AND training. Our pure-Rust `BpeTokenizer` implements `encode`/`decode` from the merge rules. The heavy BPE training logic is delegated to the external crate to avoid re‑implementing complex Unicode edge‑cases.

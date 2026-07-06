@@ -10,6 +10,8 @@ pub mod gsm8k_subset;
 pub mod hellaswag;
 /// HumanEval-lite task.
 pub mod humaneval_lite;
+/// Image-captioning smoke task.
+pub mod image_caption;
 /// MMLU-lite task.
 pub mod mmlu_lite;
 /// Perplexity task wrapper.
@@ -18,6 +20,7 @@ pub mod ppl_task;
 pub use gsm8k_subset::Gsm8kSubsetTask;
 pub use hellaswag::HellaSwagTask;
 pub use humaneval_lite::HumanEvalLiteTask;
+pub use image_caption::ImageCaptionTask;
 pub use mmlu_lite::MmluLiteTask;
 pub use ppl_task::PplTask;
 

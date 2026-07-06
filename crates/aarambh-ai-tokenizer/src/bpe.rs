@@ -141,17 +141,30 @@ impl BpeTokenizer {
 
     /// Verify that reserved Aarambh special tokens use their required ids.
     pub fn validate_special_tokens(&self) -> Result<()> {
+        for (token, id) in special::TEXT_SPECIAL_TOKENS {
+            self.validate_special_token(token, id)?;
+        }
+        Ok(())
+    }
+
+    /// Verify that multimodal v2 special tokens use their required ids.
+    pub fn validate_vision_special_tokens(&self) -> Result<()> {
         for (token, id) in special::SPECIAL_TOKENS {
-            if self.vocab.get_id(token) != Some(id) {
-                return Err(AarambhError::Tokenizer(format!(
-                    "special token {token:?} must have id {id}"
-                )));
-            }
-            if self.vocab.get_token(id) != Some(token) {
-                return Err(AarambhError::Tokenizer(format!(
-                    "special id {id} must decode to {token:?}"
-                )));
-            }
+            self.validate_special_token(token, id)?;
+        }
+        Ok(())
+    }
+
+    fn validate_special_token(&self, token: &str, id: u32) -> Result<()> {
+        if self.vocab.get_id(token) != Some(id) {
+            return Err(AarambhError::Tokenizer(format!(
+                "special token {token:?} must have id {id}"
+            )));
+        }
+        if self.vocab.get_token(id) != Some(token) {
+            return Err(AarambhError::Tokenizer(format!(
+                "special id {id} must decode to {token:?}"
+            )));
         }
         Ok(())
     }
@@ -191,7 +204,7 @@ impl BpeTokenizer {
             merges: self.merges,
             merge_rank: self.merge_rank,
         };
-        tokenizer.validate_special_tokens()?;
+        tokenizer.validate_vision_special_tokens()?;
         Ok(tokenizer)
     }
 

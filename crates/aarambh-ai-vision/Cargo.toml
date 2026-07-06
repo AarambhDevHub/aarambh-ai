@@ -1,0 +1,21 @@
+[package]
+name = "aarambh-ai-vision"
+version = "1.0.0"
+publish = false
+edition = "2024"
+
+[features]
+default = []
+cuda = [
+    "aarambh-ai-core/cuda",
+    "candle-core/cuda",
+    "candle-nn/cuda",
+]
+
+[dependencies]
+aarambh-ai-core = { path = "../aarambh-ai-core" }
+candle-core     = { workspace = true }
+candle-nn       = { workspace = true }
+image           = { workspace = true }
+serde           = { workspace = true }
+serde_json      = { workspace = true }

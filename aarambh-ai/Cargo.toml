@@ -16,6 +16,7 @@ cuda = [
     "aarambh-ai-safety/cuda",
     "aarambh-ai-selflearn/cuda",
     "aarambh-ai-train/cuda",
+    "aarambh-ai-vision/cuda",
     "aarambh-ai-weights/cuda",
     "candle-core/cuda",
 ]
@@ -31,6 +32,7 @@ aarambh-ai-safety    = { path = "../crates/aarambh-ai-safety" }
 aarambh-ai-selflearn = { path = "../crates/aarambh-ai-selflearn" }
 aarambh-ai-tokenizer = { path = "../crates/aarambh-ai-tokenizer" }
 aarambh-ai-train     = { path = "../crates/aarambh-ai-train" }
+aarambh-ai-vision    = { path = "../crates/aarambh-ai-vision" }
 aarambh-ai-weights   = { path = "../crates/aarambh-ai-weights" }
 anyhow               = { workspace = true }
 candle-core          = { workspace = true }

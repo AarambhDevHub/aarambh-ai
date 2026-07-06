@@ -10,6 +10,7 @@ use aarambh_ai_tokenizer::BpeTokenizer;
 use serde::{Deserialize, Serialize};
 
 use crate::trainer::Trainer;
+use crate::vision_projector::{self, VisionTrainingConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 /// One progressive context-length training stage.
@@ -48,6 +49,8 @@ pub struct TrainingRunConfig {
     pub train: TrainConfig,
     /// Optional progressive sequence-length schedule for long-context continuation.
     pub context_schedule: Vec<ContextScheduleStage>,
+    /// Optional vision training mode and data configuration.
+    pub vision: Option<VisionTrainingConfig>,
 }
 
 impl Default for TrainingRunConfig {
@@ -65,6 +68,7 @@ impl Default for TrainingRunConfig {
             model: ModelConfig::tiny(),
             train: TrainConfig::default(),
             context_schedule: Vec::new(),
+            vision: None,
         }
     }
 }
@@ -120,8 +124,11 @@ impl TrainingRunConfig {
 
     /// Validate required paths and numeric ranges.
     pub fn validate(&self) -> Result<()> {
-        if self.dataset_path.as_os_str().is_empty() {
+        if self.vision.is_none() && self.dataset_path.as_os_str().is_empty() {
             return Err(AarambhError::Config("dataset_path is required".into()));
+        }
+        if let Some(vision) = &self.vision {
+            vision.validate()?;
         }
         if !(0.0..1.0).contains(&self.validation_split) {
             return Err(AarambhError::Config(
@@ -180,6 +187,11 @@ impl TrainingRunConfig {
 pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
     let config = TrainingRunConfig::from_toml(path)?;
     config.validate()?;
+    if let Some(vision) = &config.vision
+        && vision.mode == "projector_pretrain"
+    {
+        return vision_projector::run_projector_pretrain(&config);
+    }
 
     let device = config.device()?;
     let dtype = config.dtype_for_device(&device)?.to_candle();

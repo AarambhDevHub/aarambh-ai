@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use aarambh_ai_core::TokenizerLike;
+use aarambh_ai_core::{AarambhError, TokenizerLike};
 use aarambh_ai_finetune::{Verifier, VerifierKind};
 use aarambh_ai_inference::{
     GenerationConfig, GenerationOutput, GenerationPhase, GenerationStep, InferenceEngine, Sampler,
@@ -12,8 +12,15 @@ use aarambh_ai_safety::{
     SafeResponse, SafetyGenerator, SafetyGuard, SafetyMode, SafetyPolicy, SafetyVerdict,
 };
 use aarambh_ai_selflearn::{SelfLearnBuildConfig, SelfLearnConfig, SelfLearnLoop, SelfLearnMode};
-use aarambh_ai_tokenizer::{ASSISTANT, BpeTokenizer, THINK_END_ID, THINK_START_ID, USER};
+use aarambh_ai_tokenizer::{
+    ASSISTANT, BpeTokenizer, IMAGE, IMAGE_END, IMAGE_ID, THINK_END_ID, THINK_START_ID, USER,
+};
 use aarambh_ai_train::TrainingRunConfig;
+use aarambh_ai_vision::{
+    ClipVisionEncoder, ImagePreprocessor, ProjectorConfig, VisionEncoderConfig, VisionModel,
+    VisionPreprocessConfig, VisionProjector, interleave_image_tokens,
+};
+use candle_core::Tensor;
 use clap::Args;
 use serde::Deserialize;
 
@@ -30,6 +37,8 @@ pub struct InferArgs {
     pub model: Option<PathBuf>,
     #[arg(long)]
     pub tokenizer: Option<PathBuf>,
+    #[arg(long)]
+    pub image: Option<PathBuf>,
     #[arg(long)]
     pub prompt: String,
     #[arg(long, default_value_t = 256)]
@@ -96,6 +105,11 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
     let thinking_mode = parse_thinking_mode(&args.thinking)?;
     let safety_mode = parse_safety_mode(&args.safety)?;
     let self_learn_mode = parse_self_learn_mode(&args.self_learn)?;
+    if args.image.is_some() && self_learn_mode.is_enabled() {
+        return Err(anyhow::anyhow!(
+            "--image cannot be combined with --self-learn in Phase 19"
+        ));
+    }
 
     let config = GenerationConfig {
         max_new_tokens: args.max_tokens,
@@ -129,6 +143,20 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
         dtype,
     )?;
     let tokenizer_for_view = engine.tokenizer().clone();
+    if let Some(image_path) = args.image.clone() {
+        return run_vision_infer(
+            &args,
+            &run_config,
+            engine,
+            image_path,
+            dtype,
+            config,
+            prompt,
+            safety_mode,
+            thinking_mode,
+            tokenizer_for_view,
+        );
+    }
     if let Some(policy) = SafetyPolicy::for_mode(safety_mode)
         .map(|policy| policy.with_audit_path(&args.safety_audit_log))
     {
@@ -184,6 +212,192 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
     io::stdout().flush()?;
     eprintln!("finish_reason={:?}", output.finish_reason);
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_vision_infer(
+    args: &InferArgs,
+    run_config: &TrainingRunConfig,
+    mut engine: InferenceEngine,
+    image_path: PathBuf,
+    dtype: candle_core::DType,
+    config: GenerationConfig,
+    prompt: String,
+    safety_mode: SafetyMode,
+    thinking_mode: ThinkingMode,
+    tokenizer_for_view: BpeTokenizer,
+) -> anyhow::Result<()> {
+    let runtime = load_vision_runtime(run_config, engine.device(), dtype)?;
+    let prompt = ensure_image_prompt(&prompt);
+
+    if let Some(policy) = SafetyPolicy::for_mode(safety_mode)
+        .map(|policy| policy.with_audit_path(&args.safety_audit_log))
+    {
+        let adapter = VisionSafetyAdapter {
+            engine,
+            runtime,
+            image_path,
+        };
+        let mut guard = SafetyGuard::new(adapter, policy);
+        let mut stream_state = StreamState::default();
+        let response = guard.generate_with_callback(&prompt, config, |step| {
+            if args.predict_view {
+                print!(
+                    "{}",
+                    predict_view::render(step, &tokenizer_for_view, args.temperature, args.top_p)
+                );
+            }
+            if args.stream {
+                stream_step(step, thinking_mode, &mut stream_state)?;
+            }
+            if args.predict_view || args.stream {
+                io::stdout().flush()?;
+            }
+            Ok(())
+        })?;
+        print_safe_response(&response, thinking_mode, args.stream, &mut stream_state)?;
+        io::stdout().flush()?;
+        if let Some(output) = &response.output {
+            eprintln!("finish_reason={:?}", output.finish_reason);
+        } else {
+            eprintln!("finish_reason=SafetyBlocked");
+        }
+        return Ok(());
+    }
+
+    let embeddings = build_vision_prompt_embeddings(&engine, &runtime, &image_path, &prompt)?;
+    let mut stream_state = StreamState::default();
+    let output = engine.generate_with_embeddings_callback(&embeddings, config, |step| {
+        if args.predict_view {
+            print!(
+                "{}",
+                predict_view::render(step, &tokenizer_for_view, args.temperature, args.top_p)
+            );
+        }
+        if args.stream {
+            stream_step(step, thinking_mode, &mut stream_state)?;
+        }
+        if args.predict_view || args.stream {
+            io::stdout().flush()?;
+        }
+        Ok(())
+    })?;
+    if args.stream {
+        finish_stream(&mut stream_state);
+    } else {
+        print_generation_output(&output, thinking_mode)?;
+    }
+    io::stdout().flush()?;
+    eprintln!("finish_reason={:?}", output.finish_reason);
+    Ok(())
+}
+
+struct VisionRuntime {
+    model: VisionModel,
+    preprocess: ImagePreprocessor,
+}
+
+fn load_vision_runtime(
+    run_config: &TrainingRunConfig,
+    device: &candle_core::Device,
+    dtype: candle_core::DType,
+) -> anyhow::Result<VisionRuntime> {
+    let vision = run_config
+        .vision
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("--image requires a [vision] config block"))?;
+    let encoder_config = VisionEncoderConfig::from_json(&vision.clip_config_path)?;
+    let encoder = ClipVisionEncoder::load_pretrained(
+        &vision.clip_weights_path,
+        encoder_config.clone(),
+        device,
+        dtype,
+    )?;
+    let projector_path = match &vision.projector_path {
+        Some(path) => path.clone(),
+        None => default_model_path(&run_config.train.checkpoint_dir)?,
+    };
+    let projector_config = ProjectorConfig {
+        vit_d_model: encoder_config.vit_d_model,
+        llm_d_model: run_config.model.hidden_dim,
+        hidden_mult: vision.projector_hidden_mult,
+    };
+    let projector =
+        VisionProjector::load_safetensors(projector_path, projector_config, device, dtype)?;
+    let preprocess = ImagePreprocessor::new(VisionPreprocessConfig {
+        image_size: encoder_config.image_size,
+        ..VisionPreprocessConfig::default()
+    })?;
+    Ok(VisionRuntime {
+        model: VisionModel::new(encoder, projector),
+        preprocess,
+    })
+}
+
+fn ensure_image_prompt(prompt: &str) -> String {
+    if prompt.contains(IMAGE) {
+        prompt.to_string()
+    } else {
+        format!("{IMAGE}{IMAGE_END}\n{prompt}")
+    }
+}
+
+fn build_vision_prompt_embeddings(
+    engine: &InferenceEngine,
+    runtime: &VisionRuntime,
+    image_path: &Path,
+    prompt: &str,
+) -> aarambh_ai_core::Result<Tensor> {
+    engine.tokenizer().validate_vision_special_tokens()?;
+    let mut prompt_ids = engine.tokenizer().encode(prompt)?;
+    if prompt_ids.is_empty() {
+        if let Some(bos) = engine.tokenizer().bos_token_id() {
+            prompt_ids.push(bos);
+        } else {
+            return Err(AarambhError::Config(
+                "prompt produced no tokens and tokenizer has no BOS token".into(),
+            ));
+        }
+    }
+    let text = Tensor::from_vec(prompt_ids.clone(), (1, prompt_ids.len()), engine.device())?;
+    let text_embeddings = engine.model().embed_tokens(&text)?;
+    let image = runtime
+        .preprocess
+        .preprocess_path(image_path, engine.device())?
+        .unsqueeze(0)?;
+    let image_embeddings = runtime.model.forward(&image)?;
+    interleave_image_tokens(&prompt_ids, &text_embeddings, &image_embeddings, IMAGE_ID)
+}
+
+struct VisionSafetyAdapter {
+    engine: InferenceEngine,
+    runtime: VisionRuntime,
+    image_path: PathBuf,
+}
+
+impl SafetyGenerator for VisionSafetyAdapter {
+    fn generate(
+        &mut self,
+        prompt: &str,
+        config: GenerationConfig,
+    ) -> aarambh_ai_core::Result<GenerationOutput> {
+        self.generate_with_callback(prompt, config, |_| Ok(()))
+    }
+
+    fn generate_with_callback<F>(
+        &mut self,
+        prompt: &str,
+        config: GenerationConfig,
+        on_step: F,
+    ) -> aarambh_ai_core::Result<GenerationOutput>
+    where
+        F: FnMut(&GenerationStep) -> aarambh_ai_core::Result<()>,
+    {
+        let embeddings =
+            build_vision_prompt_embeddings(&self.engine, &self.runtime, &self.image_path, prompt)?;
+        self.engine
+            .generate_with_embeddings_callback(&embeddings, config, on_step)
+    }
 }
 
 fn tokenizer_path(args: &InferArgs, run_config: &TrainingRunConfig) -> PathBuf {

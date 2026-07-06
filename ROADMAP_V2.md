@@ -28,7 +28,7 @@ the free weekly GPU quota; none require paid API access.
 Phase 16 →  Long context (RoPE scaling)        (7–10 days)   [Kaggle, free]
 Phase 17 →  Evaluation harness                 (7–10 days)   [i3 + Kaggle]
 Phase 18 →  DoRA fine-tuning                    (7–10 days)   [i3 + Kaggle]
-Phase 19 →  Vision encoder + projector          (10–14 days)  [Kaggle]
+Phase 19 →  Vision encoder + projector          (10–14 days)  [Kaggle] ✅
 Phase 20 →  Vision-language training            (10–14 days)  [Kaggle]
 Phase 21 →  Vision-aware self-learning          (7–10 days)   [Kaggle only]
 Phase 22 →  Mixture of Experts                  (10–14 days)  [Kaggle]
@@ -379,42 +379,42 @@ trains.
 
 **New crate `aarambh-ai-vision`:**
 ```
-[ ] src/encoder.rs
+[x] src/encoder.rs
       VisionEncoderConfig { patch_size, image_size, vit_d_model, vit_layers,
                              vit_heads, num_patches }
-      ClipVisionEncoder — standard ViT: patch embed (conv), position embed,
+      ClipVisionEncoder — standard ViT: patch embed, position embed,
         pre-norm transformer blocks, frozen after load
       load_pretrained(path: &Path) -> ClipVisionEncoder  // SafeTensors, Candle
 
-[ ] src/preprocess.rs
+[x] src/preprocess.rs
       Image → tensor: resize, center-crop, normalize to CLIP's mean/std
       Uses `image` crate (new dependency, decode-only, no external service)
 
-[ ] src/projector.rs
+[x] src/projector.rs
       ProjectorConfig { vit_d_model, llm_d_model, hidden_mult }
       Projector — 2-layer MLP (GELU), vit_d_model -> hidden -> llm_d_model
       Trainable; this is the ONLY trainable component in Phase 19
       forward(vit_patch_embeds) -> llm_token_embeds  // one per image patch
 
-[ ] src/fusion.rs
+[x] src/fusion.rs
       interleave_image_tokens(text_tokens, image_tokens, image_placeholder_id)
       Splices projected image-patch embeddings into the token embedding
       sequence at the position of a reserved <image> special token, LLaVA-style
 
-[ ] src/lib.rs
+[x] src/lib.rs
       VisionModel { encoder: ClipVisionEncoder (frozen), projector: Projector (trainable) }
 ```
 
 **`aarambh-ai-tokenizer`:**
 ```
-[ ] Reserve <image> and <image_end> special token IDs (alongside existing
+[x] Reserve <image> and <image_end> special token IDs (alongside existing
     <think>/</think> reserved IDs from Phase 7)
-[ ] Extend special-token validation so v2 tokenizers keep every reserved ID stable
+[x] Extend special-token validation so v2 tokenizers keep every reserved ID stable
 ```
 
 **`aarambh-ai-train`:**
 ```
-[ ] src/projector_pretrain.rs
+[x] src/vision_projector.rs
       Stage-1 recipe: encoder frozen, LLM frozen, only Projector trains
       Loss: standard next-token cross-entropy on image-caption pairs, loss
       masked to caption tokens only (image tokens contribute no target loss)
@@ -422,8 +422,8 @@ trains.
 
 **CLI:**
 ```
-[ ] aarambh-ai train --config configs/vision_projector_pretrain.toml
-[ ] aarambh-ai infer --config <cfg> --image path.jpg --prompt "What is this?"
+[x] aarambh-ai train --config configs/vision_projector_pretrain.toml
+[x] aarambh-ai infer --config <cfg> --image path.jpg --prompt "What is this?"
 ```
 
 ### Data Setup
@@ -1059,7 +1059,7 @@ git commit -m "chore: v2.0.0 — crates.io publish, source release"
 | 16 | Long Context | YaRN/NTK RoPE scaling, 4K → 16K+ | Kaggle | 7–10 days |
 | 17 | Evaluation Harness | `aarambh-ai eval`, PPL + MMLU-lite/HellaSwag/GSM8K/HumanEval-lite | i3 + Kaggle | 7–10 days |
 | 18 | DoRA | Weight-decomposed LoRA in `aarambh-ai-finetune` | i3 + Kaggle | 7–10 days |
-| 19 | Vision Encoder + Projector | New `aarambh-ai-vision` crate, frozen ViT + trainable projector | Kaggle | 10–14 days |
+| 19 | Vision Encoder + Projector | ✅ New `aarambh-ai-vision` crate, frozen ViT + trainable projector | Kaggle | 10–14 days |
 | 20 | Vision-Language Training | VQA instruction tuning via DoRA-adapted VLM | Kaggle | 10–14 days |
 | 21 | Vision-Aware Self-Learning | Image-grounded replay + verifier, Kaggle-only | Kaggle only | 7–10 days |
 | 22 | Mixture of Experts | Top-k router, load-balancing loss | Kaggle | 10–14 days |

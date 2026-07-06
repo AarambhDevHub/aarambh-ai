@@ -12,6 +12,10 @@ pub const THINK_END: &str = "</think>";
 pub const USER: &str = "<|user|>";
 /// Assistant role token string.
 pub const ASSISTANT: &str = "<|assistant|>";
+/// Image placeholder token string.
+pub const IMAGE: &str = "<image>";
+/// Image prefix boundary token string.
+pub const IMAGE_END: &str = "<image_end>";
 
 /// End-of-text token id.
 pub const ENDOFTEXT_ID: u32 = 0;
@@ -27,9 +31,26 @@ pub const THINK_END_ID: u32 = 4;
 pub const USER_ID: u32 = 5;
 /// Assistant role token id.
 pub const ASSISTANT_ID: u32 = 6;
+/// Image placeholder token id.
+pub const IMAGE_ID: u32 = 7;
+/// Image prefix boundary token id.
+pub const IMAGE_END_ID: u32 = 8;
 
 /// Reserved special token table in required id order.
-pub const SPECIAL_TOKENS: [(&str, u32); 7] = [
+pub const SPECIAL_TOKENS: [(&str, u32); 9] = [
+    (ENDOFTEXT, ENDOFTEXT_ID),
+    (PAD, PAD_ID),
+    (BOS, BOS_ID),
+    (THINK_START, THINK_START_ID),
+    (THINK_END, THINK_END_ID),
+    (USER, USER_ID),
+    (ASSISTANT, ASSISTANT_ID),
+    (IMAGE, IMAGE_ID),
+    (IMAGE_END, IMAGE_END_ID),
+];
+
+/// Text-only reserved special token table accepted by legacy checkpoints.
+pub const TEXT_SPECIAL_TOKENS: [(&str, u32); 7] = [
     (ENDOFTEXT, ENDOFTEXT_ID),
     (PAD, PAD_ID),
     (BOS, BOS_ID),
