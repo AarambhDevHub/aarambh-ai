@@ -34,6 +34,20 @@ Two parts:
 
 Read this first if you're completely new to AI in general, or read it alongside the other two whenever data-related phases (like Phase 2, Data Pipeline) come up.
 
+### 4. `aarambh-ai-config-toml-guide.md`
+**Every field in every `.toml` config file, explained — the practical "turn the dial" layer.**
+
+This walks through the actual 14 config files in `configs/` — `tiny_shakespeare_smoke.toml`, `tiny_shakespeare.toml`, `wikitext103_tiny/small/medium/large.toml`, `wikitext103_cuda_smoke.toml`, `wikitext103_long_smoke.toml`, `medium_16k.toml`, `large_16k.toml`, and the four `vision_*.toml` files — field by field:
+
+- **Top-level settings:** `dataset_path`, `tokenizer_path`, `vocab_size`, `validation_split`, `shuffle`, `resume`, `device`, `dtype`.
+- **`[model]` architecture:** `hidden_dim`, `ffn_dim`, `n_layers`, `n_heads`/`n_kv_heads` (Grouped-Query Attention), `max_seq_len`, `rope_theta`, `norm_eps`, `tie_embeddings`.
+- **`[model.rope_scaling]` (YaRN):** `method`, `factor`, `original_max_seq_len`, `beta_fast`/`beta_slow`, `attn_factor` — how the long-context configs stretch to 16K tokens.
+- **`[[context_schedule]]`:** the staged sequence-length ramp-up used during long-context training.
+- **`[vision]`:** `mode`, CLIP config/weights paths, `caption_jsonl`, `image_root`, `projector_hidden_mult`, `max_caption_tokens`, `max_samples`.
+- **`[train]` hyperparameters:** `lr`, `batch_size`/`grad_accum_steps`, `warmup_steps`, `min_lr_ratio`, `weight_decay`, Adam's `beta1`/`beta2`/`epsilon`, `clip_grad_norm`, checkpointing, and more — each one tied back to the exact formula it came from in the math guide.
+
+Read this whenever you're about to write a new training config, or want to understand exactly what a specific field in an existing one actually does.
+
 ---
 
 ## Suggested reading order
@@ -48,9 +62,12 @@ aarambh-ai-complete-guide.md         →  understand what Aarambh-AI actually bu
             │
             ▼
 aarambh-ai-math-formulas-guide.md    →  understand the exact math powering each phase
+            │
+            ▼
+aarambh-ai-config-toml-guide.md      →  understand how to actually configure and run a training job
 ```
 
-If you already know the basics and just want the project-specific details, jump straight to `aarambh-ai-complete-guide.md` and use the other two as reference whenever a term or formula is unfamiliar.
+If you already know the basics and just want the project-specific details, jump straight to `aarambh-ai-complete-guide.md` and use the other three as reference whenever a term, formula, or config field is unfamiliar.
 
 ---
 
