@@ -41,6 +41,7 @@ v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, an
 | Production v1.0 source release: strict docs, CI, release workflow, release notes | Phase 15 ✅ |
 | Evaluation harness: PPL, MMLU-lite, HellaSwag, GSM8K, HumanEval-lite scorecards | Phase 17 ✅ |
 | Vision encoder + projector: CLIP ViT, image preprocessing, projector pretrain, `infer --image` | Phase 19 ✅ |
+| Vision-language instruction tuning: VQA JSONL/LLaVA data, VLM DoRA/QDoRA, VQA eval | Phase 20 ✅ |
 
 ---
 
@@ -290,6 +291,60 @@ cargo run --release -p aarambh-ai -- eval \
 Vision tokenizers must reserve `<image>` and `<image_end>` at IDs 7 and 8.
 Legacy text-only tokenizers still load for text inference, but `--image`
 requires the v2 multimodal special tokens.
+
+## Vision-Language Instruction Tuning
+
+Phase 20 adds VQA-style instruction tuning on top of the Phase 19 projector.
+The CLIP encoder stays frozen, the LLM trains through DoRA/QDoRA adapters,
+and the projector can either continue training or stay frozen.
+
+```sh
+# Local synthetic smoke fixture: tiny CLIP, four images, VQA JSONL, tokenizer,
+# and an initial projector checkpoint.
+python3 scripts/phase20_make_vqa_smoke_fixture.py
+
+# CPU smoke run.
+cargo run --release -p aarambh-ai -- finetune vlm-dora \
+  --config configs/vision_vqa_smoke.toml \
+  --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --tokenizer checkpoints/vision_projector_smoke/tokenizer.json \
+  --data data/vision_smoke/vqa_smoke_4.jsonl \
+  --output adapters/vision_vqa_smoke \
+  --projector data/vision_smoke/projector_init.safetensors \
+  --lora-rank 4 \
+  --max-steps 2 \
+  --log-every-n-steps 1
+
+# Merge the DoRA LLM adapter, then point the vision config at the tuned projector.
+cargo run --release -p aarambh-ai -- finetune merge \
+  --config configs/vision_vqa_smoke.toml \
+  --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --adapter adapters/vision_vqa_smoke \
+  --method dora \
+  --output checkpoints/vision_vqa_smoke_merged
+
+cargo run --release -p aarambh-ai -- eval \
+  --config configs/vision_vqa_smoke.toml \
+  --model checkpoints/vision_vqa_smoke_merged/model.safetensors \
+  --tokenizer checkpoints/vision_projector_smoke/tokenizer.json \
+  --tasks vqa \
+  --data-dir data/eval \
+  --max-examples 2
+```
+
+For full Kaggle runs, prepare LLaVA-Instruct metadata and place the matching
+COCO images under the configured image root:
+
+```sh
+MAX_EXAMPLES=10000 scripts/phase20_prepare_llava_instruct.sh data
+
+cargo run --release --features cuda -p aarambh-ai -- finetune vlm-dora \
+  --config configs/vision_vqa_instruct.toml \
+  --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --data data/llava/llava_instruct_150k.jsonl \
+  --output adapters/vision_vqa_dora \
+  --projector checkpoints/vision_projector/step_010000/model.safetensors
+```
 
 ---
 
@@ -770,6 +825,8 @@ aarambh-ai/
 | 16 | Long context (RoPE scaling) | i3 + GPU | ✅ |
 | 17 | Evaluation harness | i3 + GPU | ✅ |
 | 18 | DoRA/QDoRA fine-tuning | i3 + GPU | ✅ |
+| 19 | Vision encoder + projector | GPU | ✅ |
+| 20 | Vision-language instruction tuning | GPU | ✅ |
 
 See [ROADMAP.md](ROADMAP.md) for the full phased delivery plan with tests and milestones.
 

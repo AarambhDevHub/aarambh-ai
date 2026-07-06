@@ -362,6 +362,13 @@ image tokens behaves identically to one generated after text-only context —
 the budget and mode logic don't know or care that some of the preceding
 context came from an image.
 
+Implementation status: Phase 20 adds `aarambh-ai-vision::instruct_data`,
+`aarambh-ai-finetune::vlm_dora`, `finetune vlm-dora`, `finetune vlm-qdora`,
+and the `vqa` eval task. VLM checkpoints save the language adapter in the
+standard DoRA format and save the tuned projector separately as
+`projector.safetensors`, so the existing merge command and `infer --image`
+path remain unchanged.
+
 ---
 
 ## 26. Mixture of Experts

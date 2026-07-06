@@ -9,6 +9,7 @@ use candle_core::{DType, Device};
 use crate::report::{Scorecard, TaskScore};
 use crate::tasks::{
     Gsm8kSubsetTask, HellaSwagTask, HumanEvalLiteTask, ImageCaptionTask, MmluLiteTask, PplTask,
+    VqaTask,
 };
 
 /// Evaluation run configuration.
@@ -161,9 +162,12 @@ fn selected_tasks(selectors: &[String], allow_code_exec: bool) -> Result<Vec<Box
             "image-caption" | "image_caption" | "caption" | "vlm-smoke" => {
                 tasks.push(Box::new(ImageCaptionTask));
             }
+            "vqa" | "vision-qa" | "vision_qa" | "vqa-smoke" | "vqa_smoke" => {
+                tasks.push(Box::new(VqaTask));
+            }
             other => {
                 return Err(AarambhError::Config(format!(
-                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,humaneval,image-caption,all"
+                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,humaneval,image-caption,vqa,all"
                 )));
             }
         }

@@ -3,8 +3,8 @@ use std::str::FromStr;
 
 use aarambh_ai_finetune::{
     AdapterMethod, GrpoConfig, GrpoRunConfig, GrpoThinkingMode, LoraConfig, SftRunConfig,
-    VerifierKind, merge_adapter_from_paths, run_dora_from_config, run_grpo_from_config,
-    run_sft_from_config,
+    VerifierKind, VlmDoraRunConfig, merge_adapter_from_paths, run_dora_from_config,
+    run_grpo_from_config, run_sft_from_config, run_vlm_dora_from_config,
 };
 use aarambh_ai_train::TrainingRunConfig;
 use clap::{Args, Subcommand};
@@ -21,6 +21,8 @@ pub enum FinetuneCommand {
     Qlora(FinetuneRunArgs),
     Dora(FinetuneRunArgs),
     Qdora(FinetuneRunArgs),
+    VlmDora(VlmFinetuneArgs),
+    VlmQdora(VlmFinetuneArgs),
     Grpo(GrpoArgs),
     Merge(MergeArgs),
 }
@@ -135,12 +137,67 @@ pub struct GrpoArgs {
     pub no_shuffle: bool,
 }
 
+#[derive(Debug, Args)]
+pub struct VlmFinetuneArgs {
+    #[arg(long, default_value = "configs/vision_vqa_instruct.toml")]
+    pub config: PathBuf,
+    #[arg(long)]
+    pub base: PathBuf,
+    #[arg(long)]
+    pub tokenizer: Option<PathBuf>,
+    #[arg(long)]
+    pub data: PathBuf,
+    #[arg(long)]
+    pub output: PathBuf,
+    #[arg(long)]
+    pub projector: Option<PathBuf>,
+    #[arg(long)]
+    pub clip_config: Option<PathBuf>,
+    #[arg(long)]
+    pub clip_weights: Option<PathBuf>,
+    #[arg(long)]
+    pub image_root: Option<PathBuf>,
+    #[arg(long)]
+    pub freeze_projector: bool,
+    #[arg(long, default_value_t = 16)]
+    pub lora_rank: usize,
+    #[arg(long)]
+    pub lora_alpha: Option<f64>,
+    #[arg(long, default_value_t = 0.05)]
+    pub lora_dropout: f32,
+    #[arg(
+        long,
+        default_value = "attn.wq,attn.wk,attn.wv,attn.wo,ffn.w_gate,ffn.w_up,ffn.w_down"
+    )]
+    pub target_modules: String,
+    #[arg(long)]
+    pub batch_size: Option<usize>,
+    #[arg(long)]
+    pub max_steps: Option<usize>,
+    #[arg(long)]
+    pub max_epochs: Option<usize>,
+    #[arg(long)]
+    pub lr: Option<f64>,
+    #[arg(long)]
+    pub grad_accum_steps: Option<usize>,
+    #[arg(long)]
+    pub warmup_steps: Option<usize>,
+    #[arg(long)]
+    pub save_every_n_steps: Option<usize>,
+    #[arg(long)]
+    pub log_every_n_steps: Option<usize>,
+    #[arg(long)]
+    pub no_shuffle: bool,
+}
+
 pub fn run(args: FinetuneArgs) -> anyhow::Result<()> {
     match args.command {
         FinetuneCommand::Sft(args) => run_lora_finetune(args, false),
         FinetuneCommand::Qlora(args) => run_lora_finetune(args, true),
         FinetuneCommand::Dora(args) => run_dora_finetune(args, false),
         FinetuneCommand::Qdora(args) => run_dora_finetune(args, true),
+        FinetuneCommand::VlmDora(args) => run_vlm_dora_finetune(args, false),
+        FinetuneCommand::VlmQdora(args) => run_vlm_dora_finetune(args, true),
         FinetuneCommand::Grpo(args) => run_grpo(args),
         FinetuneCommand::Merge(args) => run_merge(args),
     }
@@ -207,6 +264,63 @@ fn run_dora_finetune(args: FinetuneRunArgs, qdora: bool) -> anyhow::Result<()> {
         shuffle: !args.no_shuffle && run_config.shuffle,
     };
     run_dora_from_config(config)?;
+    Ok(())
+}
+
+fn run_vlm_dora_finetune(args: VlmFinetuneArgs, qdora: bool) -> anyhow::Result<()> {
+    let run_config = TrainingRunConfig::from_toml(&args.config)?;
+    let device = run_config.device()?;
+    let dtype = run_config.dtype_for_device(&device)?.to_candle();
+    let tokenizer_path = tokenizer_path(args.tokenizer.as_ref(), &run_config);
+    let mut train_config = run_config.train.clone();
+    apply_vlm_train_overrides(&mut train_config, &args);
+    train_config.checkpoint_dir = args.output.clone();
+
+    let mut vision = run_config
+        .vision
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("VLM fine-tuning requires a [vision] config block"))?;
+    if let Some(path) = args.projector.clone() {
+        vision.projector_path = Some(path);
+    }
+    if let Some(path) = args.clip_config.clone() {
+        vision.clip_config_path = path;
+    }
+    if let Some(path) = args.clip_weights.clone() {
+        vision.clip_weights_path = path;
+    }
+    if let Some(path) = args.image_root.clone() {
+        vision.image_root = path;
+    }
+    let projector_path = vision.projector_path.clone().ok_or_else(|| {
+        anyhow::anyhow!("VLM fine-tuning requires --projector or vision.projector_path")
+    })?;
+
+    let lora_config = LoraConfig {
+        rank: args.lora_rank,
+        alpha: args.lora_alpha.unwrap_or(args.lora_rank as f64 * 2.0),
+        dropout: args.lora_dropout,
+        target_modules: LoraConfig::from_target_csv(&args.target_modules),
+        ..Default::default()
+    };
+
+    let config = VlmDoraRunConfig {
+        model_config: run_config.model,
+        train_config,
+        base_model_path: args.base,
+        tokenizer_path,
+        data_path: args.data,
+        output_dir: args.output,
+        lora_config,
+        device,
+        dtype,
+        qdora,
+        shuffle: !args.no_shuffle && run_config.shuffle,
+        vision,
+        projector_path,
+        train_projector: !args.freeze_projector,
+    };
+    run_vlm_dora_from_config(config)?;
     Ok(())
 }
 
@@ -309,6 +423,36 @@ fn tokenizer_path(tokenizer: Option<&PathBuf>, run_config: &TrainingRunConfig) -
 }
 
 fn apply_train_overrides(train_config: &mut aarambh_ai_core::TrainConfig, args: &FinetuneRunArgs) {
+    if let Some(value) = args.batch_size {
+        train_config.batch_size = value;
+    }
+    if let Some(value) = args.max_steps {
+        train_config.max_steps = value;
+    }
+    if let Some(value) = args.max_epochs {
+        train_config.max_epochs = value;
+    }
+    if let Some(value) = args.lr {
+        train_config.lr = value;
+    }
+    if let Some(value) = args.grad_accum_steps {
+        train_config.grad_accum_steps = value;
+    }
+    if let Some(value) = args.warmup_steps {
+        train_config.warmup_steps = value;
+    }
+    if let Some(value) = args.save_every_n_steps {
+        train_config.save_every_n_steps = value;
+    }
+    if let Some(value) = args.log_every_n_steps {
+        train_config.log_every_n_steps = value;
+    }
+}
+
+fn apply_vlm_train_overrides(
+    train_config: &mut aarambh_ai_core::TrainConfig,
+    args: &VlmFinetuneArgs,
+) {
     if let Some(value) = args.batch_size {
         train_config.batch_size = value;
     }

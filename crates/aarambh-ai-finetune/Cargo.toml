@@ -13,6 +13,7 @@ cuda = [
     "aarambh-ai-nn/cuda",
     "aarambh-ai-quant/cuda",
     "aarambh-ai-train/cuda",
+    "aarambh-ai-vision/cuda",
     "aarambh-ai-weights/cuda",
     "candle-core/cuda",
     "candle-nn/cuda",
@@ -26,6 +27,7 @@ aarambh-ai-nn        = { path = "../aarambh-ai-nn" }
 aarambh-ai-quant     = { path = "../aarambh-ai-quant" }
 aarambh-ai-tokenizer = { path = "../aarambh-ai-tokenizer" }
 aarambh-ai-train     = { path = "../aarambh-ai-train" }
+aarambh-ai-vision    = { path = "../aarambh-ai-vision" }
 aarambh-ai-weights   = { path = "../aarambh-ai-weights" }
 candle-core          = { workspace = true }
 candle-nn            = { workspace = true }

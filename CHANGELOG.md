@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.0.0-alpha.5] - 2026-07-06
+
+### Added
+
+- **Phase 20 Vision-Language Training**
+  - Added VQA instruction data loading for simple JSONL and LLaVA-style conversation records
+  - Added `finetune vlm-dora` and `finetune vlm-qdora` for image-question-answer instruction tuning
+  - Added embedding-level DoRA forward APIs so projected image tokens can train through the adapter decoder
+  - Added VLM DoRA artifact saving with a normal DoRA adapter plus separate tuned `projector.safetensors`
+  - Added VQA evaluation task and Phase 20 smoke/full data setup scripts
+
+### Changed
+
+- Phase 20 keeps the vision encoder frozen, trains DoRA/QDoRA adapter params, and optionally trains the projector
+- README and ROADMAP_V2 now document the VQA instruction-tuning workflow
+
+### Verified
+
+- `cargo fmt --all --check`
+- `cargo check --workspace`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace`
+
 ## [2.0.0-alpha.4] - 2026-07-05
 
 ### Added
