@@ -132,8 +132,20 @@ impl AarambhModel {
     /// Run a full causal forward pass over token ids.
     pub fn forward(&self, token_ids: &Tensor) -> Result<Tensor> {
         self.check_token_ids(token_ids, 0)?;
-        let mut x = self.embedding.forward(token_ids)?;
+        let x = self.embedding.forward(token_ids)?;
+        self.forward_embeddings(&x)
+    }
 
+    /// Convert token ids into model hidden states.
+    pub fn embed_tokens(&self, token_ids: &Tensor) -> Result<Tensor> {
+        self.check_token_ids(token_ids, 0)?;
+        Ok(self.embedding.forward(token_ids)?)
+    }
+
+    /// Run a full causal forward pass over precomputed token embeddings.
+    pub fn forward_embeddings(&self, embeddings: &Tensor) -> Result<Tensor> {
+        self.check_embeddings(embeddings, 0)?;
+        let mut x = embeddings.clone();
         for block in &self.blocks {
             x = block.forward(&x, &self.rope_cache, None, None, 0)?;
         }
@@ -145,8 +157,14 @@ impl AarambhModel {
     /// Run the training forward path over token ids.
     pub fn forward_train(&self, token_ids: &Tensor) -> Result<Tensor> {
         self.check_token_ids(token_ids, 0)?;
-        let mut x = self.embedding.forward(token_ids)?;
+        let x = self.embedding.forward(token_ids)?;
+        self.forward_embeddings_train(&x)
+    }
 
+    /// Run the training forward path over precomputed token embeddings.
+    pub fn forward_embeddings_train(&self, embeddings: &Tensor) -> Result<Tensor> {
+        self.check_embeddings(embeddings, 0)?;
+        let mut x = embeddings.clone();
         for block in &self.blocks {
             x = block.forward_train(&x, &self.rope_cache, None, 0)?;
         }
@@ -188,7 +206,27 @@ impl AarambhModel {
         }
 
         self.check_token_ids(token_ids, seqlen_offset)?;
-        let mut x = self.embedding.forward(token_ids)?;
+        let x = self.embedding.forward(token_ids)?;
+        self.forward_embeddings_with_cache(&x, seqlen_offset, kv_caches)
+    }
+
+    /// Run incremental inference using precomputed embeddings and per-layer KV caches.
+    pub fn forward_embeddings_with_cache(
+        &self,
+        embeddings: &Tensor,
+        seqlen_offset: usize,
+        kv_caches: &mut [KVCache],
+    ) -> Result<Tensor> {
+        if kv_caches.len() != self.blocks.len() {
+            return Err(AarambhError::Shape(format!(
+                "expected {} KV caches, got {}",
+                self.blocks.len(),
+                kv_caches.len()
+            )));
+        }
+
+        self.check_embeddings(embeddings, seqlen_offset)?;
+        let mut x = embeddings.clone();
 
         for (block, cache) in self.blocks.iter().zip(kv_caches.iter_mut()) {
             x = block.forward(&x, &self.rope_cache, None, Some(cache), seqlen_offset)?;
@@ -324,6 +362,40 @@ impl AarambhModel {
             return Err(AarambhError::Shape(
                 "batch and sequence length must be non-zero".into(),
             ));
+        }
+        if seqlen_offset + seq_len > self.config.max_seq_len {
+            return Err(AarambhError::Shape(format!(
+                "sequence length {} with offset {} exceeds max_seq_len {}",
+                seq_len, seqlen_offset, self.config.max_seq_len
+            )));
+        }
+        Ok((batch, seq_len))
+    }
+
+    fn check_embeddings(
+        &self,
+        embeddings: &Tensor,
+        seqlen_offset: usize,
+    ) -> Result<(usize, usize)> {
+        let dims = embeddings.dims();
+        if dims.len() != 3 {
+            return Err(AarambhError::Shape(format!(
+                "embeddings must have shape [batch, seq, hidden_dim], got {dims:?}"
+            )));
+        }
+        let batch = dims[0];
+        let seq_len = dims[1];
+        let hidden_dim = dims[2];
+        if batch == 0 || seq_len == 0 {
+            return Err(AarambhError::Shape(
+                "batch and sequence length must be non-zero".into(),
+            ));
+        }
+        if hidden_dim != self.config.hidden_dim {
+            return Err(AarambhError::Shape(format!(
+                "embedding hidden dim {hidden_dim} does not match model hidden_dim {}",
+                self.config.hidden_dim
+            )));
         }
         if seqlen_offset + seq_len > self.config.max_seq_len {
             return Err(AarambhError::Shape(format!(

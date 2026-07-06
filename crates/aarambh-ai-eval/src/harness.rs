@@ -7,12 +7,14 @@ use aarambh_ai_tokenizer::BpeTokenizer;
 use candle_core::{DType, Device};
 
 use crate::report::{Scorecard, TaskScore};
-use crate::tasks::{Gsm8kSubsetTask, HellaSwagTask, HumanEvalLiteTask, MmluLiteTask, PplTask};
+use crate::tasks::{
+    Gsm8kSubsetTask, HellaSwagTask, HumanEvalLiteTask, ImageCaptionTask, MmluLiteTask, PplTask,
+};
 
 /// Evaluation run configuration.
 #[derive(Debug, Clone)]
 pub struct EvalConfig {
-    /// Task selectors such as `ppl`, `mmlu`, `hellaswag`, `gsm8k`, `humaneval`, or `all`.
+    /// Task selectors such as `ppl`, `mmlu`, `hellaswag`, `gsm8k`, `humaneval`, `image-caption`, or `all`.
     pub tasks: Vec<String>,
     /// Root directory containing normalized eval data.
     pub data_dir: PathBuf,
@@ -156,9 +158,12 @@ fn selected_tasks(selectors: &[String], allow_code_exec: bool) -> Result<Vec<Box
                 }
                 tasks.push(Box::new(HumanEvalLiteTask));
             }
+            "image-caption" | "image_caption" | "caption" | "vlm-smoke" => {
+                tasks.push(Box::new(ImageCaptionTask));
+            }
             other => {
                 return Err(AarambhError::Config(format!(
-                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,humaneval,all"
+                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,humaneval,image-caption,all"
                 )));
             }
         }

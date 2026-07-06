@@ -2,7 +2,7 @@
 
 > A modern, from-scratch LLM in Rust using `candle`. Decoder-only transformer with
 > thinking capability, four model scales, quantisation, fine-tuning, safety guardrails,
-> custom kernels, and a self-learning loop — all in one clean 14-crate workspace.
+> custom kernels, self-learning, evaluation, and vision projection — all in one clean 16-crate workspace.
 
 ---
 
@@ -11,7 +11,7 @@
 1. [Project Overview](#1-project-overview)
 2. [Design Philosophy](#2-design-philosophy)
 3. [Dependency Versions & Toolchain](#3-dependency-versions--toolchain)
-4. [Complete Workspace — 14 Crates](#4-complete-workspace--14-crates)
+4. [Complete Workspace — 16 Crates](#4-complete-workspace--16-crates)
 5. [Model Scales](#5-model-scales)
 6. [The Full Journey: Token → Output](#6-the-full-journey-token--output)
    - 6.1 Tokenisation
@@ -164,7 +164,7 @@ curl -L https://huggingface.co/gpt2/resolve/main/tokenizer.json \
 
 ---
 
-## 4. Complete Workspace — 14 Crates
+## 4. Complete Workspace — 16 Crates
 
 ```
 aarambh-ai/
@@ -260,7 +260,8 @@ aarambh-ai/
 │   │       ├── loss.rs               ← cross_entropy_loss(), label_smoothing
 │   │       ├── optim.rs              ← AdamW (β₁=0.9, β₂=0.95, ε=1e-8, λ=0.1)
 │   │       ├── schedule.rs           ← cosine LR + warmup
-│   │       └── checkpoint.rs         ← save/load training state
+│   │       ├── checkpoint.rs         ← save/load training state
+│   │       └── vision_projector.rs   ← frozen-encoder projector pretraining
 │   │
 │   ├── aarambh-ai-finetune/          ← LAYER 4: Fine-tuning stack
 │   │   └── src/
@@ -300,15 +301,29 @@ aarambh-ai/
 │   │           ├── pii_redact.rs     ← redact PII in model output
 │   │           └── audit.rs          ← SafetyEvent logging → safety_audit.jsonl
 │   │
-│   └── aarambh-ai-selflearn/         ← LAYER 5: Self-learning loop
+│   ├── aarambh-ai-selflearn/         ← LAYER 5: Self-learning loop
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── learning_loop.rs      ← SelfLearnLoop (owns OnlineGrpo, Replay)
+│   │       ├── config.rs             ← SelfLearnConfig (mode, thresholds, budget)
+│   │       ├── online_grpo.rs        ← generate N completions → score (deterministic) → train online
+│   │       ├── replay.rs             ← ReplayBuffer: store, sample, evict
+│   │       ├── critique.rs           ← critique_response() free function (replay-only)
+│   │       └── metrics.rs            ← track improvement per topic over time
+│   │
+│   ├── aarambh-ai-eval/              ← LAYER 5: Evaluation harness
+│   │   └── src/
+│   │       ├── harness.rs            ← EvalContext, EvalTask, scorecard runner
+│   │       ├── generation.rs         ← greedy text generation helpers
+│   │       └── tasks/                ← ppl, MMLU-lite, HellaSwag, GSM8K, HumanEval, image-caption
+│   │
+│   └── aarambh-ai-vision/            ← LAYER 3: Vision encoder + projector
 │       └── src/
-│           ├── lib.rs
-│           ├── learning_loop.rs      ← SelfLearnLoop (owns OnlineGrpo, Replay)
-│           ├── config.rs             ← SelfLearnConfig (mode, thresholds, budget)
-│           ├── online_grpo.rs        ← generate N completions → score (deterministic) → train online
-│           ├── replay.rs             ← ReplayBuffer: store, sample, evict
-│           ├── critique.rs           ← critique_response() free function (replay-only)
-│           └── metrics.rs            ← track improvement per topic over time
+│           ├── encoder.rs            ← frozen CLIP-style ViT, SafeTensors load
+│           ├── preprocess.rs         ← image crate resize/crop/normalize
+│           ├── projector.rs          ← trainable 2-layer GELU projector
+│           ├── fusion.rs             ← <image> prefix token interleave
+│           └── lib.rs
 │
 └── aarambh-ai/                       ← LAYER 6: CLI binary (source-built from GitHub v1.0 tag)
     └── src/
@@ -330,9 +345,9 @@ aarambh-ai/
 Layer 0  aarambh-ai-core
 Layer 1  aarambh-ai-tokenizer   aarambh-ai-data
 Layer 2  aarambh-ai-nn          aarambh-ai-kernel
-Layer 3  aarambh-ai-model       aarambh-ai-weights    aarambh-ai-quant
+Layer 3  aarambh-ai-model       aarambh-ai-weights    aarambh-ai-quant     aarambh-ai-vision
 Layer 4  aarambh-ai-train       aarambh-ai-finetune
-Layer 5  aarambh-ai-inference   aarambh-ai-safety     aarambh-ai-selflearn
+Layer 5  aarambh-ai-inference   aarambh-ai-safety     aarambh-ai-selflearn  aarambh-ai-eval
 Layer 6  aarambh-ai (binary)
 ```
 

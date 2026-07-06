@@ -159,6 +159,11 @@ impl InferenceEngine {
         &self.model
     }
 
+    /// Return the Candle device used by this engine.
+    pub fn device(&self) -> &candle_core::Device {
+        &self.device
+    }
+
     /// Generate text without per-step callbacks.
     pub fn generate(&mut self, prompt: &str, config: GenerationConfig) -> Result<GenerationOutput> {
         self.generate_with_callback(prompt, config, |_| Ok(()))
@@ -168,12 +173,37 @@ impl InferenceEngine {
     pub fn generate_with_callback<F>(
         &mut self,
         prompt: &str,
-        mut config: GenerationConfig,
-        mut on_step: F,
+        config: GenerationConfig,
+        on_step: F,
     ) -> Result<GenerationOutput>
     where
         F: FnMut(&GenerationStep) -> Result<()>,
     {
+        let prompt_ids = self.prompt_token_ids(prompt)?;
+        self.generate_from_token_ids_with_callback(prompt_ids, config, on_step)
+    }
+
+    /// Generate from a multimodal or otherwise precomputed prompt embedding prefix.
+    pub fn generate_with_embeddings_callback<F>(
+        &mut self,
+        prompt_embeddings: &Tensor,
+        config: GenerationConfig,
+        on_step: F,
+    ) -> Result<GenerationOutput>
+    where
+        F: FnMut(&GenerationStep) -> Result<()>,
+    {
+        let dims = prompt_embeddings.dims();
+        if dims.len() != 3 || dims[0] != 1 {
+            return Err(AarambhError::Shape(format!(
+                "prompt_embeddings must have shape [1, seq, hidden_dim], got {dims:?}"
+            )));
+        }
+        let prompt_len = dims[1];
+        self.generate_from_embeddings_with_callback(prompt_embeddings, prompt_len, config, on_step)
+    }
+
+    fn prompt_token_ids(&self, prompt: &str) -> Result<Vec<u32>> {
         let mut prompt_ids = self.tokenizer.encode(prompt)?;
         if prompt_ids.is_empty() {
             if let Some(bos) = self.tokenizer.bos_token_id() {
@@ -184,7 +214,18 @@ impl InferenceEngine {
                 ));
             }
         }
+        Ok(prompt_ids)
+    }
 
+    fn generate_from_token_ids_with_callback<F>(
+        &mut self,
+        prompt_ids: Vec<u32>,
+        config: GenerationConfig,
+        on_step: F,
+    ) -> Result<GenerationOutput>
+    where
+        F: FnMut(&GenerationStep) -> Result<()>,
+    {
         let max_seq_len = self.model.config().max_seq_len;
         if prompt_ids.len() >= max_seq_len {
             return Err(AarambhError::Shape(format!(
@@ -195,18 +236,7 @@ impl InferenceEngine {
         let available = max_seq_len - prompt_ids.len();
         let max_new_tokens = config.max_new_tokens.min(available);
         if max_new_tokens == 0 {
-            return Ok(GenerationOutput {
-                text: String::new(),
-                raw_text: String::new(),
-                thinking_text: String::new(),
-                answer_text: String::new(),
-                token_ids: Vec::new(),
-                thinking_token_ids: Vec::new(),
-                answer_token_ids: Vec::new(),
-                thinking_tokens: 0,
-                finish_reason: FinishReason::ContextLimit,
-                steps: Vec::new(),
-            });
+            return Ok(empty_output(FinishReason::ContextLimit));
         }
 
         let mut cache = KvCache::for_model(&self.model);
@@ -214,19 +244,83 @@ impl InferenceEngine {
         let logits = self
             .model
             .forward_with_cache(&input, 0, cache.layers_mut())?;
-        let mut next_logits = last_logits(&logits)?;
+        let next_logits = last_logits(&logits)?;
+        self.decode_from_next_logits(
+            DecodeSeed {
+                prompt_len: prompt_ids.len(),
+                max_new_tokens,
+                available,
+                next_logits,
+            },
+            &mut cache,
+            config,
+            on_step,
+        )
+    }
 
-        let mut thinking = ThinkingController::for_generation(config.thinking_mode, max_new_tokens);
-        let mut generated_ids = Vec::with_capacity(max_new_tokens);
+    fn generate_from_embeddings_with_callback<F>(
+        &mut self,
+        prompt_embeddings: &Tensor,
+        prompt_len: usize,
+        config: GenerationConfig,
+        on_step: F,
+    ) -> Result<GenerationOutput>
+    where
+        F: FnMut(&GenerationStep) -> Result<()>,
+    {
+        let max_seq_len = self.model.config().max_seq_len;
+        if prompt_len >= max_seq_len {
+            return Err(AarambhError::Shape(format!(
+                "prompt has {prompt_len} embeddings but model max_seq_len is {max_seq_len}"
+            )));
+        }
+        let available = max_seq_len - prompt_len;
+        let max_new_tokens = config.max_new_tokens.min(available);
+        if max_new_tokens == 0 {
+            return Ok(empty_output(FinishReason::ContextLimit));
+        }
+
+        let mut cache = KvCache::for_model(&self.model);
+        let logits =
+            self.model
+                .forward_embeddings_with_cache(prompt_embeddings, 0, cache.layers_mut())?;
+        let next_logits = last_logits(&logits)?;
+        self.decode_from_next_logits(
+            DecodeSeed {
+                prompt_len,
+                max_new_tokens,
+                available,
+                next_logits,
+            },
+            &mut cache,
+            config,
+            on_step,
+        )
+    }
+
+    fn decode_from_next_logits<F>(
+        &mut self,
+        seed: DecodeSeed,
+        cache: &mut KvCache,
+        mut config: GenerationConfig,
+        mut on_step: F,
+    ) -> Result<GenerationOutput>
+    where
+        F: FnMut(&GenerationStep) -> Result<()>,
+    {
+        let mut next_logits = seed.next_logits;
+        let mut thinking =
+            ThinkingController::for_generation(config.thinking_mode, seed.max_new_tokens);
+        let mut generated_ids = Vec::with_capacity(seed.max_new_tokens);
         let mut raw_text = String::new();
         let mut thinking_text = String::new();
         let mut answer_text = String::new();
         let mut thinking_token_ids = Vec::new();
         let mut answer_token_ids = Vec::new();
-        let mut steps = Vec::with_capacity(max_new_tokens);
+        let mut steps = Vec::with_capacity(seed.max_new_tokens);
         let mut finish_reason = FinishReason::MaxTokens;
 
-        for step in 0..max_new_tokens {
+        for step in 0..seed.max_new_tokens {
             let logits_vec = next_logits.to_vec1::<f32>()?;
             let candidates = config
                 .sampler
@@ -272,14 +366,14 @@ impl InferenceEngine {
             }
             steps.push(generation_step);
 
-            if step + 1 == max_new_tokens {
-                if generated_ids.len() == available {
+            if step + 1 == seed.max_new_tokens {
+                if generated_ids.len() == seed.available {
                     finish_reason = FinishReason::ContextLimit;
                 }
                 break;
             }
 
-            let offset = prompt_ids.len() + generated_ids.len() - 1;
+            let offset = seed.prompt_len + generated_ids.len() - 1;
             let input = Tensor::from_vec(vec![token_id], (1, 1), &self.device)?;
             let logits = self
                 .model
@@ -299,6 +393,28 @@ impl InferenceEngine {
             finish_reason,
             steps,
         })
+    }
+}
+
+struct DecodeSeed {
+    prompt_len: usize,
+    max_new_tokens: usize,
+    available: usize,
+    next_logits: Tensor,
+}
+
+fn empty_output(finish_reason: FinishReason) -> GenerationOutput {
+    GenerationOutput {
+        text: String::new(),
+        raw_text: String::new(),
+        thinking_text: String::new(),
+        answer_text: String::new(),
+        token_ids: Vec::new(),
+        thinking_token_ids: Vec::new(),
+        answer_token_ids: Vec::new(),
+        thinking_tokens: 0,
+        finish_reason,
+        steps: Vec::new(),
     }
 }
 

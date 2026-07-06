@@ -14,6 +14,7 @@ members = [
     "crates/aarambh-ai-safety",
     "crates/aarambh-ai-selflearn",
     "crates/aarambh-ai-eval",
+    "crates/aarambh-ai-vision",
     "aarambh-ai",
 ]
 resolver = "2"
@@ -38,3 +39,4 @@ cc                 = "1"
 which              = "6"
 criterion          = "0.5"
 sha2               = "0.10"
+image              = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

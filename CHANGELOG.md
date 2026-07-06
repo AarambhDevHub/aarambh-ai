@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.0.0-alpha.4] - 2026-07-05
+
+### Added
+
+- **Phase 19 Vision Encoder + Projector**
+  - Added the `aarambh-ai-vision` crate with CLIP-style ViT encoding, image preprocessing, projector MLP, and `<image>` prefix fusion
+  - Added public CLIP-B/32 SafeTensors loading with HuggingFace tensor-name normalization
+  - Added `<image>` and `<image_end>` reserved special tokens for v2 multimodal tokenizers
+  - Added embedding-prefix forward and generation paths so projected image tokens can enter the existing decoder without cross-attention changes
+  - Added projector-only pretraining through `train --config configs/vision_projector_pretrain.toml`
+  - Added `infer --image` support with streaming, predict-view, and safety guard integration
+  - Added image-caption smoke evaluation and Phase 19 data/weight preparation scripts
+
+### Changed
+
+- Text-only tokenizer validation remains backward compatible with legacy checkpoints, while image inference/training require the v2 multimodal tokens
+- README, ROADMAP_V2, and ARCHITECTURE_V2 now document the Phase 19 vision workflow
+
+### Verified
+
+- `cargo fmt --all`
+- `cargo check --workspace`
+
 ## [2.0.0-alpha.3] - 2026-07-05
 
 ### Added

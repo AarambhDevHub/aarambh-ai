@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org)
 
-A decoder-only transformer with four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA fine-tuning, GRPO reinforcement learning, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, and evaluation harness — all in one clean 15-crate Rust workspace.
+A decoder-only transformer with four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA/DoRA fine-tuning, GRPO reinforcement learning, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, evaluation harness, and a frozen-encoder vision projector path — all in one clean 16-crate Rust workspace.
 
 v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, and pretrained checkpoints are not attached to the release.
 
@@ -40,6 +40,7 @@ v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, an
 | CLI binary with predict-view, streaming, thinking modes | Phase 6 ✅ |
 | Production v1.0 source release: strict docs, CI, release workflow, release notes | Phase 15 ✅ |
 | Evaluation harness: PPL, MMLU-lite, HellaSwag, GSM8K, HumanEval-lite scorecards | Phase 17 ✅ |
+| Vision encoder + projector: CLIP ViT, image preprocessing, projector pretrain, `infer --image` | Phase 19 ✅ |
 
 ---
 
@@ -223,7 +224,8 @@ for user-run continuation from locally trained or converted model weights.
 
 Phase 17 adds `aarambh-ai eval` for comparable before/after model quality
 tracking. It reports JSON and Markdown scorecards for perplexity,
-MMLU-lite, HellaSwag, GSM8K-subset, and HumanEval-lite.
+MMLU-lite, HellaSwag, GSM8K-subset, HumanEval-lite, and the Phase 19
+image-caption smoke task.
 
 ```sh
 # Prepare public eval subsets. Requires Python's datasets package.
@@ -247,6 +249,47 @@ cargo run --release -p aarambh-ai -- eval \
 
 HumanEval-lite executes generated Python tests and is disabled unless
 `--allow-code-exec` is passed explicitly.
+
+---
+
+## Vision Projector
+
+Phase 19 adds `aarambh-ai-vision`: local image decode/resize/normalize,
+CLIP-B/32 SafeTensors loading, a frozen ViT encoder, and a trainable projector
+that turns image patches into LLM-space prefix tokens.
+
+```sh
+# Download public CLIP-B/32 SafeTensors and write the matching config.
+scripts/phase19_download_clip_weights.sh data/vision
+
+# Prepare a COCO caption JSONL subset and images.
+scripts/phase19_prepare_coco_captions.sh data
+
+# Train only the projector; the language model and vision encoder stay frozen.
+cargo run --release -p aarambh-ai --features cuda -- train \
+  --config configs/vision_projector_pretrain.toml
+
+# Generate from an image.
+cargo run --release -p aarambh-ai --features cuda -- infer \
+  --config configs/vision_projector_pretrain.toml \
+  --model checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --image data/sample.jpg \
+  --prompt "What is this?" \
+  --max-tokens 64
+
+# Run the image-caption eval smoke.
+cargo run --release -p aarambh-ai -- eval \
+  --config configs/vision_projector_pretrain.toml \
+  --model checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --tasks image-caption \
+  --data-dir data/eval
+```
+
+Vision tokenizers must reserve `<image>` and `<image_end>` at IDs 7 and 8.
+Legacy text-only tokenizers still load for text inference, but `--image`
+requires the v2 multimodal special tokens.
 
 ---
 
@@ -562,6 +605,7 @@ aarambh-ai/
 ├── aarambh-ai-safety/        ← Input/output guardrails, PII, audit
 ├── aarambh-ai-selflearn/     ← Self-learning loop, replay buffer, critique
 ├── aarambh-ai-eval/          ← Evaluation harness, scorecards, benchmark tasks
+├── aarambh-ai-vision/        ← Frozen CLIP encoder, projector, image fusion
 └── aarambh-ai/               ← CLI binary (train, infer, quantise, convert, eval)
 ```
 
@@ -571,7 +615,7 @@ aarambh-ai/
 Layer 0  aarambh-ai-core
 Layer 1  aarambh-ai-tokenizer   aarambh-ai-data
 Layer 2  aarambh-ai-nn          aarambh-ai-kernel
-Layer 3  aarambh-ai-model       aarambh-ai-weights    aarambh-ai-quant
+Layer 3  aarambh-ai-model       aarambh-ai-weights    aarambh-ai-quant     aarambh-ai-vision
 Layer 4  aarambh-ai-train       aarambh-ai-finetune
 Layer 5  aarambh-ai-inference   aarambh-ai-safety     aarambh-ai-selflearn  aarambh-ai-eval
 Layer 6  aarambh-ai (binary)
@@ -689,7 +733,9 @@ aarambh-ai/
 │   ├── aarambh-ai-finetune/     ← LoRA, QLoRA, SFT adapters
 │   ├── aarambh-ai-inference/    ← Inference engine
 │   ├── aarambh-ai-safety/       ← Safety guardrails
-│   └── aarambh-ai-selflearn/    ← Self-learning loop
+│   ├── aarambh-ai-selflearn/    ← Self-learning loop
+│   ├── aarambh-ai-eval/         ← Evaluation harness
+│   └── aarambh-ai-vision/       ← Vision encoder + projector
 ├── aarambh-ai/                  ← CLI binary
 ├── .github/                     ← CI, issue templates, PR template
 ├── LICENSE                      ← Apache 2.0

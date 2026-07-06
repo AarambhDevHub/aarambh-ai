@@ -1,0 +1,49 @@
+tokenizer_path = "checkpoints/vision_projector_smoke/tokenizer.json"
+vocab_size = 8000
+validation_split = 0.0
+shuffle = false
+resume = false
+device = "cpu"
+dtype = "f32"
+
+[model]
+vocab_size = 8000
+hidden_dim = 384
+ffn_dim = 1024
+n_layers = 8
+n_heads = 6
+n_kv_heads = 2
+max_seq_len = 256
+rope_theta = 10000.0
+norm_eps = 0.00001
+tie_embeddings = true
+
+[train]
+lr = 0.001
+batch_size = 1
+grad_accum_steps = 1
+max_epochs = 1
+max_steps = 4
+warmup_steps = 1
+min_lr_ratio = 0.1
+weight_decay = 0.01
+beta1 = 0.9
+beta2 = 0.95
+epsilon = 0.00000001
+clip_grad_norm = 1.0
+save_every_n_steps = 1
+log_every_n_steps = 1
+eval_steps = 0
+seed = 42
+checkpoint_dir = "checkpoints/vision_projector_smoke"
+
+[vision]
+mode = "projector_pretrain"
+base_model_path = "checkpoints/tiny_shakespeare/step_000050/model.safetensors"
+clip_config_path = "data/vision_smoke/clip_tiny_config.json"
+clip_weights_path = "data/vision_smoke/clip_tiny.safetensors"
+caption_jsonl = "data/vision_smoke/train_smoke_4.jsonl"
+image_root = "data/vision_smoke/images"
+projector_hidden_mult = 1
+max_caption_tokens = 32
+max_samples = 4

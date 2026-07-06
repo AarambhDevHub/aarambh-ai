@@ -278,7 +278,7 @@ embedding.
 Image (H×W×3)
    │
    ▼
-Patch embed (conv, frozen) → N patches × vit_d_model
+Patchify + linear patch embed (frozen) → N patches × vit_d_model
    │
    ▼
 ViT transformer blocks (frozen, pretrained CLIP weights)
@@ -304,6 +304,11 @@ same loading path `aarambh-ai-weights` already uses for the language model
 PyTorch bindings (`tch-rs`), no ONNX Runtime, no Python FFI. The only new
 dependency is the `image` crate, used purely for local decode/resize/
 normalise — no network calls, no external service.
+
+Implementation note: Phase 19 accepts public HuggingFace CLIP-B/32
+SafeTensors and normalizes their tensor names into Aarambh's canonical
+encoder layout at load time, including reshaping the CLIP conv patch weight
+into the linear patchifier matrix.
 
 ### Fusion: why prefix-splice, not cross-attention
 
