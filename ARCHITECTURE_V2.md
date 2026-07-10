@@ -113,7 +113,7 @@ aarambh-ai/
 | `aarambh-ai-finetune` | `dora.rs` (Phase 18), `vlm_dora.rs` (Phase 20), `dpo.rs` (Phase 24) |
 | `aarambh-ai-inference` | `speculative.rs` (Phase 25), `grammar.rs` + `tool_calling.rs` (Phase 26), `--image` flag |
 | `aarambh-ai-tokenizer` | `<image>` / `<image_end>` reserved special token strings, IDs, and validation |
-| `aarambh-ai-selflearn` | `replay_buffer.rs` v2 schema, `vision_verifier.rs`, `gating.rs` — see `SELF_LEARNING_V2.md` |
+| `aarambh-ai-selflearn` | `replay.rs` v2 schema, `vision_cache.rs`, `vision_verifier.rs`, `gating.rs` — see `SELF_LEARNING_V2.md` |
 
 ### Updated Crate Count
 
@@ -368,6 +368,12 @@ and the `vqa` eval task. VLM checkpoints save the language adapter in the
 standard DoRA format and save the tuned projector separately as
 `projector.safetensors`, so the existing merge command and `infer --image`
 path remain unchanged.
+
+Implementation status: Phase 21 extends `aarambh-ai-selflearn` with
+vision-aware replay entries, projected image-token caching, grounded VQA
+verifiers, CUDA-only hardware gating, multimodal online LoRA generation, and
+cached vision replay SFT. Text-only self-learning stays on the existing Phase
+12 path.
 
 ---
 

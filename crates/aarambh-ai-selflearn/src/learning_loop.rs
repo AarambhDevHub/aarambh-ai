@@ -10,6 +10,7 @@ use crate::critique::{CritiqueResult, critique_response};
 use crate::metrics::{LearningMetrics, MetricsEvent};
 use crate::online_grpo::{OnlineGrpo, OnlineGrpoBuildConfig, OnlineUpdate};
 use crate::replay::{ReplayBuffer, ReplayEntry};
+use crate::vision_cache::VisionCache;
 
 #[derive(Debug, Clone)]
 /// Build configuration for [`SelfLearnLoop`].
@@ -43,6 +44,8 @@ pub struct SelfLearnDraft {
     pub update: OnlineUpdate,
     /// Critique result for the output.
     pub critique: CritiqueResult,
+    /// Optional cached projected image-token reference for a vision draft.
+    pub image_ref: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +63,8 @@ pub struct SelfLearnResponse {
     pub stored_in_replay: bool,
     /// Whether GRPO was used for the update.
     pub used_grpo: bool,
+    /// Optional cached projected image-token reference stored with replay.
+    pub image_ref: Option<PathBuf>,
     /// Human-readable metrics summary.
     pub metrics_summary: String,
 }
@@ -154,6 +159,63 @@ impl SelfLearnLoop {
             output,
             update,
             critique,
+            image_ref: None,
+        });
+        Ok(self.last_draft.as_ref().expect("draft inserted above"))
+    }
+
+    /// Generate and store a vision draft without committing the update.
+    pub fn generate_vision_draft(
+        &mut self,
+        prompt: &str,
+        image_tokens: &candle_core::Tensor,
+        image_ref: PathBuf,
+        config: GenerationConfig,
+        verifier: Option<&dyn Verifier>,
+        ground_truth: Option<&str>,
+    ) -> Result<&SelfLearnDraft> {
+        let update = self.online_grpo.generate_vision_update(
+            prompt,
+            image_tokens,
+            config,
+            verifier,
+            ground_truth,
+        )?;
+        let base_response = update.output.text.clone();
+        let critique = if let Some(score) = update.verifier_score {
+            CritiqueResult {
+                response: base_response,
+                score,
+                reason: "grounded vision verifier".into(),
+                was_rewritten: false,
+            }
+        } else if self.config.critique.enabled {
+            critique_response(
+                &mut self.online_grpo,
+                prompt,
+                &base_response,
+                &self.config.critique,
+            )?
+        } else {
+            CritiqueResult {
+                response: base_response,
+                score: 0.5,
+                reason: "critique disabled".into(),
+                was_rewritten: false,
+            }
+        };
+        let mut output = update.output.clone();
+        if critique.was_rewritten {
+            output.text = critique.response.clone();
+            output.answer_text = critique.response.clone();
+            output.raw_text = critique.response.clone();
+        }
+        self.last_draft = Some(SelfLearnDraft {
+            prompt: prompt.to_string(),
+            output,
+            update,
+            critique,
+            image_ref: Some(image_ref),
         });
         Ok(self.last_draft.as_ref().expect("draft inserted above"))
     }
@@ -180,6 +242,38 @@ impl SelfLearnLoop {
         Ok(output)
     }
 
+    /// Generate a vision draft and replay stored generation steps through a callback.
+    #[allow(clippy::too_many_arguments)]
+    pub fn generate_vision_draft_with_callback<F>(
+        &mut self,
+        prompt: &str,
+        image_tokens: &candle_core::Tensor,
+        image_ref: PathBuf,
+        config: GenerationConfig,
+        verifier: Option<&dyn Verifier>,
+        ground_truth: Option<&str>,
+        mut on_step: F,
+    ) -> Result<GenerationOutput>
+    where
+        F: FnMut(&GenerationStep) -> Result<()>,
+    {
+        let output = self
+            .generate_vision_draft(
+                prompt,
+                image_tokens,
+                image_ref,
+                config,
+                verifier,
+                ground_truth,
+            )?
+            .output
+            .clone();
+        for step in &output.steps {
+            on_step(step)?;
+        }
+        Ok(output)
+    }
+
     /// Commit the last draft after optional safety-filtered replacement text.
     pub fn commit_last_draft(
         &mut self,
@@ -197,7 +291,12 @@ impl SelfLearnLoop {
         let score = draft.critique.score;
         let mut stored = false;
         if score >= self.config.replay.min_score {
-            let entry = ReplayEntry::new(&draft.prompt, &draft.output.text, score);
+            let entry = ReplayEntry::new_with_image_ref(
+                &draft.prompt,
+                &draft.output.text,
+                score,
+                draft.image_ref.clone(),
+            );
             stored = self.replay.push(entry.clone());
             if stored {
                 ReplayBuffer::append_jsonl(&self.config.replay.path, &entry)?;
@@ -223,6 +322,7 @@ impl SelfLearnLoop {
             was_rewritten: draft.critique.was_rewritten,
             stored_in_replay: stored,
             used_grpo,
+            image_ref: draft.image_ref,
             metrics_summary: self.metrics.summary(),
         })
     }
@@ -250,7 +350,9 @@ impl SelfLearnLoop {
             std::fs::create_dir_all(parent)?;
         }
         let mut file = std::fs::File::create(&path)?;
-        let mut examples = Vec::with_capacity(batch.len());
+        let cache = VisionCache::new(&self.config.state_dir);
+        let mut text_examples = Vec::new();
+        let mut vision_examples = Vec::new();
         for entry in &batch {
             let example = SftExample {
                 instruction: entry.prompt.clone(),
@@ -260,12 +362,34 @@ impl SelfLearnLoop {
             serde_json::to_writer(&mut file, &example)?;
             use std::io::Write;
             writeln!(file)?;
-            examples.push(example);
+            if let Some(image_ref) = &entry.image_ref {
+                if let Some(tokens) =
+                    cache.load_projected_tokens(image_ref, self.online_grpo.device())?
+                {
+                    vision_examples.push((example, tokens));
+                }
+            } else {
+                text_examples.push(example);
+            }
         }
-        let grad_norm = self
+        let mut norms = Vec::new();
+        if let Some(norm) = self
             .online_grpo
-            .replay_sft_batch(&examples, self.config.replay.batch_size)?;
+            .replay_sft_batch(&text_examples, self.config.replay.batch_size)?
+        {
+            norms.push(norm);
+        }
+        if let Some(norm) = self
+            .online_grpo
+            .replay_vision_sft_batch(&vision_examples, self.config.replay.batch_size)?
+        {
+            norms.push(norm);
+        }
         self.metrics.record_replay();
-        Ok(grad_norm)
+        if norms.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(norms.iter().sum::<f64>() / norms.len() as f64))
+        }
     }
 }
