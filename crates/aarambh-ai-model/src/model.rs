@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use aarambh_ai_core::{AarambhError, Configurable, Forward, ModelConfig, Result};
 use aarambh_ai_nn::{
-    GroupedQueryAttention, KVCache, RMSNorm, RopeCache, SwiGluFfn, TransformerBlock,
+    FeedForwardLayer, GroupedQueryAttention, KVCache, MoeFfn, MoeForwardStats, RMSNorm, RopeCache,
+    SwiGluFfn, TransformerBlock,
 };
 use candle_core::Tensor;
 use candle_nn::{Init, VarBuilder, linear_no_bias};
@@ -19,6 +20,17 @@ pub struct AarambhModel {
     final_norm: RMSNorm,
     lm_head: LmHead,
     rope_cache: RopeCache,
+}
+
+#[derive(Debug)]
+/// Logits plus optional MoE auxiliary metadata from a training forward pass.
+pub struct ModelForwardOutput {
+    /// Language-model logits.
+    pub logits: Tensor,
+    /// Average MoE load-balancing auxiliary loss when MoE layers are active.
+    pub moe_aux_loss: Option<Tensor>,
+    /// Average per-expert utilization across active MoE layers.
+    pub expert_utilization: Vec<f32>,
 }
 
 impl AarambhModel {
@@ -57,13 +69,48 @@ impl AarambhModel {
             );
 
             let ffn_vb = block_vb.pp("ffn");
-            let ffn = SwiGluFfn::new(
-                linear_no_bias(cfg.hidden_dim, cfg.ffn_dim, ffn_vb.pp("w_gate"))?,
-                linear_no_bias(cfg.hidden_dim, cfg.ffn_dim, ffn_vb.pp("w_up"))?,
-                linear_no_bias(cfg.ffn_dim, cfg.hidden_dim, ffn_vb.pp("w_down"))?,
-            );
+            let ffn = match cfg
+                .moe
+                .as_ref()
+                .filter(|moe| moe.applies_to_layer(layer_idx))
+            {
+                Some(moe) => {
+                    let experts = (0..moe.num_experts)
+                        .map(|expert_idx| {
+                            let expert_vb = ffn_vb.pp("experts").pp(expert_idx);
+                            Ok(SwiGluFfn::new(
+                                linear_no_bias(
+                                    cfg.hidden_dim,
+                                    moe.expert_ffn_dim,
+                                    expert_vb.pp("w_gate"),
+                                )?,
+                                linear_no_bias(
+                                    cfg.hidden_dim,
+                                    moe.expert_ffn_dim,
+                                    expert_vb.pp("w_up"),
+                                )?,
+                                linear_no_bias(
+                                    moe.expert_ffn_dim,
+                                    cfg.hidden_dim,
+                                    expert_vb.pp("w_down"),
+                                )?,
+                            ))
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    FeedForwardLayer::Moe(MoeFfn::new(
+                        moe.clone(),
+                        linear_no_bias(cfg.hidden_dim, moe.num_experts, ffn_vb.pp("router"))?,
+                        experts,
+                    ))
+                }
+                None => FeedForwardLayer::Dense(SwiGluFfn::new(
+                    linear_no_bias(cfg.hidden_dim, cfg.ffn_dim, ffn_vb.pp("w_gate"))?,
+                    linear_no_bias(cfg.hidden_dim, cfg.ffn_dim, ffn_vb.pp("w_up"))?,
+                    linear_no_bias(cfg.ffn_dim, cfg.hidden_dim, ffn_vb.pp("w_down"))?,
+                )),
+            };
 
-            blocks.push(TransformerBlock::new(norm1, attn, norm2, ffn));
+            blocks.push(TransformerBlock::new_with_ffn(norm1, attn, norm2, ffn));
         }
 
         let final_norm = RMSNorm::new(
@@ -126,6 +173,9 @@ impl AarambhModel {
         if let Some(rope_scaling) = &cfg.rope_scaling {
             rope_scaling.validate(cfg.max_seq_len, cfg.head_dim())?;
         }
+        if let Some(moe) = &cfg.moe {
+            moe.validate(cfg.n_layers)?;
+        }
         Ok(())
     }
 
@@ -171,6 +221,34 @@ impl AarambhModel {
 
         let x = self.final_norm.forward_train(&x)?;
         Ok(self.lm_head.forward(&x)?)
+    }
+
+    /// Run the training forward path and collect MoE auxiliary metadata.
+    pub fn forward_train_with_aux(&self, token_ids: &Tensor) -> Result<ModelForwardOutput> {
+        self.check_token_ids(token_ids, 0)?;
+        let x = self.embedding.forward(token_ids)?;
+        self.forward_embeddings_train_with_aux(&x)
+    }
+
+    /// Run the training forward path over embeddings and collect MoE auxiliary metadata.
+    pub fn forward_embeddings_train_with_aux(
+        &self,
+        embeddings: &Tensor,
+    ) -> Result<ModelForwardOutput> {
+        self.check_embeddings(embeddings, 0)?;
+        let mut stats = MoeForwardStats::default();
+        let mut x = embeddings.clone();
+        for block in &self.blocks {
+            x = block.forward_train_with_stats(&x, &self.rope_cache, None, 0, &mut stats)?;
+        }
+
+        let x = self.final_norm.forward_train(&x)?;
+        let logits = self.lm_head.forward(&x)?;
+        Ok(ModelForwardOutput {
+            logits,
+            moe_aux_loss: stats.aux_loss()?,
+            expert_utilization: stats.expert_utilization(),
+        })
     }
 
     /// Capture inputs to linear layers for calibration and quantisation.
@@ -276,18 +354,7 @@ impl AarambhModel {
                 format!("blocks.{idx}.norm2.weight"),
                 block.norm2().weight().clone(),
             );
-            tensors.insert(
-                format!("blocks.{idx}.ffn.w_gate.weight"),
-                block.ffn().w_gate_weight().clone(),
-            );
-            tensors.insert(
-                format!("blocks.{idx}.ffn.w_up.weight"),
-                block.ffn().w_up_weight().clone(),
-            );
-            tensors.insert(
-                format!("blocks.{idx}.ffn.w_down.weight"),
-                block.ffn().w_down_weight().clone(),
-            );
+            insert_ffn_tensors(&mut tensors, idx, block.ffn());
         }
 
         tensors.insert(
@@ -324,10 +391,11 @@ impl AarambhModel {
                 "attn.wv.weight" => Some(block.attn().wv_weight()),
                 "attn.wo.weight" => Some(block.attn().wo_weight()),
                 "norm2.weight" => Some(block.norm2().weight()),
-                "ffn.w_gate.weight" => Some(block.ffn().w_gate_weight()),
-                "ffn.w_up.weight" => Some(block.ffn().w_up_weight()),
-                "ffn.w_down.weight" => Some(block.ffn().w_down_weight()),
-                _ => None,
+                "ffn.w_gate.weight" => block.ffn().as_dense().map(SwiGluFfn::w_gate_weight),
+                "ffn.w_up.weight" => block.ffn().as_dense().map(SwiGluFfn::w_up_weight),
+                "ffn.w_down.weight" => block.ffn().as_dense().map(SwiGluFfn::w_down_weight),
+                "ffn.router.weight" => block.ffn().as_moe().map(MoeFfn::router_weight),
+                _ => get_moe_expert_weight(block.ffn(), suffix),
             };
         }
 
@@ -404,6 +472,63 @@ impl AarambhModel {
             )));
         }
         Ok((batch, seq_len))
+    }
+}
+
+fn insert_ffn_tensors(
+    tensors: &mut HashMap<String, Tensor>,
+    layer_idx: usize,
+    ffn: &FeedForwardLayer,
+) {
+    match ffn {
+        FeedForwardLayer::Dense(ffn) => {
+            tensors.insert(
+                format!("blocks.{layer_idx}.ffn.w_gate.weight"),
+                ffn.w_gate_weight().clone(),
+            );
+            tensors.insert(
+                format!("blocks.{layer_idx}.ffn.w_up.weight"),
+                ffn.w_up_weight().clone(),
+            );
+            tensors.insert(
+                format!("blocks.{layer_idx}.ffn.w_down.weight"),
+                ffn.w_down_weight().clone(),
+            );
+        }
+        FeedForwardLayer::Moe(ffn) => {
+            tensors.insert(
+                format!("blocks.{layer_idx}.ffn.router.weight"),
+                ffn.router_weight().clone(),
+            );
+            for (expert_idx, expert) in ffn.experts().iter().enumerate() {
+                let prefix = format!("blocks.{layer_idx}.ffn.experts.{expert_idx}");
+                tensors.insert(
+                    format!("{prefix}.w_gate.weight"),
+                    expert.w_gate_weight().clone(),
+                );
+                tensors.insert(
+                    format!("{prefix}.w_up.weight"),
+                    expert.w_up_weight().clone(),
+                );
+                tensors.insert(
+                    format!("{prefix}.w_down.weight"),
+                    expert.w_down_weight().clone(),
+                );
+            }
+        }
+    }
+}
+
+fn get_moe_expert_weight<'a>(ffn: &'a FeedForwardLayer, suffix: &str) -> Option<&'a Tensor> {
+    let ffn = ffn.as_moe()?;
+    let suffix = suffix.strip_prefix("ffn.experts.")?;
+    let (expert_idx, name) = suffix.split_once('.')?;
+    let expert = ffn.experts().get(expert_idx.parse::<usize>().ok()?)?;
+    match name {
+        "w_gate.weight" => Some(expert.w_gate_weight()),
+        "w_up.weight" => Some(expert.w_up_weight()),
+        "w_down.weight" => Some(expert.w_down_weight()),
+        _ => None,
     }
 }
 

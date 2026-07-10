@@ -31,7 +31,7 @@ Phase 18 →  DoRA fine-tuning                    (7–10 days)   [i3 + Kaggle]
 Phase 19 →  Vision encoder + projector          (10–14 days)  [Kaggle] ✅
 Phase 20 →  Vision-language training            (10–14 days)  [Kaggle] ✅
 Phase 21 →  Vision-aware self-learning          (7–10 days)   [Kaggle only] ✅
-Phase 22 →  Mixture of Experts                  (10–14 days)  [Kaggle]
+Phase 22 →  Mixture of Experts                  (10–14 days)  [Kaggle] ✅
 Phase 23 →  Multi-GPU training                  (7–10 days)   [Kaggle 2×T4]
 Phase 24 →  DPO preference tuning               (7–10 days)   [Kaggle]
 Phase 25 →  Speculative decoding                (5–7 days)    [Kaggle]
@@ -633,7 +633,7 @@ git tag v2.0.0-alpha.6
 
 ---
 
-## Phase 22 — Mixture of Experts
+## Phase 22 — Mixture of Experts ✅
 
 **Duration:** 10–14 days | **Hardware:** Kaggle (P100/A100 recommended)
 
@@ -648,15 +648,15 @@ at this parameter count before it's treated as a default.
 
 **`aarambh-ai-nn`:**
 ```
-[ ] src/moe.rs
-      MoeConfig { num_experts, top_k, expert_ffn_dim, aux_loss_weight }
+[x] src/moe.rs
+      MoeConfig { num_experts, top_k, expert_ffn_dim, aux_loss_weight, every_n_layers }
       Router — linear gate producing per-token expert logits
       top_k_gating(logits) -> (expert_indices, expert_weights)  // softmax over top-k only
       MoeFfn — num_experts independent SwiGLU FFNs, dispatched by router
       load_balancing_loss() — encourages uniform expert utilization
         (standard switch-transformer-style auxiliary loss)
 
-[ ] src/dispatch.rs
+[x] src/dispatch.rs
       Token-to-expert dispatch via gather/scatter (dense masked matmul
       implementation first — simplest correct version; a sparse/grouped
       implementation is an optional follow-up, not required for this phase)
@@ -664,15 +664,15 @@ at this parameter count before it's treated as a default.
 
 **`aarambh-ai-model`:**
 ```
-[ ] Model config gains `moe: Option<MoeConfig>` per-layer or every-N-layers
-[ ] New MoE-scale config: configs/small_moe.toml (Small dense-equivalent
+[x] Model config gains `moe: Option<MoeConfig>` every-N-layers
+[x] New MoE-scale config: configs/small_moe.toml (Small dense-equivalent
     active params, more total params via experts)
 ```
 
 **`aarambh-ai-train`:**
 ```
-[ ] Total loss = cross_entropy_loss + aux_loss_weight * load_balancing_loss
-[ ] Training log line gains `expert_util=[...]` per-expert utilization stats
+[x] Total loss = cross_entropy_loss + aux_loss_weight * load_balancing_loss
+[x] Training log line gains `expert_util=[...]` per-expert utilization stats
 ```
 
 ### Tests
@@ -1075,7 +1075,7 @@ git commit -m "chore: v2.0.0 — crates.io publish, source release"
 | 19 | Vision Encoder + Projector | ✅ New `aarambh-ai-vision` crate, frozen ViT + trainable projector | Kaggle | 10–14 days |
 | 20 | Vision-Language Training | ✅ VQA instruction tuning via DoRA-adapted VLM | Kaggle | 10–14 days |
 | 21 | Vision-Aware Self-Learning | ✅ Image-grounded replay + verifier, Kaggle-only | Kaggle only | 7–10 days |
-| 22 | Mixture of Experts | Top-k router, load-balancing loss | Kaggle | 10–14 days |
+| 22 | Mixture of Experts | ✅ Top-k router, load-balancing loss | Kaggle | 10–14 days |
 | 23 | Multi-GPU Training | Data-parallel training via NCCL | Kaggle 2×T4 | 7–10 days |
 | 24 | DPO Preference Tuning | Preference optimization alongside GRPO | Kaggle | 7–10 days |
 | 25 | Speculative Decoding | Tiny-draft / Large-target speedup | Kaggle | 5–7 days |

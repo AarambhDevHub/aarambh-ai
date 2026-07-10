@@ -65,6 +65,7 @@ fn rope_scaling_none_matches_v1_output_exactly() {
         max_seq_len: 16,
         rope_theta: 10000.0,
         rope_scaling: None,
+        moe: None,
         norm_eps: 1e-5,
         tie_embeddings: true,
     };

@@ -91,6 +91,11 @@ impl OnlineGrpo {
         let tokenizer = BpeTokenizer::from_pretrained(&build.tokenizer_path)?;
         tokenizer.validate_special_tokens()?;
         build.model_config.vocab_size = tokenizer.vocab_size();
+        if build.model_config.moe.is_some() {
+            return Err(AarambhError::Config(
+                "self-learning LoRA updates for MoE models are not supported in Phase 22; train the MoE base model directly or use a dense config".into(),
+            ));
+        }
 
         let base = load_any_model_with_dtype(
             &build.base_model_path,

@@ -96,6 +96,77 @@ impl RopeScalingConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+/// Mixture-of-Experts feed-forward configuration.
+pub struct MoeConfig {
+    /// Number of independent feed-forward experts.
+    pub num_experts: usize,
+    /// Number of experts selected per token.
+    pub top_k: usize,
+    /// Intermediate width used inside each expert SwiGLU FFN.
+    pub expert_ffn_dim: usize,
+    /// Weight applied to the load-balancing auxiliary loss.
+    pub aux_loss_weight: f64,
+    /// Use MoE every Nth layer, selecting zero-based layers `N - 1, 2N - 1, ...`.
+    pub every_n_layers: usize,
+}
+
+impl Default for MoeConfig {
+    fn default() -> Self {
+        Self {
+            num_experts: 8,
+            top_k: 2,
+            expert_ffn_dim: 0,
+            aux_loss_weight: 0.01,
+            every_n_layers: 2,
+        }
+    }
+}
+
+impl MoeConfig {
+    /// Return true when the zero-based layer index should use an MoE FFN.
+    pub fn applies_to_layer(&self, layer_idx: usize) -> bool {
+        self.every_n_layers > 0 && (layer_idx + 1).is_multiple_of(self.every_n_layers)
+    }
+
+    /// Validate MoE routing and expert dimensions for a model with `n_layers`.
+    pub fn validate(&self, n_layers: usize) -> Result<()> {
+        if self.num_experts < 2 {
+            return Err(AarambhError::Config(
+                "moe.num_experts must be at least 2".into(),
+            ));
+        }
+        if self.top_k == 0 || self.top_k > self.num_experts {
+            return Err(AarambhError::Config(format!(
+                "moe.top_k must be in 1..={} for num_experts={}",
+                self.num_experts, self.num_experts
+            )));
+        }
+        if self.expert_ffn_dim == 0 {
+            return Err(AarambhError::Config(
+                "moe.expert_ffn_dim must be non-zero".into(),
+            ));
+        }
+        if self.aux_loss_weight < 0.0 || !self.aux_loss_weight.is_finite() {
+            return Err(AarambhError::Config(
+                "moe.aux_loss_weight must be finite and non-negative".into(),
+            ));
+        }
+        if self.every_n_layers == 0 {
+            return Err(AarambhError::Config(
+                "moe.every_n_layers must be non-zero".into(),
+            ));
+        }
+        if n_layers == 0 || !(0..n_layers).any(|idx| self.applies_to_layer(idx)) {
+            return Err(AarambhError::Config(
+                "moe.every_n_layers does not select any model layer".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// Decoder-only transformer model shape and numerical defaults.
 pub struct ModelConfig {
@@ -118,6 +189,9 @@ pub struct ModelConfig {
     /// Optional long-context RoPE scaling configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rope_scaling: Option<RopeScalingConfig>,
+    /// Optional Mixture-of-Experts FFN configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moe: Option<MoeConfig>,
     /// RMSNorm epsilon.
     pub norm_eps: f64,
     /// Whether the output head shares weights with token embeddings.
@@ -137,6 +211,7 @@ impl ModelConfig {
             max_seq_len: 512,
             rope_theta: 10000.0,
             rope_scaling: None,
+            moe: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -154,6 +229,7 @@ impl ModelConfig {
             max_seq_len: 1024,
             rope_theta: 10000.0,
             rope_scaling: None,
+            moe: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -171,6 +247,7 @@ impl ModelConfig {
             max_seq_len: 2048,
             rope_theta: 500000.0,
             rope_scaling: None,
+            moe: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -188,6 +265,7 @@ impl ModelConfig {
             max_seq_len: 4096,
             rope_theta: 500000.0,
             rope_scaling: None,
+            moe: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -227,6 +305,7 @@ mod tests {
         }"#;
         let cfg: ModelConfig = serde_json::from_str(json).unwrap();
         assert!(cfg.rope_scaling.is_none());
+        assert!(cfg.moe.is_none());
     }
 
     #[test]
@@ -238,6 +317,30 @@ mod tests {
         };
         let err = cfg.validate(1024, 64).unwrap_err().to_string();
         assert!(err.contains("factor"), "{err}");
+    }
+
+    #[test]
+    fn moe_config_validates_layer_selection() {
+        let cfg = MoeConfig {
+            expert_ffn_dim: 128,
+            every_n_layers: 2,
+            ..MoeConfig::default()
+        };
+        cfg.validate(2).unwrap();
+        assert!(cfg.applies_to_layer(1));
+        assert!(!cfg.applies_to_layer(0));
+    }
+
+    #[test]
+    fn moe_config_rejects_top_k_larger_than_experts() {
+        let cfg = MoeConfig {
+            num_experts: 2,
+            top_k: 3,
+            expert_ffn_dim: 128,
+            ..MoeConfig::default()
+        };
+        let err = cfg.validate(2).unwrap_err().to_string();
+        assert!(err.contains("top_k"), "{err}");
     }
 }
 

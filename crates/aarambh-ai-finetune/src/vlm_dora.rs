@@ -438,6 +438,11 @@ pub fn run_vlm_dora_from_config(config: VlmDoraRunConfig) -> Result<()> {
     tokenizer.validate_vision_special_tokens()?;
     let mut model_config = config.model_config.clone();
     model_config.vocab_size = tokenizer.vocab_size();
+    if model_config.moe.is_some() {
+        return Err(AarambhError::Config(
+            "VLM DoRA training for MoE models is not supported in Phase 22; train the MoE base model directly or use a dense config".into(),
+        ));
+    }
 
     let base = aarambh_ai_weights::load_any_model_with_dtype(
         &config.base_model_path,

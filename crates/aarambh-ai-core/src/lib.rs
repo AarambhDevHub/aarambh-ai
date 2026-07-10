@@ -13,6 +13,7 @@ pub mod error;
 pub mod traits;
 
 pub use config::ModelConfig;
+pub use config::MoeConfig;
 pub use config::RopeScalingConfig;
 pub use config::RopeScalingMethod;
 pub use config::TrainConfig;

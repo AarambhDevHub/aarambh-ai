@@ -375,6 +375,7 @@ pub fn run_sft_from_config(config: SftRunConfig) -> Result<()> {
     tokenizer.validate_special_tokens()?;
     let mut model_config = config.model_config.clone();
     model_config.vocab_size = tokenizer.vocab_size();
+    reject_moe_adapters(&model_config)?;
 
     let base = load_any_model(&config.base_model_path, &model_config, &candle_device)?;
     let base_tensors = base.named_tensors();
@@ -427,6 +428,7 @@ pub fn run_dora_from_config(config: SftRunConfig) -> Result<()> {
     tokenizer.validate_special_tokens()?;
     let mut model_config = config.model_config.clone();
     model_config.vocab_size = tokenizer.vocab_size();
+    reject_moe_adapters(&model_config)?;
 
     let base = load_any_model(&config.base_model_path, &model_config, &candle_device)?;
     let base_tensors = base.named_tensors();
@@ -516,6 +518,7 @@ pub fn merge_lora_from_paths(
     } else {
         metadata.model.clone()
     };
+    reject_moe_adapters(&config)?;
     let base = load_any_model(base_model_path.as_ref(), &config, device)?;
     let tensors = base.named_tensors();
     drop(base);
@@ -546,6 +549,7 @@ pub fn merge_dora_from_paths(
     } else {
         metadata.model.clone()
     };
+    reject_moe_adapters(&config)?;
     let base = load_any_model(base_model_path.as_ref(), &config, device)?;
     let tensors = base.named_tensors();
     drop(base);
@@ -577,6 +581,15 @@ fn model_output_path(output: impl AsRef<Path>) -> PathBuf {
     } else {
         output.join("model.safetensors")
     }
+}
+
+fn reject_moe_adapters(model_config: &ModelConfig) -> Result<()> {
+    if model_config.moe.is_some() {
+        return Err(AarambhError::Config(
+            "LoRA/DoRA adapter training for MoE models is not supported in Phase 22; train the MoE base model directly or use a dense config".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn write_json(path: impl AsRef<Path>, value: &impl Serialize) -> Result<()> {

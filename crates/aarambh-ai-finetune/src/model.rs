@@ -31,6 +31,11 @@ impl LoraAarambhModel {
         device: &Device,
     ) -> Result<(Self, VarMap)> {
         AarambhModel::validate_config(config)?;
+        if config.moe.is_some() {
+            return Err(AarambhError::Config(
+                "LoRA for MoE models is not supported in Phase 22; train the MoE base model directly or use a dense config".into(),
+            ));
+        }
         lora_config.validate()?;
         let varmap = VarMap::new();
         let embedding_weight = required_tensor(tensors, "embedding.weight")?;
@@ -561,6 +566,7 @@ fn tensor_elem_count(tensor: &Tensor) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aarambh_ai_core::MoeConfig;
     use candle_core::{DType, Device};
     use candle_nn::{VarBuilder, VarMap};
 
@@ -577,6 +583,7 @@ mod tests {
             max_seq_len: 8,
             rope_theta: 10000.0,
             rope_scaling: None,
+            moe: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -609,6 +616,7 @@ mod tests {
             max_seq_len: 8,
             rope_theta: 10000.0,
             rope_scaling: None,
+            moe: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -632,5 +640,50 @@ mod tests {
             data.values()
                 .any(|var| grads.get(var.as_tensor()).is_some())
         );
+    }
+
+    #[test]
+    fn lora_model_rejects_moe_config() {
+        let device = Device::Cpu;
+        let config = ModelConfig {
+            vocab_size: 32,
+            hidden_dim: 64,
+            ffn_dim: 128,
+            n_layers: 2,
+            n_heads: 1,
+            n_kv_heads: 1,
+            max_seq_len: 8,
+            rope_theta: 10000.0,
+            rope_scaling: None,
+            moe: Some(MoeConfig {
+                num_experts: 2,
+                top_k: 1,
+                expert_ffn_dim: 64,
+                aux_loss_weight: 0.01,
+                every_n_layers: 2,
+            }),
+            norm_eps: 1e-5,
+            tie_embeddings: true,
+        };
+        let base_varmap = VarMap::new();
+        let vb = VarBuilder::from_varmap(&base_varmap, DType::F32, &device);
+        let base = AarambhModel::new(&config, vb).unwrap();
+        let lora = LoraConfig {
+            rank: 2,
+            alpha: 4.0,
+            dropout: 0.0,
+            ..Default::default()
+        };
+        let err = match LoraAarambhModel::from_tensors(
+            &config,
+            &base.named_tensors(),
+            &lora,
+            false,
+            &device,
+        ) {
+            Ok(_) => panic!("MoE LoRA construction unexpectedly succeeded"),
+            Err(err) => err.to_string(),
+        };
+        assert!(err.contains("MoE"), "{err}");
     }
 }

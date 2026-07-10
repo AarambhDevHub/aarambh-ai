@@ -67,13 +67,28 @@ impl SwiGluFfn {
         self.w_gate.weight()
     }
 
+    /// Run the gate projection only.
+    pub fn w_gate_forward(&self, x: &Tensor) -> Result<Tensor> {
+        self.w_gate.forward(x)
+    }
+
     /// Return the up projection weight tensor.
     pub fn w_up_weight(&self) -> &Tensor {
         self.w_up.weight()
     }
 
+    /// Run the up projection only.
+    pub fn w_up_forward(&self, x: &Tensor) -> Result<Tensor> {
+        self.w_up.forward(x)
+    }
+
     /// Return the down projection weight tensor.
     pub fn w_down_weight(&self) -> &Tensor {
         self.w_down.weight()
+    }
+
+    /// Run the down projection only.
+    pub fn w_down_forward(&self, x: &Tensor) -> Result<Tensor> {
+        self.w_down.forward(x)
     }
 }

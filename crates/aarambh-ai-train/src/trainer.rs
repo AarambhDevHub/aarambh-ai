@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use aarambh_ai_core::{AarambhError, ModelConfig, Result, TrainConfig};
+use aarambh_ai_core::{AarambhError, Configurable, ModelConfig, Result, TrainConfig};
 use aarambh_ai_data::{Batch, DataLoader};
 use aarambh_ai_model::AarambhModel;
 use candle_core::DType;
@@ -17,8 +17,14 @@ use crate::schedule::CosineScheduleWithWarmup;
 pub struct TrainingMetrics {
     /// Current optimizer step.
     pub step: usize,
-    /// Unscaled loss for this batch.
+    /// Unscaled total loss for this batch.
     pub loss: f64,
+    /// Unscaled cross-entropy loss for this batch.
+    pub ce_loss: f64,
+    /// Unscaled MoE auxiliary loss for this batch.
+    pub moe_aux_loss: Option<f64>,
+    /// Average per-expert utilization for this batch.
+    pub expert_utilization: Vec<f32>,
     /// Exponential of loss.
     pub perplexity: f64,
     /// Learning rate used or scheduled for this step.
@@ -43,6 +49,9 @@ pub struct Trainer {
     state: TrainState,
     pending_grads: GradMap,
     last_loss: Option<f64>,
+    last_ce_loss: Option<f64>,
+    last_moe_aux_loss: Option<f64>,
+    last_expert_utilization: Vec<f32>,
     tokens_since_log: usize,
     last_log_at: Instant,
 }
@@ -93,6 +102,9 @@ impl Trainer {
             state: TrainState::default(),
             pending_grads: GradMap::new(),
             last_loss: None,
+            last_ce_loss: None,
+            last_moe_aux_loss: None,
+            last_expert_utilization: Vec::new(),
             tokens_since_log: 0,
             last_log_at: Instant::now(),
         })
@@ -141,12 +153,38 @@ impl Trainer {
     /// Run one training micro-step.
     pub fn train_step(&mut self, batch: Batch) -> Result<TrainingMetrics> {
         let token_count = batch.input_ids.elem_count();
-        let logits = self.model.forward_train(&batch.input_ids)?;
-        let loss = cross_entropy_loss(&logits, &batch.labels, &batch.attention_mask)?;
+        let output = self.model.forward_train_with_aux(&batch.input_ids)?;
+        let ce_loss = cross_entropy_loss(&output.logits, &batch.labels, &batch.attention_mask)?;
+        let moe_aux_weight = self
+            .model
+            .config()
+            .moe
+            .as_ref()
+            .map(|moe| moe.aux_loss_weight)
+            .unwrap_or(0.0);
+        let loss = match &output.moe_aux_loss {
+            Some(aux_loss) if moe_aux_weight > 0.0 => {
+                (&ce_loss + &aux_loss.affine(moe_aux_weight, 0.0)?)?
+            }
+            _ => ce_loss.clone(),
+        };
+        let ce_loss_value = ce_loss.to_scalar::<f32>()? as f64;
+        let moe_aux_loss_value = output
+            .moe_aux_loss
+            .as_ref()
+            .map(|loss| loss.to_scalar::<f32>().map(|value| value as f64))
+            .transpose()?;
         let loss_value = loss.to_scalar::<f32>()? as f64;
-        if !loss_value.is_finite() {
+        if !loss_value.is_finite() || !ce_loss_value.is_finite() {
             return Err(AarambhError::Config(format!(
-                "non-finite training loss: {loss_value}"
+                "non-finite training loss: total={loss_value} ce={ce_loss_value}"
+            )));
+        }
+        if let Some(aux) = moe_aux_loss_value
+            && !aux.is_finite()
+        {
+            return Err(AarambhError::Config(format!(
+                "non-finite MoE auxiliary loss: {aux}"
             )));
         }
 
@@ -156,6 +194,9 @@ impl Trainer {
         self.state.micro_step += 1;
         self.state.train_loss = Some(loss_value);
         self.last_loss = Some(loss_value);
+        self.last_ce_loss = Some(ce_loss_value);
+        self.last_moe_aux_loss = moe_aux_loss_value;
+        self.last_expert_utilization = output.expert_utilization.clone();
         self.tokens_since_log += token_count;
 
         let should_step = self
@@ -167,7 +208,10 @@ impl Trainer {
             Ok(TrainingMetrics {
                 step: self.state.step,
                 loss: loss_value,
-                perplexity: loss_value.exp(),
+                ce_loss: ce_loss_value,
+                moe_aux_loss: moe_aux_loss_value,
+                expert_utilization: output.expert_utilization,
+                perplexity: ce_loss_value.exp(),
                 lr,
                 grad_norm: Some(grad_norm),
                 did_optimizer_step: true,
@@ -176,7 +220,10 @@ impl Trainer {
             Ok(TrainingMetrics {
                 step: self.state.step,
                 loss: loss_value,
-                perplexity: loss_value.exp(),
+                ce_loss: ce_loss_value,
+                moe_aux_loss: moe_aux_loss_value,
+                expert_utilization: output.expert_utilization,
+                perplexity: ce_loss_value.exp(),
                 lr: self.schedule.lr_at_step(self.state.step),
                 grad_norm: None,
                 did_optimizer_step: false,
@@ -298,10 +345,14 @@ impl Trainer {
         }
         let (lr, grad_norm) = self.optimizer_step()?;
         let loss = self.last_loss.unwrap_or(0.0);
+        let ce_loss = self.last_ce_loss.unwrap_or(loss);
         let metrics = TrainingMetrics {
             step: self.state.step,
             loss,
-            perplexity: loss.exp(),
+            ce_loss,
+            moe_aux_loss: self.last_moe_aux_loss,
+            expert_utilization: self.last_expert_utilization.clone(),
+            perplexity: ce_loss.exp(),
             lr,
             grad_norm: Some(grad_norm),
             did_optimizer_step: true,
@@ -316,15 +367,26 @@ impl Trainer {
                 .is_multiple_of(self.train_config.log_every_n_steps)
         {
             let grad_norm = metrics.grad_norm.unwrap_or(0.0);
-            println!(
-                "step={} loss={:.4} ppl={:.2} lr={:.6} grad_norm={:.4} tok/s={:.2}",
-                metrics.step,
-                metrics.loss,
-                metrics.perplexity,
-                metrics.lr,
-                grad_norm,
-                self.tokens_per_second_since_last_log()
-            );
+            let tok_s = self.tokens_per_second_since_last_log();
+            if let Some(moe_aux_loss) = metrics.moe_aux_loss {
+                println!(
+                    "step={} loss={:.4} ce_loss={:.4} moe_aux={:.6} ppl={:.2} lr={:.6} grad_norm={:.4} expert_util=[{}] tok/s={:.2}",
+                    metrics.step,
+                    metrics.loss,
+                    metrics.ce_loss,
+                    moe_aux_loss,
+                    metrics.perplexity,
+                    metrics.lr,
+                    grad_norm,
+                    format_expert_utilization(&metrics.expert_utilization),
+                    tok_s
+                );
+            } else {
+                println!(
+                    "step={} loss={:.4} ppl={:.2} lr={:.6} grad_norm={:.4} tok/s={:.2}",
+                    metrics.step, metrics.loss, metrics.perplexity, metrics.lr, grad_norm, tok_s
+                );
+            }
         }
 
         if self.train_config.eval_steps > 0
@@ -369,10 +431,18 @@ impl Trainer {
     }
 }
 
+fn format_expert_utilization(values: &[f32]) -> String {
+    values
+        .iter()
+        .map(|value| format!("{value:.3}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aarambh_ai_core::{Device as AarambhDevice, TokenizerLike};
+    use aarambh_ai_core::{Device as AarambhDevice, MoeConfig, TokenizerLike};
     use aarambh_ai_data::dataset::PlaintextDataset;
     use std::collections::HashMap;
 
@@ -429,6 +499,7 @@ mod tests {
             max_seq_len: 4,
             rope_theta: 10000.0,
             rope_scaling: None,
+            moe: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -484,5 +555,73 @@ mod tests {
             last < first,
             "loss did not decrease: first={first}, last={last}"
         );
+    }
+
+    #[test]
+    fn moe_training_step_reports_aux_loss_and_utilization() {
+        let tokenizer = CharTokenizer {
+            ids: HashMap::from([('a', 0), ('b', 1), ('c', 2), ('d', 3)]),
+        };
+        let dataset = PlaintextDataset::from_lines(vec!["abcdabcdabcdabcdabcdabcd".into()]);
+        let device = AarambhDevice::Cpu;
+        let train_loader = DataLoader::new(&dataset, &tokenizer, 1, 4, false, device.clone());
+        let mut batch_loader = DataLoader::new(&dataset, &tokenizer, 1, 4, false, device.clone());
+        let candle_device = device.to_candle().unwrap();
+        let model_config = ModelConfig {
+            vocab_size: tokenizer.vocab_size(),
+            hidden_dim: 64,
+            ffn_dim: 128,
+            n_layers: 2,
+            n_heads: 1,
+            n_kv_heads: 1,
+            max_seq_len: 4,
+            rope_theta: 10000.0,
+            rope_scaling: None,
+            moe: Some(MoeConfig {
+                num_experts: 2,
+                top_k: 1,
+                expert_ffn_dim: 64,
+                aux_loss_weight: 0.01,
+                every_n_layers: 2,
+            }),
+            norm_eps: 1e-5,
+            tie_embeddings: true,
+        };
+        let train_config = TrainConfig {
+            lr: 1e-3,
+            batch_size: 1,
+            grad_accum_steps: 1,
+            max_epochs: 1,
+            max_steps: 1,
+            warmup_steps: 0,
+            min_lr_ratio: 1.0,
+            weight_decay: 0.0,
+            beta1: 0.9,
+            beta2: 0.95,
+            epsilon: 1e-8,
+            clip_grad_norm: 1.0,
+            save_every_n_steps: 0,
+            log_every_n_steps: 0,
+            eval_steps: 0,
+            seed: 42,
+            checkpoint_dir: std::env::temp_dir().join("aarambh_moe_train_step"),
+        };
+
+        let mut trainer = Trainer::new(
+            model_config,
+            train_config,
+            train_loader,
+            None,
+            candle_device,
+            DType::F32,
+        )
+        .unwrap();
+        let metrics = trainer
+            .train_step(batch_loader.next().unwrap().unwrap())
+            .unwrap();
+        assert!(metrics.moe_aux_loss.is_some());
+        assert_eq!(metrics.expert_utilization.len(), 2);
+        let util_sum = metrics.expert_utilization.iter().sum::<f32>();
+        assert!((util_sum - 1.0).abs() < 1e-5, "util_sum={util_sum}");
     }
 }

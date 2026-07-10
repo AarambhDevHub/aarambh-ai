@@ -5,10 +5,14 @@
 pub mod attention;
 /// Transformer block composition.
 pub mod block;
+/// Expert dispatch helpers.
+pub mod dispatch;
 /// SwiGLU feed-forward layer.
 pub mod ffn;
 /// Training/inference KV cache helper.
 pub mod kvcache;
+/// Mixture-of-Experts feed-forward layer.
+pub mod moe;
 /// RMSNorm layer.
 pub mod norm;
 /// Rotary-position embedding cache.
@@ -17,8 +21,12 @@ pub mod rope;
 pub mod rope_scaling;
 
 pub use attention::GroupedQueryAttention;
-pub use block::TransformerBlock;
+pub use block::{FeedForwardLayer, TransformerBlock};
+pub use dispatch::dense_weighted_dispatch;
 pub use ffn::SwiGluFfn;
 pub use kvcache::KVCache;
+pub use moe::{
+    GatingOutput, MoeFfn, MoeForwardStats, load_balancing_loss_from_stats, top_k_gating,
+};
 pub use norm::RMSNorm;
 pub use rope::RopeCache;

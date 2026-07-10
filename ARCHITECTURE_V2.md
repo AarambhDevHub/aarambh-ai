@@ -392,7 +392,7 @@ be true for a given run.
 ### Mechanism
 
 ```
-MoeConfig { num_experts, top_k, expert_ffn_dim, aux_loss_weight }
+MoeConfig { num_experts, top_k, expert_ffn_dim, aux_loss_weight, every_n_layers }
 
 Router: linear gate, d_model → num_experts logits per token
 top_k_gating(logits) → indices + softmax weights, over the top_k experts only
@@ -407,9 +407,15 @@ Load-balancing auxiliary loss: standard switch-transformer-style loss that
 ```
 
 `MoeFfn` is a **drop-in replacement** at the block level for the dense
-`SwiGluFfn` — same input/output shape — selected per-layer or every-N-layers
-via `moe: Option<MoeConfig>` on the model config. `moe: None` reproduces
-v1's dense FFN exactly.
+`SwiGluFfn` — same input/output shape — selected every N layers via
+`moe: Option<MoeConfig>` on the model config. Phase 22 defaults to
+`every_n_layers = 2`, selecting zero-based layers `1, 3, 5, ...`.
+`moe: None` reproduces v1's dense FFN exactly.
+
+MoE checkpoint tensor names are intentionally separate from dense FFN names:
+`blocks.N.ffn.router.weight` and
+`blocks.N.ffn.experts.E.{w_gate,w_up,w_down}.weight`. Dense checkpoints keep
+the original `blocks.N.ffn.w_*` names.
 
 ### Dispatch implementation
 
@@ -419,6 +425,11 @@ implementation. A sparse/grouped dispatch (only compute the selected
 experts per token) is called out as an optional follow-up in
 `ROADMAP_V2.md`, not a Phase 22 requirement — correctness first, efficiency
 second.
+
+Implementation status: Phase 22 ships native MoE base-model training,
+inference, safetensors/GGUF serialization, and CPU smoke configs. LoRA/DoRA
+adapter training for MoE expert weights is explicitly rejected until a later
+adapter phase.
 
 ---
 

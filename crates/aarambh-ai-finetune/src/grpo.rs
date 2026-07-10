@@ -682,6 +682,11 @@ pub fn run_grpo_from_config(config: GrpoRunConfig) -> Result<()> {
     tokenizer.validate_special_tokens()?;
     let mut model_config = config.model_config.clone();
     model_config.vocab_size = tokenizer.vocab_size();
+    if model_config.moe.is_some() {
+        return Err(AarambhError::Config(
+            "GRPO LoRA training for MoE models is not supported in Phase 22; train the MoE base model directly or use a dense config".into(),
+        ));
+    }
 
     let base = load_any_model(&config.base_model_path, &model_config, &candle_device)?;
     let base_tensors = base.named_tensors();
