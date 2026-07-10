@@ -8,6 +8,7 @@ use candle_core::backprop::GradStore;
 use candle_nn::{VarBuilder, VarMap};
 
 use crate::checkpoint::{CheckpointManager, TrainState};
+use crate::distributed::DistributedContext;
 use crate::loss::cross_entropy_loss;
 use crate::optim::{AdamW, AdamWConfig, GradMap, clip_gradients};
 use crate::schedule::CosineScheduleWithWarmup;
@@ -42,6 +43,7 @@ pub struct Trainer {
     optimizer: AdamW,
     schedule: CosineScheduleWithWarmup,
     checkpoint: CheckpointManager,
+    distributed: Option<DistributedContext>,
     train_loader: DataLoader,
     val_loader: Option<DataLoader>,
     train_config: TrainConfig,
@@ -65,6 +67,27 @@ impl Trainer {
         val_loader: Option<DataLoader>,
         device: candle_core::Device,
         dtype: DType,
+    ) -> Result<Self> {
+        Self::new_with_distributed(
+            model_config,
+            train_config,
+            train_loader,
+            val_loader,
+            device,
+            dtype,
+            None,
+        )
+    }
+
+    /// Create a trainer with an optional distributed data-parallel context.
+    pub fn new_with_distributed(
+        model_config: ModelConfig,
+        train_config: TrainConfig,
+        train_loader: DataLoader,
+        val_loader: Option<DataLoader>,
+        device: candle_core::Device,
+        dtype: DType,
+        distributed: Option<DistributedContext>,
     ) -> Result<Self> {
         if train_config.grad_accum_steps == 0 {
             return Err(AarambhError::Config(
@@ -95,6 +118,7 @@ impl Trainer {
             optimizer,
             schedule,
             checkpoint,
+            distributed,
             train_loader,
             val_loader,
             train_config,
@@ -128,6 +152,11 @@ impl Trainer {
     /// Return the optimizer.
     pub fn optimizer(&self) -> &AdamW {
         &self.optimizer
+    }
+
+    /// Return true when this trainer owns rank-0 side effects.
+    pub fn is_rank0(&self) -> bool {
+        self.distributed.as_ref().is_none_or(|ctx| ctx.is_rank0())
     }
 
     /// Load the latest checkpoint if one exists.
@@ -274,6 +303,9 @@ impl Trainer {
 
     /// Save a checkpoint for the current training state.
     pub fn save_checkpoint(&mut self) -> Result<()> {
+        if !self.is_rank0() {
+            return Ok(());
+        }
         self.checkpoint
             .save(&self.varmap, &self.optimizer, &self.state)?;
         Ok(())
@@ -281,6 +313,9 @@ impl Trainer {
 
     /// Evaluate the validation loader when present.
     pub fn validate(&mut self) -> Result<Option<f64>> {
+        if !self.is_rank0() {
+            return Ok(None);
+        }
         let Some(loader) = self.val_loader.as_mut() else {
             return Ok(None);
         };
@@ -332,6 +367,9 @@ impl Trainer {
 
     fn optimizer_step(&mut self) -> Result<(f64, f64)> {
         let lr = self.schedule.lr_at_step(self.state.step);
+        if let Some(distributed) = &self.distributed {
+            distributed.all_reduce_gradients(&mut self.pending_grads)?;
+        }
         let grad_norm = clip_gradients(&mut self.pending_grads, self.train_config.clip_grad_norm)?;
         self.optimizer.step(&self.pending_grads, lr)?;
         self.pending_grads.clear();
@@ -361,6 +399,9 @@ impl Trainer {
     }
 
     fn after_optimizer_step(&mut self, metrics: &TrainingMetrics) -> Result<()> {
+        if !self.is_rank0() {
+            return Ok(());
+        }
         if self.train_config.log_every_n_steps > 0
             && metrics
                 .step

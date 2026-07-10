@@ -18,7 +18,7 @@ cuda = [
     "aarambh-ai-train/cuda",
     "aarambh-ai-vision/cuda",
     "aarambh-ai-weights/cuda",
-    "candle-core/cuda",
+    "candle-core/nccl",
 ]
 
 [dependencies]

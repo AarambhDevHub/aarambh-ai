@@ -32,7 +32,7 @@ Phase 19 →  Vision encoder + projector          (10–14 days)  [Kaggle] ✅
 Phase 20 →  Vision-language training            (10–14 days)  [Kaggle] ✅
 Phase 21 →  Vision-aware self-learning          (7–10 days)   [Kaggle only] ✅
 Phase 22 →  Mixture of Experts                  (10–14 days)  [Kaggle] ✅
-Phase 23 →  Multi-GPU training                  (7–10 days)   [Kaggle 2×T4]
+Phase 23 →  Multi-GPU training                  (7–10 days)   [Kaggle 2×T4] ✅
 Phase 24 →  DPO preference tuning               (7–10 days)   [Kaggle]
 Phase 25 →  Speculative decoding                (5–7 days)    [Kaggle]
 Phase 26 →  Tool use / function calling         (7–10 days)   [i3 + Kaggle]
@@ -706,7 +706,7 @@ git tag v2.0.0-alpha.7
 
 ---
 
-## Phase 23 — Multi-GPU Training
+## Phase 23 — Multi-GPU Training ✅
 
 **Duration:** 7–10 days | **Hardware:** Kaggle 2×T4 (when available)
 
@@ -719,22 +719,36 @@ break the existing single-GPU path from Phase 13).
 
 **`aarambh-ai-train`:**
 ```
-[ ] src/distributed.rs
-      DistributedConfig { world_size, rank, backend: Nccl }
-      init_process_group() — Candle's NCCL-based collective ops
-      all_reduce_gradients() — gradient sync after backward, before optimizer step
-      Data sharding: each rank sees a disjoint shard of the DataLoader
+[x] src/distributed.rs
+      DistributedConfig + env override resolution for
+      AARAMBH_WORLD_SIZE/RANK/LOCAL_RANK
+      single-node NCCL rendezvous through .aarambh_dist/<run_id>/nccl_id.bin
+      bucketed F32 gradient all-reduce before clipping/AdamW
+      rank-0 fallback when a Kaggle 2×T4 session is not available
 
-[ ] src/trainer.rs
-      Trainer gains an optional DistributedConfig; when None, behavior is
-      byte-identical to the existing single-GPU/CPU path
-      Checkpoint save only from rank 0
+[x] src/trainer.rs
+      Trainer gains an optional DistributedContext; None keeps the existing
+      CPU/single-GPU path
+      gradient sync runs after accumulation and before clipping
+      logging, validation, best/final checkpoints save only from rank 0
+
+[x] aarambh-ai-data
+      DataLoader::new_sharded gives each rank equal-count disjoint batches
+      DataLoader::new_with_seed keeps rank-local shuffling deterministic
 ```
 
 ### Data Setup
 
 ```bash
 # No new dataset; reuses Phase 13's WikiText-103 pipeline, sharded across ranks.
+cargo build --release -p aarambh-ai --features cuda
+export AARAMBH_WORLD_SIZE=2
+export AARAMBH_DIST_RUN_ID=wikitext-2gpu-$(date +%s)
+AARAMBH_RANK=0 AARAMBH_LOCAL_RANK=0 ./target/release/aarambh-ai train \
+  --config configs/wikitext103_small_2gpu.toml &
+AARAMBH_RANK=1 AARAMBH_LOCAL_RANK=1 ./target/release/aarambh-ai train \
+  --config configs/wikitext103_small_2gpu.toml &
+wait
 ```
 
 ### Tests
@@ -1076,7 +1090,7 @@ git commit -m "chore: v2.0.0 — crates.io publish, source release"
 | 20 | Vision-Language Training | ✅ VQA instruction tuning via DoRA-adapted VLM | Kaggle | 10–14 days |
 | 21 | Vision-Aware Self-Learning | ✅ Image-grounded replay + verifier, Kaggle-only | Kaggle only | 7–10 days |
 | 22 | Mixture of Experts | ✅ Top-k router, load-balancing loss | Kaggle | 10–14 days |
-| 23 | Multi-GPU Training | Data-parallel training via NCCL | Kaggle 2×T4 | 7–10 days |
+| 23 | Multi-GPU Training | ✅ Single-node NCCL DDP, sharded loaders, rank-0 checkpoints | Kaggle 2×T4 | 7–10 days |
 | 24 | DPO Preference Tuning | Preference optimization alongside GRPO | Kaggle | 7–10 days |
 | 25 | Speculative Decoding | Tiny-draft / Large-target speedup | Kaggle | 5–7 days |
 | 26 | Tool Use / Function Calling | Grammar-constrained JSON tool calls | i3 + Kaggle | 7–10 days |

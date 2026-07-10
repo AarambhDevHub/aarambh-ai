@@ -44,6 +44,7 @@ v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, an
 | Vision-language instruction tuning: VQA JSONL/LLaVA data, VLM DoRA/QDoRA, VQA eval | Phase 20 ✅ |
 | Vision-aware self-learning: image replay cache, grounded VQA verifier, CUDA gate | Phase 21 ✅ |
 | Mixture of Experts: top-k router, dense masked dispatch, load-balanced training | Phase 22 ✅ |
+| Multi-GPU training: single-node NCCL data parallelism, sharded loaders, rank-0 checkpoints | Phase 23 ✅ |
 
 ---
 
@@ -191,6 +192,35 @@ and packaged checkpoint downloads.
 # Package a trained checkpoint directory for download.
 scripts/phase13_pack_checkpoint.sh checkpoints/wikitext103_small phase13_small_checkpoint.zip
 ```
+
+---
+
+## Multi-GPU Training
+
+Phase 23 adds single-node data-parallel training for Kaggle 2×T4 sessions. It
+uses one worker process per GPU, NCCL all-reduce for averaged gradients,
+deterministic rank-local data shards, and rank-0-only logging/checkpointing.
+When only one GPU is visible, rank 0 falls back to the normal single-process
+path and nonzero workers exit cleanly.
+
+```sh
+cargo build --release -p aarambh-ai --features cuda
+
+export AARAMBH_WORLD_SIZE=2
+export AARAMBH_DIST_RUN_ID=wikitext-2gpu-$(date +%s)
+
+AARAMBH_RANK=0 AARAMBH_LOCAL_RANK=0 ./target/release/aarambh-ai train \
+  --config configs/wikitext103_small_2gpu.toml &
+AARAMBH_RANK=1 AARAMBH_LOCAL_RANK=1 ./target/release/aarambh-ai train \
+  --config configs/wikitext103_small_2gpu.toml &
+wait
+```
+
+The `[distributed]` TOML section can provide defaults, but
+`AARAMBH_WORLD_SIZE`, `AARAMBH_RANK`, `AARAMBH_LOCAL_RANK`,
+`AARAMBH_DIST_RUN_ID`, and `AARAMBH_DIST_RENDEZVOUS` override it at runtime.
+Phase 23 is single-node only; multi-node rendezvous is intentionally out of
+scope.
 
 ---
 
@@ -891,6 +921,8 @@ aarambh-ai/
 | 19 | Vision encoder + projector | GPU | ✅ |
 | 20 | Vision-language instruction tuning | GPU | ✅ |
 | 21 | Vision-aware self-learning | GPU | ✅ |
+| 22 | Mixture of Experts | GPU | ✅ |
+| 23 | Multi-GPU training | 2×T4 | ✅ |
 
 See [ROADMAP.md](ROADMAP.md) for the full phased delivery plan with tests and milestones.
 
