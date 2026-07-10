@@ -18,6 +18,17 @@ pub struct Batch {
     pub attention_mask: Tensor,
 }
 
+/// Rank-local shard descriptor for distributed training.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DataShard {
+    /// Zero-based shard rank.
+    pub rank: usize,
+    /// Total number of shards.
+    pub count: usize,
+    /// Deterministic RNG seed for this shard.
+    pub seed: u64,
+}
+
 /// Mini-batch iterator over fixed-length token chunks.
 pub struct DataLoader {
     chunks: Vec<(Vec<u32>, Vec<u32>)>,
@@ -39,7 +50,47 @@ impl DataLoader {
         device: Device,
     ) -> Self {
         let chunks = chunk_and_tokenize(dataset, tokenizer, max_seq_len);
+        Self::from_chunks(chunks, batch_size, shuffle, device, None)
+    }
+
+    /// Build a loader with a deterministic RNG seed.
+    pub fn new_with_seed(
+        dataset: &dyn TextDataset,
+        tokenizer: &dyn TokenizerLike,
+        batch_size: usize,
+        max_seq_len: usize,
+        shuffle: bool,
+        device: Device,
+        seed: u64,
+    ) -> Self {
+        let chunks = chunk_and_tokenize(dataset, tokenizer, max_seq_len);
+        Self::from_chunks(chunks, batch_size, shuffle, device, Some(seed))
+    }
+
+    /// Build a deterministic rank-local shard for data-parallel training.
+    pub fn new_sharded(
+        dataset: &dyn TextDataset,
+        tokenizer: &dyn TokenizerLike,
+        batch_size: usize,
+        max_seq_len: usize,
+        shuffle: bool,
+        device: Device,
+        shard: DataShard,
+    ) -> Self {
+        let chunks = chunk_and_tokenize(dataset, tokenizer, max_seq_len);
+        let chunks = shard_chunks(chunks, batch_size, shard.rank, shard.count);
+        Self::from_chunks(chunks, batch_size, shuffle, device, Some(shard.seed))
+    }
+
+    fn from_chunks(
+        chunks: Vec<(Vec<u32>, Vec<u32>)>,
+        batch_size: usize,
+        shuffle: bool,
+        device: Device,
+        seed: Option<u64>,
+    ) -> Self {
         let rng = StdRng::from_entropy();
+        let rng = seed.map_or(rng, StdRng::seed_from_u64);
         let pos = 0;
         DataLoader {
             chunks,
@@ -68,6 +119,33 @@ impl DataLoader {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+}
+
+fn shard_chunks(
+    chunks: Vec<(Vec<u32>, Vec<u32>)>,
+    batch_size: usize,
+    shard_rank: usize,
+    shard_count: usize,
+) -> Vec<(Vec<u32>, Vec<u32>)> {
+    if shard_count <= 1 || batch_size == 0 {
+        return chunks;
+    }
+    if shard_rank >= shard_count {
+        return Vec::new();
+    }
+
+    let samples_per_sync_step = batch_size.saturating_mul(shard_count);
+    if samples_per_sync_step == 0 {
+        return Vec::new();
+    }
+    let full_sync_steps = chunks.len() / samples_per_sync_step;
+    let mut sharded = Vec::with_capacity(full_sync_steps * batch_size);
+    for step in 0..full_sync_steps {
+        let start = step * samples_per_sync_step + shard_rank * batch_size;
+        let end = start + batch_size;
+        sharded.extend(chunks[start..end].iter().cloned());
+    }
+    sharded
 }
 
 impl Iterator for DataLoader {
@@ -206,5 +284,53 @@ mod tests {
         let mut loader = DataLoader::new(&dataset, &tokenizer, 2, 1, false, device);
         assert!(loader.next().is_some());
         assert!(loader.next().is_none());
+    }
+
+    #[test]
+    fn sharded_dataloader_produces_equal_disjoint_batches() {
+        let tokenizer = DummyTokenizer {
+            vocab: HashMap::from([
+                ("a".into(), 0),
+                ("b".into(), 1),
+                ("c".into(), 2),
+                ("d".into(), 3),
+            ]),
+        };
+        let dataset = PlaintextDataset::from_lines(vec![
+            "abcd".into(),
+            "abcd".into(),
+            "abcd".into(),
+            "abcd".into(),
+            "abcd".into(),
+        ]);
+        let rank0 = DataLoader::new_sharded(
+            &dataset,
+            &tokenizer,
+            2,
+            1,
+            false,
+            Device::Cpu,
+            DataShard {
+                rank: 0,
+                count: 2,
+                seed: 42,
+            },
+        );
+        let rank1 = DataLoader::new_sharded(
+            &dataset,
+            &tokenizer,
+            2,
+            1,
+            false,
+            Device::Cpu,
+            DataShard {
+                rank: 1,
+                count: 2,
+                seed: 42,
+            },
+        );
+        assert_eq!(rank0.len(), rank1.len());
+        assert!(!rank0.is_empty());
+        assert_ne!(rank0.chunks, rank1.chunks);
     }
 }

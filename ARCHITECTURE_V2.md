@@ -436,23 +436,36 @@ adapter phase.
 ## 27. Multi-GPU Training
 
 Kaggle occasionally grants 2×T4 sessions instead of the usual single-GPU
-session. v2.0 adds data-parallel training via Candle's NCCL-based collective
-operations, with single-GPU as the default and unconditional fallback.
+session. v2.0 adds single-node data-parallel training through one worker
+process per GPU, Candle/cudarc NCCL collectives, and single-GPU fallback.
 
 ```
-DistributedConfig { world_size, rank, backend: Nccl }
+DistributedConfig {
+  enabled,
+  backend: Nccl,
+  world_size,
+  rank,
+  local_rank,
+  run_id,
+  rendezvous_dir,
+  bucket_bytes,
+  fallback_single_gpu,
+}
 
 Per training step:
   1. Each rank forward+backward passes on its own data shard
-  2. all_reduce_gradients() averages gradients across ranks
+  2. all_reduce_gradients() averages F32 gradient buckets across ranks
   3. Optimiser step proceeds identically to single-GPU (§9.4)
   4. Checkpoint save only from rank 0
 ```
 
-`Trainer` gains an `Option<DistributedConfig>` field. When `None`
+`Trainer` gains an `Option<DistributedContext>` field. When `None`
 (the default, and the only path on the i3 or a single-GPU Kaggle session),
 behaviour is byte-identical to v1.0.0's training loop — this is enforced by
-a regression test.
+a regression test. The TOML `[distributed]` section is overridden by
+`AARAMBH_WORLD_SIZE`, `AARAMBH_RANK`, `AARAMBH_LOCAL_RANK`,
+`AARAMBH_DIST_RUN_ID`, and `AARAMBH_DIST_RENDEZVOUS` so Kaggle notebooks can
+launch workers without generating per-rank config files.
 
 ---
 

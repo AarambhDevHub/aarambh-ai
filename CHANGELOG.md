@@ -1,5 +1,36 @@
 # Changelog
 
+## [2.0.0-alpha.8] - 2026-07-10
+
+### Added
+
+- **Phase 23 Multi-GPU Training**
+  - Added single-node NCCL data-parallel training context with env-worker launch support
+  - Added `[distributed]` training config with `AARAMBH_WORLD_SIZE`, `AARAMBH_RANK`, `AARAMBH_LOCAL_RANK`, `AARAMBH_DIST_RUN_ID`, and `AARAMBH_DIST_RENDEZVOUS` overrides
+  - Added deterministic sharded `DataLoader` construction with equal per-rank batch counts
+  - Added bucketed F32 gradient all-reduce before gradient clipping and AdamW updates
+  - Added rank-0-only logging, validation, checkpoint, and tokenizer creation behavior
+  - Added `configs/wikitext103_small_2gpu.toml` for Kaggle 2×T4 runs
+
+### Changed
+
+- The `cuda` feature for training now enables Candle NCCL support
+- Distributed runs fall back cleanly to rank-0 single-process training when the requested 2×T4 allocation is unavailable
+- README, ROADMAP_V2, and ARCHITECTURE_V2 now document the Phase 23 env-worker launch path
+
+### Verified
+
+- `cargo fmt --all --check`
+- `cargo check -p aarambh-ai-data -p aarambh-ai-train`
+- `cargo check --workspace`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test -p aarambh-ai-data -p aarambh-ai-train --no-fail-fast`
+- `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
+
+### Notes
+
+- Local CUDA-feature verification is blocked on this machine because cudarc requires `nvcc`; run `cargo build --release -p aarambh-ai --features cuda` on Kaggle or another CUDA/NCCL host.
+
 ## [2.0.0-alpha.7] - 2026-07-10
 
 ### Added

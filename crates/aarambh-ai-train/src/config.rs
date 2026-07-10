@@ -1,14 +1,20 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use aarambh_ai_core::{
     AarambhError, DType as AarambhDType, Device, ModelConfig, Result, TokenizerLike, TrainConfig,
 };
-use aarambh_ai_data::DataLoader;
 use aarambh_ai_data::dataset::PlaintextDataset;
+use aarambh_ai_data::{DataLoader, DataShard};
 use aarambh_ai_tokenizer::BpeTokenizer;
 use serde::{Deserialize, Serialize};
 
+use crate::distributed::{
+    DistributedConfig, DistributedContext, DistributedRuntime, ResolvedDistributedConfig,
+    resolve_runtime,
+};
 use crate::trainer::Trainer;
 use crate::vision_projector::{self, VisionTrainingConfig};
 
@@ -47,6 +53,8 @@ pub struct TrainingRunConfig {
     pub model: ModelConfig,
     /// Optimizer and schedule configuration.
     pub train: TrainConfig,
+    /// Optional single-node distributed data-parallel configuration.
+    pub distributed: Option<DistributedConfig>,
     /// Optional progressive sequence-length schedule for long-context continuation.
     pub context_schedule: Vec<ContextScheduleStage>,
     /// Optional vision training mode and data configuration.
@@ -67,6 +75,7 @@ impl Default for TrainingRunConfig {
             dtype: "f32".to_string(),
             model: ModelConfig::tiny(),
             train: TrainConfig::default(),
+            distributed: None,
             context_schedule: Vec::new(),
             vision: None,
         }
@@ -140,6 +149,9 @@ impl TrainingRunConfig {
         }
         let device = self.device()?;
         self.dtype_for_device(&device)?;
+        if let Some(distributed) = &self.distributed {
+            distributed.validate()?;
+        }
         self.validate_context_schedule()?;
         Ok(())
     }
@@ -193,11 +205,62 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
         return vision_projector::run_projector_pretrain(&config);
     }
 
-    let device = config.device()?;
+    let runtime = resolve_runtime(config.distributed.as_ref())?;
+    if let DistributedRuntime::NonParticipant {
+        rank,
+        world_size,
+        reason,
+    } = &runtime
+    {
+        println!(
+            "distributed fallback: rank {rank}/{world_size} exiting because rank 0 will run single-process training ({reason})"
+        );
+        return Ok(());
+    }
+
+    let mut device = config.device()?;
+    let distributed_config = match &runtime {
+        DistributedRuntime::Active(distributed) => {
+            device = Device::Cuda(distributed.local_rank);
+            Some(distributed.clone())
+        }
+        DistributedRuntime::SingleProcessFallback { reason, .. } => {
+            if matches!(device, Device::Cuda(_)) {
+                device = Device::Cuda(0);
+            }
+            println!("distributed fallback: {reason}; running single-process training on rank 0");
+            None
+        }
+        DistributedRuntime::Disabled | DistributedRuntime::NonParticipant { .. } => None,
+    };
+    let is_rank0 = runtime.is_rank0();
     let dtype = config.dtype_for_device(&device)?.to_candle();
     let candle_device = device.to_candle()?;
-    println!("training run: device={device:?} dtype={dtype:?}");
-    let tokenizer = prepare_tokenizer(&config)?;
+    let distributed_context = distributed_config
+        .clone()
+        .map(|distributed| DistributedContext::init(distributed, &candle_device))
+        .transpose()?;
+    if let Some(distributed) = &distributed_config {
+        if is_rank0 {
+            println!(
+                "distributed training: backend={:?} world_size={} rank={} local_rank={} dtype={dtype:?}",
+                distributed.backend,
+                distributed.world_size,
+                distributed.rank,
+                distributed.local_rank
+            );
+        }
+    } else if is_rank0 {
+        println!("training run: device={device:?} dtype={dtype:?}");
+    }
+    let tokenizer = prepare_tokenizer(
+        &config,
+        is_rank0,
+        distributed_config
+            .as_ref()
+            .map(|distributed| distributed.init_timeout_secs)
+            .unwrap_or(120),
+    )?;
     let mut model_config = config.model.clone();
     model_config.vocab_size = tokenizer.vocab_size();
 
@@ -214,17 +277,19 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
         &config,
         initial_seq_len,
         device.clone(),
+        distributed_config.as_ref(),
     );
 
-    let mut trainer = Trainer::new(
+    let mut trainer = Trainer::new_with_distributed(
         model_config,
         config.train.clone(),
         train_loader,
         val_loader,
         candle_device,
         dtype,
+        distributed_context,
     )?;
-    if config.resume && trainer.load_latest_checkpoint()? {
+    if config.resume && trainer.load_latest_checkpoint()? && trainer.is_rank0() {
         println!("resumed checkpoint at step={}", trainer.state().step);
     }
     if config.context_schedule.is_empty() {
@@ -241,19 +306,26 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
                 &config,
                 stage.max_seq_len,
                 device.clone(),
+                distributed_config.as_ref(),
             );
             trainer.replace_loaders(train_loader, val_loader);
-            println!(
-                "context stage: max_seq_len={} until_step={}",
-                stage.max_seq_len, stage.until_step
-            );
+            if trainer.is_rank0() {
+                println!(
+                    "context stage: max_seq_len={} until_step={}",
+                    stage.max_seq_len, stage.until_step
+                );
+            }
             trainer.train_until(stage.until_step)?;
         }
         trainer.save_checkpoint()
     }
 }
 
-fn prepare_tokenizer(config: &TrainingRunConfig) -> Result<BpeTokenizer> {
+fn prepare_tokenizer(
+    config: &TrainingRunConfig,
+    is_rank0: bool,
+    wait_timeout_secs: u64,
+) -> Result<BpeTokenizer> {
     if let Some(path) = &config.tokenizer_path {
         let tokenizer = BpeTokenizer::from_pretrained(path)?;
         tokenizer.validate_special_tokens()?;
@@ -265,17 +337,51 @@ fn prepare_tokenizer(config: &TrainingRunConfig) -> Result<BpeTokenizer> {
         .tokenizer_save_path
         .clone()
         .unwrap_or_else(|| config.train.checkpoint_dir.join("tokenizer.json"));
-    if save_path.exists() {
-        let tokenizer = BpeTokenizer::from_pretrained(&save_path)?;
-        if tokenizer.validate_special_tokens().is_ok() {
-            return Ok(tokenizer);
-        }
+    if let Some(tokenizer) = load_valid_tokenizer(&save_path)? {
+        return Ok(tokenizer);
+    }
+
+    if !is_rank0 {
+        return wait_for_tokenizer(&save_path, wait_timeout_secs);
     }
 
     let tokenizer = BpeTokenizer::train(&config.dataset_path, config.vocab_size)?;
     tokenizer.validate_special_tokens()?;
     tokenizer.save_pretrained(save_path)?;
     Ok(tokenizer)
+}
+
+fn load_valid_tokenizer(path: &Path) -> Result<Option<BpeTokenizer>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let tokenizer = BpeTokenizer::from_pretrained(path)?;
+    if tokenizer.validate_special_tokens().is_ok() {
+        Ok(Some(tokenizer))
+    } else {
+        Ok(None)
+    }
+}
+
+fn wait_for_tokenizer(path: &Path, wait_timeout_secs: u64) -> Result<BpeTokenizer> {
+    let deadline = Instant::now() + Duration::from_secs(wait_timeout_secs.max(1));
+    loop {
+        if path.exists() {
+            match load_valid_tokenizer(path) {
+                Ok(Some(tokenizer)) => return Ok(tokenizer),
+                Ok(None) => {}
+                Err(_) if Instant::now() < deadline => {}
+                Err(err) => return Err(err),
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(AarambhError::Config(format!(
+                "timed out waiting for rank 0 tokenizer at {}",
+                path.display()
+            )));
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn load_datasets(
@@ -318,24 +424,45 @@ fn build_loaders(
     config: &TrainingRunConfig,
     max_seq_len: usize,
     device: Device,
+    distributed: Option<&ResolvedDistributedConfig>,
 ) -> (DataLoader, Option<DataLoader>) {
-    let train_loader = DataLoader::new(
-        train_dataset,
-        tokenizer,
-        config.train.batch_size,
-        max_seq_len,
-        config.shuffle,
-        device.clone(),
-    );
-    let val_loader = val_dataset.map(|dataset| {
+    let train_loader = if let Some(distributed) = distributed {
+        DataLoader::new_sharded(
+            train_dataset,
+            tokenizer,
+            config.train.batch_size,
+            max_seq_len,
+            config.shuffle,
+            device.clone(),
+            DataShard {
+                rank: distributed.rank,
+                count: distributed.world_size,
+                seed: config.train.seed.saturating_add(distributed.rank as u64),
+            },
+        )
+    } else {
         DataLoader::new(
+            train_dataset,
+            tokenizer,
+            config.train.batch_size,
+            max_seq_len,
+            config.shuffle,
+            device.clone(),
+        )
+    };
+    let val_loader = val_dataset.and_then(|dataset| {
+        if distributed.is_some_and(|distributed| !distributed.is_rank0()) {
+            return None;
+        }
+        Some(DataLoader::new_with_seed(
             dataset,
             tokenizer,
             config.train.batch_size,
             max_seq_len,
             false,
             device,
-        )
+            config.train.seed,
+        ))
     });
     (train_loader, val_loader)
 }
