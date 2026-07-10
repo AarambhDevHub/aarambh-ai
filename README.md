@@ -43,6 +43,7 @@ v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, an
 | Vision encoder + projector: CLIP ViT, image preprocessing, projector pretrain, `infer --image` | Phase 19 ✅ |
 | Vision-language instruction tuning: VQA JSONL/LLaVA data, VLM DoRA/QDoRA, VQA eval | Phase 20 ✅ |
 | Vision-aware self-learning: image replay cache, grounded VQA verifier, CUDA gate | Phase 21 ✅ |
+| Mixture of Experts: top-k router, dense masked dispatch, load-balanced training | Phase 22 ✅ |
 
 ---
 
@@ -497,6 +498,29 @@ cargo run --release -p aarambh-ai -- selflearn stats \
   --replay-path data/replay_buffer_v2.jsonl \
   --self-learn-state-dir adapters/selflearn_vision
 ```
+
+---
+
+## Mixture Of Experts
+
+Phase 22 adds optional MoE feed-forward layers. Dense configs remain the
+default; MoE activates only when `[model.moe]` is present. The first
+implementation uses top-k routing, dense masked dispatch, and a
+load-balancing auxiliary loss during base-model training.
+
+```sh
+# CPU smoke run.
+cargo run --release -p aarambh-ai -- train --config configs/moe_smoke.toml
+
+# Kaggle/P100/A100 Small-MoE run.
+cargo run --release --features cuda -p aarambh-ai -- train --config configs/small_moe.toml
+```
+
+MoE checkpoint tensor names use router/expert paths such as
+`blocks.1.ffn.router.weight` and `blocks.1.ffn.experts.0.w_gate.weight`.
+LoRA/DoRA fine-tuning for MoE weights is intentionally not enabled in Phase
+22; use dense configs for adapter workflows or train the MoE base model
+directly.
 
 ---
 

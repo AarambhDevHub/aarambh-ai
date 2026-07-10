@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.0.0-alpha.7] - 2026-07-10
+
+### Added
+
+- **Phase 22 Mixture of Experts**
+  - Added optional `MoeConfig` on `ModelConfig` with every-N-layer placement
+  - Added top-k router gating, dense masked expert dispatch, and MoE SwiGLU experts
+  - Added differentiable load-balancing auxiliary loss and per-expert utilization stats
+  - Added MoE tensor naming for router/expert checkpoints and GGUF roundtrips
+  - Added `configs/moe_smoke.toml` and `configs/small_moe.toml`
+
+### Changed
+
+- Trainer loss now adds `aux_loss_weight * moe_aux_loss` when MoE layers are active
+- MoE training logs include `ce_loss`, `moe_aux`, and `expert_util=[...]`
+- LoRA/DoRA/self-learning adapter updates now reject MoE configs clearly in Phase 22
+
+### Verified
+
+- `cargo fmt --all --check`
+- `cargo check -p aarambh-ai-nn -p aarambh-ai-model -p aarambh-ai-train`
+- `cargo check --workspace`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test -p aarambh-ai-nn -p aarambh-ai-model`
+- `cargo test -p aarambh-ai-train -p aarambh-ai-weights -p aarambh-ai-finetune -p aarambh-ai-selflearn`
+- `cargo test --workspace`
+- `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
+- `cargo run --release -p aarambh-ai -- train --config configs/moe_smoke.toml`
+- `cargo run --release -p aarambh-ai -- infer --config configs/moe_smoke.toml --model checkpoints/moe_smoke/step_000002/model.safetensors --tokenizer checkpoints/moe_smoke/tokenizer.json --prompt "Hello" --max-tokens 4 --greedy --safety none`
+
 ## [2.0.0-alpha.6] - 2026-07-10
 
 ### Added

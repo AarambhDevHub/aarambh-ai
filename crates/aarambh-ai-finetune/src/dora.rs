@@ -194,6 +194,11 @@ impl DoraAarambhModel {
         device: &Device,
     ) -> Result<(Self, VarMap)> {
         AarambhModel::validate_config(config)?;
+        if config.moe.is_some() {
+            return Err(AarambhError::Config(
+                "DoRA for MoE models is not supported in Phase 22; train the MoE base model directly or use a dense config".into(),
+            ));
+        }
         dora_config.validate()?;
         let varmap = VarMap::new();
         let embedding_weight = required_tensor(tensors, "embedding.weight")?;
@@ -746,6 +751,7 @@ mod tests {
             max_seq_len: 8,
             rope_theta: 10000.0,
             rope_scaling: None,
+            moe: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }

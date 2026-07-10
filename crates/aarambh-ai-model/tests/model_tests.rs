@@ -1,4 +1,4 @@
-use aarambh_ai_core::{ModelConfig, RopeScalingConfig, RopeScalingMethod};
+use aarambh_ai_core::{ModelConfig, MoeConfig, RopeScalingConfig, RopeScalingMethod};
 use aarambh_ai_model::AarambhModel;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{VarBuilder, VarMap};
@@ -14,6 +14,7 @@ fn mini_config() -> ModelConfig {
         max_seq_len: 16,
         rope_theta: 10000.0,
         rope_scaling: None,
+        moe: None,
         norm_eps: 1e-5,
         tie_embeddings: true,
     }
@@ -37,6 +38,19 @@ fn scaled_mini_config() -> ModelConfig {
             attn_factor: 1.0,
         }),
         max_seq_len: 16,
+        ..mini_config()
+    }
+}
+
+fn moe_mini_config() -> ModelConfig {
+    ModelConfig {
+        moe: Some(MoeConfig {
+            num_experts: 4,
+            top_k: 2,
+            expert_ffn_dim: 64,
+            aux_loss_weight: 0.01,
+            every_n_layers: 2,
+        }),
         ..mini_config()
     }
 }
@@ -109,6 +123,69 @@ fn cached_forward_matches_full_forward_for_next_token() {
         .to_scalar::<f32>()
         .unwrap();
     assert!(max_diff < 1e-4, "cached/full mismatch: {max_diff}");
+}
+
+#[test]
+fn moe_forward_produces_correct_shape_and_aux_loss() {
+    let device = Device::Cpu;
+    let cfg = moe_mini_config();
+    let varmap = VarMap::new();
+    let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
+    let model = AarambhModel::new(&cfg, vb).unwrap();
+    let ids = Tensor::from_vec(vec![1u32, 2, 3, 4, 5, 6], (1, 6), &device).unwrap();
+    let output = model.forward_train_with_aux(&ids).unwrap();
+    assert_eq!(output.logits.shape().dims(), &[1, 6, cfg.vocab_size]);
+    assert!(output.moe_aux_loss.is_some());
+    assert_eq!(output.expert_utilization.len(), 4);
+}
+
+#[test]
+fn moe_cached_forward_matches_full_forward_for_next_token() {
+    let device = Device::Cpu;
+    let cfg = moe_mini_config();
+    let varmap = VarMap::new();
+    let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
+    let model = AarambhModel::new(&cfg, vb).unwrap();
+    let ids = Tensor::from_vec(vec![7u32, 8, 9, 10], (1, 4), &device).unwrap();
+    let full_logits = model.forward(&ids).unwrap();
+    let full_last = full_logits.narrow(1, 3, 1).unwrap();
+
+    let mut caches = model.empty_kv_cache();
+    let mut cached_last = None;
+    for pos in 0..4 {
+        let token = ids.narrow(1, pos, 1).unwrap();
+        cached_last = Some(model.forward_with_cache(&token, pos, &mut caches).unwrap());
+    }
+
+    let cached_last = cached_last.unwrap();
+    let max_diff = (full_last - cached_last)
+        .unwrap()
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    assert!(max_diff < 1e-4, "cached/full mismatch: {max_diff}");
+}
+
+#[test]
+fn moe_tensor_names_use_router_and_expert_paths() {
+    let device = Device::Cpu;
+    let cfg = moe_mini_config();
+    let varmap = VarMap::new();
+    let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
+    let model = AarambhModel::new(&cfg, vb).unwrap();
+    let tensors = model.named_tensors();
+    assert!(tensors.contains_key("blocks.0.ffn.w_gate.weight"));
+    assert!(tensors.contains_key("blocks.1.ffn.router.weight"));
+    assert!(tensors.contains_key("blocks.1.ffn.experts.0.w_gate.weight"));
+    assert!(
+        model
+            .get_weight("blocks.1.ffn.experts.3.w_down.weight")
+            .is_some()
+    );
+    assert!(model.get_weight("blocks.1.ffn.w_gate.weight").is_none());
 }
 
 #[test]
