@@ -30,7 +30,7 @@ Phase 17 →  Evaluation harness                 (7–10 days)   [i3 + Kaggle]
 Phase 18 →  DoRA fine-tuning                    (7–10 days)   [i3 + Kaggle]
 Phase 19 →  Vision encoder + projector          (10–14 days)  [Kaggle] ✅
 Phase 20 →  Vision-language training            (10–14 days)  [Kaggle] ✅
-Phase 21 →  Vision-aware self-learning          (7–10 days)   [Kaggle only]
+Phase 21 →  Vision-aware self-learning          (7–10 days)   [Kaggle only] ✅
 Phase 22 →  Mixture of Experts                  (10–14 days)  [Kaggle]
 Phase 23 →  Multi-GPU training                  (7–10 days)   [Kaggle 2×T4]
 Phase 24 →  DPO preference tuning               (7–10 days)   [Kaggle]
@@ -571,24 +571,24 @@ turn pushes memory well past the i3's comfortable CPU-safe envelope.
 
 **`aarambh-ai-selflearn`:**
 ```
-[ ] src/replay_buffer.rs
-      Extend ReplayEntry with `image_ref: Option<PathBuf>` (or cached
-      embedding path, to avoid re-running the frozen encoder on every replay)
+[x] src/replay.rs + src/vision_cache.rs
+      Extend ReplayEntry with `image_ref: Option<PathBuf>` and cache projected
+      image tokens to avoid re-running frozen encoder/projector work on replay
       Schema version bump: replay_buffer_v2.jsonl, v1 files load unchanged
       with image_ref = None
 
-[ ] src/vision_verifier.rs
+[x] src/vision_verifier.rs
       Grounded verifier for checkable VQA task types only (counting,
       color, yes/no presence questions) — analogous to Phase 10/12's
       MathVerifier/CodeVerifier pattern, NOT open-ended self-critique
       Open-ended image description falls back to existing self-critique,
       with the same noise caveats already documented for text
 
-[ ] src/online_grpo.rs
+[x] src/online_grpo.rs
       Extend online GRPO scoring to accept an optional vision_verifier;
       when absent, behavior is identical to today's text-only path
 
-[ ] src/gating.rs
+[x] src/gating.rs
       require_hardware(Hardware::Kaggle) guard on any self-learn session
       that includes image turns; CLI errors clearly on i3 rather than
       silently degrading or OOMing
@@ -596,9 +596,9 @@ turn pushes memory well past the i3's comfortable CPU-safe envelope.
 
 **CLI:**
 ```
-[ ] aarambh-ai selflearn start --mode vision   (Kaggle only, errors on i3 with
+[x] aarambh-ai selflearn start --mode vision   (Kaggle only, errors on i3 with
                                                  a clear message pointing here)
-[ ] aarambh-ai selflearn stats --mode vision
+[x] aarambh-ai selflearn stats --mode vision
 ```
 
 ### Tests
@@ -1074,7 +1074,7 @@ git commit -m "chore: v2.0.0 — crates.io publish, source release"
 | 18 | DoRA | Weight-decomposed LoRA in `aarambh-ai-finetune` | i3 + Kaggle | 7–10 days |
 | 19 | Vision Encoder + Projector | ✅ New `aarambh-ai-vision` crate, frozen ViT + trainable projector | Kaggle | 10–14 days |
 | 20 | Vision-Language Training | ✅ VQA instruction tuning via DoRA-adapted VLM | Kaggle | 10–14 days |
-| 21 | Vision-Aware Self-Learning | Image-grounded replay + verifier, Kaggle-only | Kaggle only | 7–10 days |
+| 21 | Vision-Aware Self-Learning | ✅ Image-grounded replay + verifier, Kaggle-only | Kaggle only | 7–10 days |
 | 22 | Mixture of Experts | Top-k router, load-balancing loss | Kaggle | 10–14 days |
 | 23 | Multi-GPU Training | Data-parallel training via NCCL | Kaggle 2×T4 | 7–10 days |
 | 24 | DPO Preference Tuning | Preference optimization alongside GRPO | Kaggle | 7–10 days |

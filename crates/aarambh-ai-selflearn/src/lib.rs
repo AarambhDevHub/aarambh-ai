@@ -5,6 +5,8 @@
 pub mod config;
 /// Critique parsing and scoring helpers.
 pub mod critique;
+/// Hardware gating for expensive self-learning modes.
+pub mod gating;
 /// High-level self-learning orchestration.
 pub mod learning_loop;
 /// Learning metric tracking.
@@ -13,10 +15,17 @@ pub mod metrics;
 pub mod online_grpo;
 /// Replay buffer persistence and sampling.
 pub mod replay;
+/// Projected image-token cache for vision replay.
+pub mod vision_cache;
+/// Grounded verifiers for checkable vision questions.
+pub mod vision_verifier;
 
 pub use config::{CritiqueConfig, OnlineGrpoConfig, ReplayConfig, SelfLearnConfig, SelfLearnMode};
 pub use critique::{CritiqueResult, critique_response, parse_critique_response};
+pub use gating::{Hardware, require_vision_hardware};
 pub use learning_loop::{SelfLearnBuildConfig, SelfLearnDraft, SelfLearnLoop, SelfLearnResponse};
 pub use metrics::{LearningMetrics, TrendDirection};
 pub use online_grpo::{OnlineGrpo, OnlineGrpoBuildConfig, OnlineUpdate, generate_lora};
 pub use replay::{ReplayBuffer, ReplayEntry, ReplayStats, infer_topic};
+pub use vision_cache::VisionCache;
+pub use vision_verifier::{VisionVerifier, VisionVerifierKind};

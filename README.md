@@ -42,6 +42,7 @@ v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, an
 | Evaluation harness: PPL, MMLU-lite, HellaSwag, GSM8K, HumanEval-lite scorecards | Phase 17 ✅ |
 | Vision encoder + projector: CLIP ViT, image preprocessing, projector pretrain, `infer --image` | Phase 19 ✅ |
 | Vision-language instruction tuning: VQA JSONL/LLaVA data, VLM DoRA/QDoRA, VQA eval | Phase 20 ✅ |
+| Vision-aware self-learning: image replay cache, grounded VQA verifier, CUDA gate | Phase 21 ✅ |
 
 ---
 
@@ -459,6 +460,44 @@ cargo run --release -p aarambh-ai -- selflearn replay \
   --self-learn-state-dir adapters/selflearn
 ```
 
+Phase 21 extends self-learning to image-grounded turns on Kaggle/CUDA only.
+It caches frozen projected image tokens in the self-learning state directory,
+stores `image_ref` in replay JSONL, and uses grounded verifiers for checkable
+VQA questions. Text-only self-learning remains CPU-safe and unchanged.
+
+```sh
+# Local gate smoke: this should fail clearly on CPU, proving vision mode will not silently OOM.
+cargo run --release -p aarambh-ai -- selflearn start \
+  --mode vision \
+  --config configs/selflearn_vision_smoke.toml \
+  --model checkpoints/vision_vqa_smoke_merged/model.safetensors \
+  --tokenizer checkpoints/vision_projector_smoke/tokenizer.json \
+  --prompt "What color is the square?" \
+  --image data/vision_smoke/images/red_square.png \
+  --self-learn-vision-verifier color \
+  --self-learn-ground-truth red \
+  --safety none
+
+# Kaggle/CUDA vision self-learning turn.
+cargo run --release --features cuda -p aarambh-ai -- infer \
+  --config configs/selflearn_vision.toml \
+  --model checkpoints/vision_vqa_merged/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --image data/llava/images/example.jpg \
+  --prompt "What color is the car?" \
+  --max-tokens 32 \
+  --self-learn gpu \
+  --self-learn-vision-verifier color \
+  --self-learn-ground-truth red \
+  --replay-path data/replay_buffer_v2.jsonl \
+  --self-learn-state-dir adapters/selflearn_vision
+
+cargo run --release -p aarambh-ai -- selflearn stats \
+  --mode vision \
+  --replay-path data/replay_buffer_v2.jsonl \
+  --self-learn-state-dir adapters/selflearn_vision
+```
+
 ---
 
 ## Quantise And Convert
@@ -827,6 +866,7 @@ aarambh-ai/
 | 18 | DoRA/QDoRA fine-tuning | i3 + GPU | ✅ |
 | 19 | Vision encoder + projector | GPU | ✅ |
 | 20 | Vision-language instruction tuning | GPU | ✅ |
+| 21 | Vision-aware self-learning | GPU | ✅ |
 
 See [ROADMAP.md](ROADMAP.md) for the full phased delivery plan with tests and milestones.
 

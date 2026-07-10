@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.0.0-alpha.6] - 2026-07-10
+
+### Added
+
+- **Phase 21 Vision-Aware Self-Learning**
+  - Added `image_ref` replay entries with backward-compatible v1 JSONL loading
+  - Added projected image-token cache under the self-learning state directory
+  - Added grounded vision verifiers for count, color, yes/no presence, and exact VQA answers
+  - Added CUDA-only vision self-learning gate so CPU text self-learning remains unchanged
+  - Added multimodal LoRA generation, vision GRPO scoring, and cached vision replay SFT
+  - Added `selflearn start --mode vision` and `selflearn stats --mode vision`
+
+### Changed
+
+- `infer --image --self-learn gpu` now runs the vision-aware self-learning path instead of rejecting the combination
+- Open-ended vision prompts fall back to existing self-critique; checkable VQA prompts can use deterministic grounded rewards
+- `SELF_LEARNING_V2.md`, README, and ROADMAP_V2 now document projected-token caching and the Kaggle/CUDA requirement
+
+### Verified
+
+- `cargo fmt --all --check`
+- `cargo check -p aarambh-ai-selflearn -p aarambh-ai`
+- `cargo check --workspace`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test -p aarambh-ai-selflearn`
+- `cargo test --workspace`
+- `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
+- Local CPU smoke gate for `selflearn start --mode vision` fails clearly with the Kaggle/CUDA requirement
+
 ## [2.0.0-alpha.5] - 2026-07-06
 
 ### Added

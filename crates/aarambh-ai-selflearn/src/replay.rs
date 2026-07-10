@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use aarambh_ai_core::{AarambhError, Result};
 use rand::distributions::WeightedIndex;
@@ -27,11 +27,24 @@ pub struct ReplayEntry {
     pub timestamp: u64,
     /// Inferred topic label.
     pub topic: String,
+    /// Optional cached projected image-token reference for vision replay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_ref: Option<PathBuf>,
 }
 
 impl ReplayEntry {
     /// Create a replay entry and infer its topic.
     pub fn new(prompt: impl Into<String>, response: impl Into<String>, score: f32) -> Self {
+        Self::new_with_image_ref(prompt, response, score, None)
+    }
+
+    /// Create a replay entry with an optional cached image-token reference.
+    pub fn new_with_image_ref(
+        prompt: impl Into<String>,
+        response: impl Into<String>,
+        score: f32,
+        image_ref: Option<PathBuf>,
+    ) -> Self {
         let prompt = prompt.into();
         Self {
             topic: infer_topic(&prompt),
@@ -39,7 +52,13 @@ impl ReplayEntry {
             response: response.into(),
             score: score.clamp(0.0, 1.0),
             timestamp: now_unix_seconds(),
+            image_ref,
         }
+    }
+
+    /// Return true when this replay entry came from a vision turn.
+    pub fn is_vision(&self) -> bool {
+        self.image_ref.is_some()
     }
 }
 
@@ -247,6 +266,13 @@ pub fn infer_topic(prompt: &str) -> String {
     let text = prompt.to_ascii_lowercase();
     if contains_any(
         &text,
+        &[
+            "<image>", "image", "picture", "photo", "visible", "color", "colour",
+        ],
+    ) {
+        "vision".into()
+    } else if contains_any(
+        &text,
         &["solve", "calculate", "equation", "math", "+", "-", "*", "/"],
     ) {
         "math".into()
@@ -302,6 +328,7 @@ mod tests {
             score,
             timestamp: 1,
             topic: topic.into(),
+            image_ref: None,
         }
     }
 
@@ -361,6 +388,46 @@ mod tests {
         let _ = fs::remove_file(path);
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded.entries()[0].prompt, "Hello");
+        assert_eq!(loaded.entries()[0].image_ref, None);
+    }
+
+    #[test]
+    fn v1_replay_buffer_loads_with_image_ref_defaulting_to_none() {
+        let path =
+            std::env::temp_dir().join(format!("aarambh_replay_v1_{}.jsonl", std::process::id()));
+        fs::write(
+            &path,
+            r#"{"prompt":"What is recursion?","response":"A loop of calls.","score":0.9,"timestamp":1,"topic":"code"}"#,
+        )
+        .unwrap();
+        let loaded = ReplayBuffer::load_jsonl(&path, config(3, 0.0)).unwrap();
+        let _ = fs::remove_file(path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded.entries()[0].image_ref, None);
+    }
+
+    #[test]
+    fn vision_replay_entry_persists_image_ref() {
+        let path =
+            std::env::temp_dir().join(format!("aarambh_replay_v2_{}.jsonl", std::process::id()));
+        let mut cfg = config(3, 0.0);
+        cfg.path = path.clone();
+        let entry = ReplayEntry::new_with_image_ref(
+            "<image> What color?",
+            "red",
+            0.95,
+            Some(PathBuf::from("vision_cache/red.safetensors")),
+        );
+        let mut buffer = ReplayBuffer::new(cfg.clone());
+        assert!(buffer.push(entry));
+        buffer.save_jsonl(&path).unwrap();
+        let loaded = ReplayBuffer::load_jsonl(&path, cfg).unwrap();
+        let _ = fs::remove_file(path);
+        assert!(loaded.entries()[0].is_vision());
+        assert_eq!(
+            loaded.entries()[0].image_ref.as_deref(),
+            Some(Path::new("vision_cache/red.safetensors"))
+        );
     }
 
     #[test]
@@ -369,5 +436,6 @@ mod tests {
         assert_eq!(infer_topic("Write Rust code"), "code");
         assert_eq!(infer_topic("Why is the sky blue?"), "reasoning");
         assert_eq!(infer_topic("Write a poem"), "creative");
+        assert_eq!(infer_topic("<image> What color is this?"), "vision");
     }
 }

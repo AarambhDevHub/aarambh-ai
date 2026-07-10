@@ -72,16 +72,17 @@ v1's replay entries (`SELF_LEARNING.md` §6) are plain JSONL:
 v2.0 adds one optional field:
 
 ```json
-{"prompt": "How many cats are in this image?", "response": "There are 3 cats.", "score": 0.95, "timestamp": 1719000000, "topic": "vision", "image_ref": "cache/img_a1b2c3.safetensors"}
+{"prompt": "How many cats are in this image?", "response": "There are 3 cats.", "score": 0.95, "timestamp": 1719000000, "topic": "vision", "image_ref": "vision_cache/img_a1b2c3.safetensors"}
 ```
 
-`image_ref` points to a **cached vision embedding**, not the raw image
-file — the frozen ViT encoder's output for that image, saved once at
-first use. This matters for replay specifically: replay fine-tuning
-resamples the same entries repeatedly, and re-running the frozen encoder
-forward pass on every replay batch would be pure wasted compute for a
-component that never changes. Caching the embedding once and reusing it
-is both faster and exactly correct, since the encoder is frozen.
+`image_ref` points to **cached projected image tokens**, not the raw image
+file — the frozen ViT encoder output after the frozen Phase 20 projector has
+mapped it into language-model hidden width. This matters for replay
+specifically: replay fine-tuning resamples the same entries repeatedly, and
+re-running the frozen encoder/projector path on every replay batch would be
+pure wasted compute for components that do not change during Phase 21.
+Caching projected tokens once and reusing them is both faster and exactly
+correct while the encoder and projector stay frozen.
 
 **Schema versioning:** the buffer file gains a `replay_buffer_v2.jsonl`
 name for sessions that include any vision entries. Existing
@@ -198,7 +199,7 @@ User provides prompt + image
          ▼
 Vision encoder (frozen) → image embeddings
   (cached: if this exact image was seen before, reuse the cached
-   embedding instead of re-running the encoder — §16)
+   projected image tokens instead of re-running encoder/projector — §16)
          │
          ▼
 Projector (frozen at inference time — training only in Phase 20's
@@ -226,14 +227,19 @@ VisionVerifier              Self-critique
      High-scoring entries → replay buffer (image_ref cached, §16)
                  ▼
      Periodic replay fine-tune (same SFT-on-replay mechanism as v1 §6,
-     reusing cached embeddings — no repeated encoder forward passes)
+     reusing cached projected tokens — no repeated encoder/projector passes)
 ```
 
 ## 21. CLI Commands (Vision Mode)
 
 ```sh
-# Start a vision-capable self-learning session (Kaggle only)
-aarambh-ai selflearn start --mode vision --config configs/selflearn_vision.toml
+# Start one vision-capable self-learning turn (Kaggle only)
+aarambh-ai selflearn start --mode vision \
+  --config configs/selflearn_vision.toml \
+  --prompt "What color is the car?" \
+  --image data/llava/images/example.jpg \
+  --self-learn-vision-verifier color \
+  --self-learn-ground-truth red
 
 # Text-only session — unchanged from v1, works on i3
 aarambh-ai selflearn start --mode text --config configs/selflearn_cpu.toml
@@ -260,7 +266,8 @@ crates/aarambh-ai-selflearn/
 └── src/
     ├── ...lib.rs, config.rs, learning_loop.rs, online_grpo.rs,
     │     critique.rs, replay.rs, metrics.rs — all unchanged from v1...
-    ├── replay_buffer.rs   ← NEW: v2 schema extension (image_ref), v1-compatible load path
+    ├── replay.rs          ← EXTENDED: v2 schema extension (image_ref), v1-compatible load path
+    ├── vision_cache.rs    ← NEW: projected image-token cache for replay
     ├── vision_verifier.rs ← NEW: VisionVerifier trait + checkable-question implementations
     ├── online_grpo.rs     ← EXTENDED: optional vision_verifier field on OnlineGrpoConfig
     └── gating.rs          ← NEW: require_hardware() guard for vision-mode sessions
@@ -279,7 +286,7 @@ safety layer continues to apply at the binary level, not inside
 Mirrors the shape of `SELF_LEARNING.md` §12, with vision-specific timing.
 
 ### Turn 1–50 (early)
-Encoder embeddings get cached as new images are seen. Checkable-question
+Projected image tokens get cached as new images are seen. Checkable-question
 scores are noisy but meaningful (real ground truth, small model). Open-
 ended scores are noisy in the same way v1 §12 describes for text — self-
 critique hasn't accumulated enough replay signal yet.
@@ -289,8 +296,8 @@ Cache hit rate rises as repeated/similar images get reused. Checkable-
 question accuracy trend becomes visible in `selflearn stats`.
 
 ### Turn 200+ (first Kaggle-scale flush)
-Replay fine-tune runs against cached embeddings — no repeated encoder
-forward passes, so this stays close to v1's replay-fine-tune cost
+Replay fine-tune runs against cached projected image tokens — no repeated
+encoder/projector forward passes, so this stays close to v1's replay-fine-tune cost
 (`SELF_LEARNING.md` §6) despite the added modality.
 
 ### Steady state
@@ -311,10 +318,10 @@ Open, subjective, or free-form questions about a user's own uploaded
 images have no ground truth to check against, and fall back to
 self-critique with the same noise already documented for text.
 
-**Cached embeddings assume a frozen encoder.** If the vision encoder is
-ever fine-tuned in a future version, every cached embedding in the replay
-buffer becomes stale and must be recomputed. As long as the encoder stays
-frozen (the v2.0 design, `ARCHITECTURE_V2.md` §24), this is a non-issue.
+**Cached projected tokens assume a frozen encoder and projector.** If either
+component is ever fine-tuned in a future version, every cached projected token
+file in the replay buffer becomes stale and must be recomputed. As long as both
+stay frozen during self-learning (the Phase 21 design), this is a non-issue.
 
 **Kaggle-only means self-learning sessions cannot span both modes on one
 machine mid-session.** A user on i3 who wants to add images to an ongoing
