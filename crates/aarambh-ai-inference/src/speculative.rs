@@ -4,6 +4,7 @@ use aarambh_ai_core::{AarambhError, Configurable, Result, TokenizerLike};
 use aarambh_ai_tokenizer::{BpeTokenizer, THINK_END_ID, THINK_START_ID};
 use candle_core::{DType, Tensor};
 
+use crate::tool_calling::{TokenConstraint, ToolCall, ToolCallController, ToolPhase};
 use crate::{
     FinishReason, GenerationConfig, GenerationOutput, GenerationPhase, GenerationStep,
     InferenceEngine, KvCache, Sampler, ThinkingController, ThinkingMode, TokenCandidate,
@@ -165,7 +166,11 @@ impl SpeculativeEngine {
     where
         F: FnMut(&GenerationStep) -> Result<()>,
     {
-        let mut prompt_ids = self.tokenizer().encode(prompt)?;
+        let effective_prompt = match &config.tool_calling {
+            Some(tools) => tools.render_prompt(prompt)?,
+            None => prompt.to_string(),
+        };
+        let mut prompt_ids = self.tokenizer().encode(&effective_prompt)?;
         if prompt_ids.is_empty() {
             prompt_ids.push(self.tokenizer().bos_token_id().ok_or_else(|| {
                 AarambhError::Config(
@@ -186,9 +191,24 @@ impl SpeculativeEngine {
         let available = max_seq_len - prompt_ids.len();
         let max_new_tokens = config.max_new_tokens.min(available);
         let mut stats = SpeculativeStats::default();
+        let mut controller = match config.tool_calling.clone() {
+            Some(tools) => DecodeController::Tools(ToolCallController::new(
+                config.thinking_mode,
+                max_new_tokens,
+                tools,
+                self.tokenizer(),
+            )?),
+            None => DecodeController::Thinking(ThinkingController::for_generation(
+                config.thinking_mode,
+                max_new_tokens,
+            )),
+        };
         if max_new_tokens == 0 {
-            return Ok(OutputState::new(0, config.thinking_mode)
-                .finish(FinishReason::ContextLimit, Some(stats)));
+            return OutputState::new(0, config.thinking_mode).finish(
+                FinishReason::ContextLimit,
+                Some(stats),
+                &controller,
+            );
         }
 
         let device = self.target.device();
@@ -207,7 +227,6 @@ impl SpeculativeEngine {
         let mut draft_next = last_logits(&draft_logits)?;
         let mut pending_target_token = None;
         let mut output = OutputState::new(max_new_tokens, config.thinking_mode);
-        let mut thinking = ThinkingController::for_generation(config.thinking_mode, max_new_tokens);
         let eos = self.tokenizer().eos_token_id();
         let mut finish_reason = FinishReason::MaxTokens;
 
@@ -222,12 +241,17 @@ impl SpeculativeEngine {
             );
             debug_assert_eq!(draft_cache.seqlen(), committed_len);
 
-            let mut proposal_state = thinking.clone();
+            let mut proposal_state = controller.clone();
             let mut proposals = Vec::with_capacity(proposal_count);
             for _ in 0..proposal_count {
                 let logits = draft_next.to_vec1::<f32>()?;
-                let (distribution, forced) =
-                    constrained_distribution(&config.sampler, &logits, &mut proposal_state, eos)?;
+                let (distribution, forced) = constrained_distribution(
+                    &config.sampler,
+                    &logits,
+                    &mut proposal_state,
+                    eos,
+                    self.tokenizer(),
+                )?;
                 let token_id = config.sampler.sample_probabilities(&distribution)?;
                 proposals.push(Proposal {
                     token_id,
@@ -235,10 +259,11 @@ impl SpeculativeEngine {
                     forced,
                 });
                 stats.draft_tokens_proposed += 1;
-                if token_id == eos && !proposal_state.in_thinking_block() {
+                if token_id == eos && proposal_state.eos_terminates() {
                     break;
                 }
-                proposal_state.on_token(token_id);
+                let token_text = proposal_state.token_text(token_id, self.tokenizer())?;
+                proposal_state.on_token(token_id, &token_text, self.tokenizer())?;
                 let offset = draft_cache.seqlen();
                 let input = Tensor::from_vec(vec![token_id], (1, 1), device)?;
                 let logits = self.draft.model().forward_with_cache(
@@ -248,6 +273,9 @@ impl SpeculativeEngine {
                 )?;
                 draft_next = last_logits(&logits)?;
                 stats.draft_decode_forwards += 1;
+                if proposal_state.tool_complete() {
+                    break;
+                }
             }
 
             let mut target_input_ids =
@@ -281,28 +309,27 @@ impl SpeculativeEngine {
                         .to_vec1::<f32>()?;
                     &initial_target_logits
                 };
-                let (target_distribution, target_forced) =
-                    constrained_distribution(&config.sampler, target_logits, &mut thinking, eos)?;
+                let (target_distribution, target_forced) = constrained_distribution(
+                    &config.sampler,
+                    target_logits,
+                    &mut controller,
+                    eos,
+                    self.tokenizer(),
+                )?;
                 let accepted = accept_proposal(
                     &mut config.sampler,
                     proposal.token_id,
                     &proposal.distribution,
                     &target_distribution,
                 );
-                let candidates = if config.sampler.is_deterministic() {
-                    config
-                        .sampler
-                        .top_candidates(target_logits, config.top_candidates)?
-                } else {
-                    Sampler::top_candidates_from_probabilities(
-                        &target_distribution,
-                        config.top_candidates,
-                    )?
-                };
+                let candidates = Sampler::top_candidates_from_probabilities(
+                    &target_distribution,
+                    config.top_candidates,
+                )?;
 
                 if accepted {
                     stats.draft_tokens_accepted += 1;
-                    if proposal.token_id == eos && !thinking.in_thinking_block() {
+                    if proposal.token_id == eos && controller.eos_terminates() {
                         finish_reason = FinishReason::EosToken;
                         break 'generation;
                     }
@@ -310,10 +337,14 @@ impl SpeculativeEngine {
                         proposal.token_id,
                         candidates,
                         target_forced || proposal.forced,
-                        &mut thinking,
+                        &mut controller,
                         self.tokenizer(),
                         &mut on_step,
                     )?;
+                    if controller.tool_complete() {
+                        finish_reason = FinishReason::ToolCall;
+                        break 'generation;
+                    }
                     if output.token_ids.len() == max_new_tokens {
                         break 'generation;
                     }
@@ -331,7 +362,7 @@ impl SpeculativeEngine {
                 let accepted_before = index;
                 target_cache.truncate(committed_len + accepted_before)?;
                 draft_cache.truncate(committed_len + accepted_before)?;
-                if replacement == eos && !thinking.in_thinking_block() {
+                if replacement == eos && controller.eos_terminates() {
                     finish_reason = FinishReason::EosToken;
                     break 'generation;
                 }
@@ -339,10 +370,14 @@ impl SpeculativeEngine {
                     replacement,
                     candidates,
                     target_forced,
-                    &mut thinking,
+                    &mut controller,
                     self.tokenizer(),
                     &mut on_step,
                 )?;
+                if controller.tool_complete() {
+                    finish_reason = FinishReason::ToolCall;
+                    break 'generation;
+                }
                 let input = Tensor::from_vec(vec![replacement], (1, 1), device)?;
                 let offset = draft_cache.seqlen();
                 let logits = self.draft.model().forward_with_cache(
@@ -366,20 +401,19 @@ impl SpeculativeEngine {
 
             let bonus_index = proposals.len() - usize::from(!has_pending);
             let bonus_logits = &verified_rows[bonus_index];
-            let (bonus_distribution, forced) =
-                constrained_distribution(&config.sampler, bonus_logits, &mut thinking, eos)?;
-            let candidates = if config.sampler.is_deterministic() {
-                config
-                    .sampler
-                    .top_candidates(bonus_logits, config.top_candidates)?
-            } else {
-                Sampler::top_candidates_from_probabilities(
-                    &bonus_distribution,
-                    config.top_candidates,
-                )?
-            };
+            let (bonus_distribution, forced) = constrained_distribution(
+                &config.sampler,
+                bonus_logits,
+                &mut controller,
+                eos,
+                self.tokenizer(),
+            )?;
+            let candidates = Sampler::top_candidates_from_probabilities(
+                &bonus_distribution,
+                config.top_candidates,
+            )?;
             let bonus = config.sampler.sample_probabilities(&bonus_distribution)?;
-            if bonus == eos && !thinking.in_thinking_block() {
+            if bonus == eos && controller.eos_terminates() {
                 finish_reason = FinishReason::EosToken;
                 break;
             }
@@ -387,10 +421,14 @@ impl SpeculativeEngine {
                 bonus,
                 candidates,
                 forced,
-                &mut thinking,
+                &mut controller,
                 self.tokenizer(),
                 &mut on_step,
             )?;
+            if controller.tool_complete() {
+                finish_reason = FinishReason::ToolCall;
+                break;
+            }
             let input = Tensor::from_vec(vec![bonus], (1, 1), device)?;
             let offset = draft_cache.seqlen();
             let logits =
@@ -409,7 +447,12 @@ impl SpeculativeEngine {
         stats.draft_tokens_rejected = stats
             .draft_tokens_proposed
             .saturating_sub(stats.draft_tokens_accepted);
-        Ok(output.finish(finish_reason, Some(stats)))
+        if finish_reason != FinishReason::ToolCall && !controller.action_is_resolved() {
+            return Err(AarambhError::Config(
+                "generation ended before the constrained tool action completed".into(),
+            ));
+        }
+        output.finish(finish_reason, Some(stats), &controller)
     }
 }
 
@@ -426,6 +469,7 @@ struct OutputState {
     answer_text: String,
     thinking_token_ids: Vec<u32>,
     answer_token_ids: Vec<u32>,
+    tool_text: String,
     steps: Vec<GenerationStep>,
     thinking_mode: ThinkingMode,
 }
@@ -439,6 +483,7 @@ impl OutputState {
             answer_text: String::new(),
             thinking_token_ids: Vec::new(),
             answer_token_ids: Vec::new(),
+            tool_text: String::new(),
             steps: Vec::with_capacity(capacity),
             thinking_mode,
         }
@@ -450,15 +495,15 @@ impl OutputState {
         token_id: u32,
         candidates: Vec<TokenCandidate>,
         forced: bool,
-        thinking: &mut ThinkingController,
+        controller: &mut DecodeController,
         tokenizer: &BpeTokenizer,
         on_step: &mut F,
     ) -> Result<()>
     where
         F: FnMut(&GenerationStep) -> Result<()>,
     {
-        let phase = phase_for_token(thinking, self.thinking_mode, token_id);
-        let token_text = tokenizer.decode(&[token_id])?;
+        let phase = controller.phase_for_next(self.thinking_mode, token_id);
+        let token_text = controller.token_text(token_id, tokenizer)?;
         let step = GenerationStep {
             step: self.token_ids.len() + 1,
             token_id,
@@ -468,7 +513,7 @@ impl OutputState {
             forced,
         };
         on_step(&step)?;
-        thinking.on_token(token_id);
+        controller.on_token(token_id, &token_text, tokenizer)?;
         self.token_ids.push(token_id);
         self.raw_text.push_str(&token_text);
         if phase == GenerationPhase::Thinking && !is_thinking_marker(token_id) {
@@ -477,6 +522,8 @@ impl OutputState {
         } else if phase == GenerationPhase::Answer {
             self.answer_text.push_str(&token_text);
             self.answer_token_ids.push(token_id);
+        } else if phase == GenerationPhase::ToolCall {
+            self.tool_text.push_str(&token_text);
         }
         self.steps.push(step);
         Ok(())
@@ -486,10 +533,17 @@ impl OutputState {
         self,
         finish_reason: FinishReason,
         speculative_stats: Option<SpeculativeStats>,
-    ) -> GenerationOutput {
+        controller: &DecodeController,
+    ) -> Result<GenerationOutput> {
         let thinking_tokens = self.thinking_token_ids.len();
-        GenerationOutput {
-            text: self.answer_text.clone(),
+        let tool_call = controller.tool_call().cloned();
+        let text = match &tool_call {
+            Some(call) => serde_json::to_string(call)?,
+            None => self.answer_text.clone(),
+        };
+        debug_assert!(tool_call.is_none() || text == self.tool_text);
+        Ok(GenerationOutput {
+            text,
             raw_text: self.raw_text,
             thinking_text: self.thinking_text,
             answer_text: self.answer_text,
@@ -500,30 +554,38 @@ impl OutputState {
             finish_reason,
             steps: self.steps,
             speculative_stats,
-        }
+            tool_call,
+        })
     }
 }
 
 fn constrained_distribution(
     sampler: &Sampler,
     logits: &[f32],
-    thinking: &mut ThinkingController,
+    controller: &mut DecodeController,
     eos_token_id: u32,
+    tokenizer: &BpeTokenizer,
 ) -> Result<(Vec<f32>, bool)> {
-    if let Some(force) = thinking.take_forced_token() {
-        let mut probabilities = vec![0.0; logits.len()];
-        let token_id = force.token_id() as usize;
-        if token_id >= probabilities.len() {
-            return Err(AarambhError::Shape(format!(
-                "forced thinking token {token_id} exceeds vocabulary size {}",
-                probabilities.len()
-            )));
+    let constraint = controller.constraint(tokenizer)?;
+    let (mut probabilities, forced) = match constraint {
+        TokenConstraint::Any => (sampler.probabilities(logits)?, false),
+        TokenConstraint::Allowed(allowed) => {
+            (sampler.probabilities_allowed(logits, &allowed)?, false)
         }
-        probabilities[token_id] = 1.0;
-        return Ok((probabilities, true));
-    }
-    let mut probabilities = sampler.probabilities(logits)?;
-    if thinking.in_thinking_block() {
+        TokenConstraint::Forced(token_id) => {
+            let mut probabilities = vec![0.0; logits.len()];
+            let index = token_id as usize;
+            if index >= probabilities.len() {
+                return Err(AarambhError::Shape(format!(
+                    "forced token {token_id} exceeds vocabulary size {}",
+                    probabilities.len()
+                )));
+            }
+            probabilities[index] = 1.0;
+            (probabilities, true)
+        }
+    };
+    if controller.in_thinking_block() {
         let eos = eos_token_id as usize;
         let think_end = THINK_END_ID as usize;
         if eos < probabilities.len() && think_end < probabilities.len() && eos != think_end {
@@ -531,7 +593,92 @@ fn constrained_distribution(
             probabilities[eos] = 0.0;
         }
     }
-    Ok((probabilities, false))
+    Ok((probabilities, forced))
+}
+
+#[derive(Debug, Clone)]
+enum DecodeController {
+    Thinking(ThinkingController),
+    Tools(ToolCallController),
+}
+
+impl DecodeController {
+    fn constraint(&mut self, tokenizer: &BpeTokenizer) -> Result<TokenConstraint> {
+        match self {
+            Self::Thinking(thinking) => Ok(match thinking.take_forced_token() {
+                Some(force) => TokenConstraint::Forced(force.token_id()),
+                None => TokenConstraint::Any,
+            }),
+            Self::Tools(tools) => tools.constraint(tokenizer),
+        }
+    }
+
+    fn phase_for_next(&self, thinking_mode: ThinkingMode, token_id: u32) -> GenerationPhase {
+        match self {
+            Self::Thinking(thinking) => phase_for_token(thinking, thinking_mode, token_id),
+            Self::Tools(tools) => match tools.phase_for_next() {
+                ToolPhase::Thinking => GenerationPhase::Thinking,
+                ToolPhase::Control => GenerationPhase::Control,
+                ToolPhase::Answer => GenerationPhase::Answer,
+                ToolPhase::ToolCall => GenerationPhase::ToolCall,
+            },
+        }
+    }
+
+    fn on_token(
+        &mut self,
+        token_id: u32,
+        token_text: &str,
+        tokenizer: &BpeTokenizer,
+    ) -> Result<()> {
+        match self {
+            Self::Thinking(thinking) => {
+                thinking.on_token(token_id);
+                Ok(())
+            }
+            Self::Tools(tools) => tools.on_token(token_id, token_text, tokenizer),
+        }
+    }
+
+    fn in_thinking_block(&self) -> bool {
+        match self {
+            Self::Thinking(thinking) => thinking.in_thinking_block(),
+            Self::Tools(tools) => tools.thinking().in_thinking_block(),
+        }
+    }
+
+    fn tool_complete(&self) -> bool {
+        matches!(self, Self::Tools(tools) if tools.is_complete())
+    }
+
+    fn action_is_resolved(&self) -> bool {
+        match self {
+            Self::Thinking(_) => true,
+            Self::Tools(tools) => tools.action_is_resolved(),
+        }
+    }
+
+    fn tool_call(&self) -> Option<&ToolCall> {
+        match self {
+            Self::Thinking(_) => None,
+            Self::Tools(tools) => tools.tool_call(),
+        }
+    }
+
+    fn eos_terminates(&self) -> bool {
+        !self.in_thinking_block()
+            && !matches!(
+                self,
+                Self::Tools(tools) if tools.phase_for_next() == ToolPhase::ToolCall
+            )
+    }
+
+    fn token_text(&self, token_id: u32, tokenizer: &BpeTokenizer) -> Result<String> {
+        match self {
+            Self::Thinking(_) => tokenizer.decode(&[token_id]),
+            Self::Tools(tools) => tools.token_text(token_id, tokenizer),
+        }
+    }
 }
 
 fn accept_proposal(sampler: &mut Sampler, token_id: u32, draft: &[f32], target: &[f32]) -> bool {

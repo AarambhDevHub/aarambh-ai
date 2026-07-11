@@ -10,8 +10,13 @@ checkpoints/
 data/*
 !data/grpo_tiny_math.jsonl
 !data/dpo_tiny_preferences.jsonl
+!data/tool_sft_tiny.jsonl
+!data/tools_smoke.json
 !data/eval/
 data/eval/*
 !data/eval/preference/
 data/eval/preference/*
 !data/eval/preference/data.jsonl
+!data/eval/tool_calling/
+data/eval/tool_calling/*
+!data/eval/tool_calling/data.jsonl

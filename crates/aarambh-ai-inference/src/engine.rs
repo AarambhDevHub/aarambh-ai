@@ -9,6 +9,9 @@ use crate::kvcache::KvCache;
 use crate::sampler::{Sampler, TokenCandidate};
 use crate::speculative::SpeculativeStats;
 use crate::thinking::{ThinkingController, ThinkingMode};
+use crate::tool_calling::{
+    TokenConstraint, ToolCall, ToolCallController, ToolCallingConfig, ToolPhase,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Reason generation stopped.
@@ -19,6 +22,8 @@ pub enum FinishReason {
     EosToken,
     /// Model context window left no room for more tokens.
     ContextLimit,
+    /// A complete schema-valid tool call was produced.
+    ToolCall,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +33,10 @@ pub enum GenerationPhase {
     Thinking,
     /// Token belongs to the final answer span.
     Answer,
+    /// Token belongs to grammar-constrained tool-call JSON.
+    ToolCall,
+    /// Token is an internal tool-protocol marker.
+    Control,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +50,8 @@ pub struct GenerationConfig {
     pub thinking_mode: ThinkingMode,
     /// Number of top candidates to capture per step.
     pub top_candidates: usize,
+    /// Optional validated tool-calling configuration.
+    pub tool_calling: Option<ToolCallingConfig>,
 }
 
 impl GenerationConfig {
@@ -51,6 +62,7 @@ impl GenerationConfig {
             sampler: Sampler::greedy(),
             thinking_mode: ThinkingMode::None,
             top_candidates: 5,
+            tool_calling: None,
         }
     }
 }
@@ -97,6 +109,8 @@ pub struct GenerationOutput {
     pub steps: Vec<GenerationStep>,
     /// Speculative-decoding counters when a draft model was used.
     pub speculative_stats: Option<SpeculativeStats>,
+    /// Parsed function call when generation selected a tool.
+    pub tool_call: Option<ToolCall>,
 }
 
 /// Stateful autoregressive inference engine.
@@ -189,7 +203,11 @@ impl InferenceEngine {
     where
         F: FnMut(&GenerationStep) -> Result<()>,
     {
-        let prompt_ids = self.prompt_token_ids(prompt)?;
+        let effective_prompt = match &config.tool_calling {
+            Some(tools) => tools.render_prompt(prompt)?,
+            None => prompt.to_string(),
+        };
+        let prompt_ids = self.prompt_token_ids(&effective_prompt)?;
         self.generate_from_token_ids_with_callback(prompt_ids, config, on_step)
     }
 
@@ -203,6 +221,12 @@ impl InferenceEngine {
     where
         F: FnMut(&GenerationStep) -> Result<()>,
     {
+        if config.tool_calling.is_some() {
+            return Err(AarambhError::Unsupported(
+                "tool calling with precomputed or vision embeddings is not supported in Phase 26"
+                    .into(),
+            ));
+        }
         let dims = prompt_embeddings.dims();
         if dims.len() != 3 || dims[0] != 1 {
             return Err(AarambhError::Shape(format!(
@@ -321,29 +345,99 @@ impl InferenceEngine {
         let mut next_logits = seed.next_logits;
         let mut thinking =
             ThinkingController::for_generation(config.thinking_mode, seed.max_new_tokens);
+        let mut tools = config
+            .tool_calling
+            .clone()
+            .map(|tool_config| {
+                ToolCallController::new(
+                    config.thinking_mode,
+                    seed.max_new_tokens,
+                    tool_config,
+                    &self.tokenizer,
+                )
+            })
+            .transpose()?;
         let mut generated_ids = Vec::with_capacity(seed.max_new_tokens);
         let mut raw_text = String::new();
         let mut thinking_text = String::new();
         let mut answer_text = String::new();
         let mut thinking_token_ids = Vec::new();
         let mut answer_token_ids = Vec::new();
+        let mut tool_text = String::new();
         let mut steps = Vec::with_capacity(seed.max_new_tokens);
         let mut finish_reason = FinishReason::MaxTokens;
 
         for step in 0..seed.max_new_tokens {
             let logits_vec = next_logits.to_vec1::<f32>()?;
-            let candidates = config
-                .sampler
-                .top_candidates(&logits_vec, config.top_candidates)?;
-            let forced_token = thinking.take_forced_token();
-            let mut forced = forced_token.is_some();
-            let mut token_id = match forced_token {
-                Some(force) => force.token_id(),
-                None => config.sampler.sample(&logits_vec)?,
+            let (mut token_id, candidates, mut forced, phase) = if let Some(controller) = &mut tools
+            {
+                let phase = tool_phase(controller.phase_for_next());
+                match controller.constraint(&self.tokenizer)? {
+                    TokenConstraint::Any => (
+                        config.sampler.sample(&logits_vec)?,
+                        config
+                            .sampler
+                            .top_candidates(&logits_vec, config.top_candidates)?,
+                        false,
+                        phase,
+                    ),
+                    TokenConstraint::Forced(token_id) => {
+                        let mut probabilities = vec![0.0; logits_vec.len()];
+                        let index = token_id as usize;
+                        if index >= probabilities.len() {
+                            return Err(AarambhError::Shape(format!(
+                                "forced token {token_id} exceeds vocabulary size {}",
+                                probabilities.len()
+                            )));
+                        }
+                        probabilities[index] = 1.0;
+                        (
+                            token_id,
+                            Sampler::top_candidates_from_probabilities(
+                                &probabilities,
+                                config.top_candidates,
+                            )?,
+                            true,
+                            phase,
+                        )
+                    }
+                    TokenConstraint::Allowed(allowed) => {
+                        let probabilities = config
+                            .sampler
+                            .probabilities_allowed(&logits_vec, &allowed)?;
+                        (
+                            config.sampler.sample_probabilities(&probabilities)?,
+                            Sampler::top_candidates_from_probabilities(
+                                &probabilities,
+                                config.top_candidates,
+                            )?,
+                            false,
+                            phase,
+                        )
+                    }
+                }
+            } else {
+                let candidates = config
+                    .sampler
+                    .top_candidates(&logits_vec, config.top_candidates)?;
+                let forced_token = thinking.take_forced_token();
+                (
+                    match forced_token {
+                        Some(force) => force.token_id(),
+                        None => config.sampler.sample(&logits_vec)?,
+                    },
+                    candidates,
+                    forced_token.is_some(),
+                    phase_for_token(&thinking, config.thinking_mode, THINK_START_ID),
+                )
             };
 
-            if token_id == self.tokenizer.eos_token_id() {
-                if thinking.in_thinking_block() {
+            if token_id == self.tokenizer.eos_token_id() && phase != GenerationPhase::ToolCall {
+                let in_thinking = tools
+                    .as_ref()
+                    .map(|controller| controller.thinking().in_thinking_block())
+                    .unwrap_or_else(|| thinking.in_thinking_block());
+                if in_thinking {
                     token_id = THINK_END_ID;
                     forced = true;
                 } else {
@@ -352,8 +446,15 @@ impl InferenceEngine {
                 }
             }
 
-            let phase = phase_for_token(&thinking, config.thinking_mode, token_id);
-            let token_text = self.tokenizer.decode(&[token_id])?;
+            let phase = if tools.is_none() {
+                phase_for_token(&thinking, config.thinking_mode, token_id)
+            } else {
+                phase
+            };
+            let token_text = match &tools {
+                Some(controller) => controller.token_text(token_id, &self.tokenizer)?,
+                None => self.tokenizer.decode(&[token_id])?,
+            };
             let generation_step = GenerationStep {
                 step: step + 1,
                 token_id,
@@ -363,7 +464,11 @@ impl InferenceEngine {
                 forced,
             };
             on_step(&generation_step)?;
-            let _ = thinking.on_token(token_id);
+            if let Some(controller) = &mut tools {
+                controller.on_token(token_id, &token_text, &self.tokenizer)?;
+            } else {
+                let _ = thinking.on_token(token_id);
+            }
 
             generated_ids.push(token_id);
             raw_text.push_str(&token_text);
@@ -373,8 +478,15 @@ impl InferenceEngine {
             } else if phase == GenerationPhase::Answer {
                 answer_text.push_str(&token_text);
                 answer_token_ids.push(token_id);
+            } else if phase == GenerationPhase::ToolCall {
+                tool_text.push_str(&token_text);
             }
             steps.push(generation_step);
+
+            if tools.as_ref().is_some_and(ToolCallController::is_complete) {
+                finish_reason = FinishReason::ToolCall;
+                break;
+            }
 
             if step + 1 == seed.max_new_tokens {
                 if generated_ids.len() == seed.available {
@@ -391,18 +503,41 @@ impl InferenceEngine {
             next_logits = last_logits(&logits)?;
         }
 
+        if finish_reason != FinishReason::ToolCall
+            && tools
+                .as_ref()
+                .is_some_and(|controller| !controller.action_is_resolved())
+        {
+            return Err(AarambhError::Config(
+                "generation ended before the constrained tool action completed".into(),
+            ));
+        }
+        let tool_call = tools
+            .as_ref()
+            .and_then(ToolCallController::tool_call)
+            .cloned();
+        let text = match &tool_call {
+            Some(call) => serde_json::to_string(call)?,
+            None => answer_text.clone(),
+        };
+        debug_assert!(tool_call.is_none() || text == tool_text);
+        let thinking_tokens = tools
+            .as_ref()
+            .map(|controller| controller.thinking().tokens_used())
+            .unwrap_or_else(|| thinking.tokens_used());
         Ok(GenerationOutput {
-            text: answer_text.clone(),
+            text,
             raw_text,
             thinking_text,
             answer_text,
             token_ids: generated_ids,
             thinking_token_ids,
             answer_token_ids,
-            thinking_tokens: thinking.tokens_used(),
+            thinking_tokens,
             finish_reason,
             steps,
             speculative_stats: None,
+            tool_call,
         })
     }
 }
@@ -427,6 +562,16 @@ fn empty_output(finish_reason: FinishReason) -> GenerationOutput {
         finish_reason,
         steps: Vec::new(),
         speculative_stats: None,
+        tool_call: None,
+    }
+}
+
+fn tool_phase(phase: ToolPhase) -> GenerationPhase {
+    match phase {
+        ToolPhase::Thinking => GenerationPhase::Thinking,
+        ToolPhase::Control => GenerationPhase::Control,
+        ToolPhase::Answer => GenerationPhase::Answer,
+        ToolPhase::ToolCall => GenerationPhase::ToolCall,
     }
 }
 

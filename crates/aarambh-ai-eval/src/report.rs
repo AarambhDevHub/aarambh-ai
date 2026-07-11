@@ -23,6 +23,9 @@ pub struct TaskScore {
     pub loss: Option<f64>,
     /// Optional perplexity.
     pub ppl: Option<f64>,
+    /// Optional secondary metrics for richer tasks.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub details: BTreeMap<String, f64>,
 }
 
 impl TaskScore {
@@ -42,6 +45,7 @@ impl TaskScore {
             correct: Some(correct),
             loss: None,
             ppl: None,
+            details: BTreeMap::new(),
         }
     }
 
@@ -70,7 +74,14 @@ impl TaskScore {
             correct: None,
             loss: Some(loss),
             ppl: Some(ppl),
+            details: BTreeMap::new(),
         }
+    }
+
+    /// Attach one secondary metric.
+    pub fn with_detail(mut self, name: impl Into<String>, value: f64) -> Self {
+        self.details.insert(name.into(), value);
+        self
     }
 }
 
@@ -135,6 +146,12 @@ impl Scorecard {
                 "| {} | {} | {:.4} | {} |\n",
                 task.name, task.metric, task.value, task.examples
             ));
+            for (name, value) in &task.details {
+                out.push_str(&format!(
+                    "| {}/{} | detail | {:.4} | {} |\n",
+                    task.name, name, value, task.examples
+                ));
+            }
         }
         out.push_str(&format!(
             "\nContext length used: `{}`  \nMax new tokens: `{}`\n",

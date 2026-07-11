@@ -69,8 +69,17 @@ impl ThinkingController {
 
     /// Create a controller clamped to a generation token budget.
     pub fn for_generation(mode: ThinkingMode, max_new_tokens: usize) -> Self {
+        Self::for_generation_with_reserve(mode, max_new_tokens, 32)
+    }
+
+    /// Create a controller while reserving tokens for a post-thinking action.
+    pub fn for_generation_with_reserve(
+        mode: ThinkingMode,
+        max_new_tokens: usize,
+        reserve: usize,
+    ) -> Self {
         let budget = if mode.is_enabled() {
-            mode.budget().min(max_new_tokens.saturating_sub(32))
+            mode.budget().min(max_new_tokens.saturating_sub(reserve))
         } else {
             0
         };

@@ -589,6 +589,46 @@ first (bounded by its existing budget), then either answer directly or
 emit a grammar-constrained tool call. Neither system needs to know about
 the other beyond this wrapping.
 
+### Phase 26 protocol and boundary
+
+The controller constrains the first post-thinking action to one of two internal
+control sequences, so existing vocabulary sizes and checkpoints remain
+compatible. During tool JSON only, the seven existing reserved IDs form a
+virtual structural alphabet for `{ } [ ] \" : ,`; ordinary token IDs still carry
+names and values. This is necessary because legacy text tokenizers may not have
+learned standalone JSON punctuation. The virtual characters are rendered as
+canonical JSON externally and never alter normal or thinking-mode decoding:
+
+```text
+<final>visible assistant answer
+<tool_call>{"name":"tool_name","arguments":{...}}</tool_call>
+```
+
+Control markers are excluded from `GenerationOutput.text`. A tool response
+sets `GenerationOutput.tool_call`, uses `FinishReason::ToolCall`, and exposes
+the canonical JSON object as `text`. Tool JSON is buffered during CLI streaming
+and released atomically after validation. Phase 26 emits this typed request;
+tool authorization, execution, result transport, and multi-step loops are not
+part of the inference crate.
+
+The grammar supports the common function-schema subset: nested objects and
+arrays, required/optional properties, primitive values, scalar enum/const,
+nullable types, lengths, item counts, and numeric bounds. Objects are emitted
+in deterministic schema order without unknown or duplicate keys. `$ref`,
+composition, regex, conditional, tuple-array, and recursive schemas fail at
+compile time with a schema path.
+
+When a schema omits generation bounds, the decoder uses conservative valid
+subsets (`maxLength=64`, `maxItems=16`, and 64 number characters). Every emitted
+value still satisfies the original, less restrictive schema, while malformed
+calls cannot consume the context indefinitely.
+
+Masking occurs before temperature/top-k/top-p. Speculative decoding applies
+the same grammar state to draft and target distributions, clones state for
+proposals, and commits state only for accepted/replacement tokens. This keeps
+Phase 25 rejection sampling exact. Tool calling supports all text inference
+modes; vision and self-learning combinations are explicitly deferred.
+
 ---
 
 ## 31. Inference Server

@@ -7,7 +7,8 @@ use aarambh_ai_core::{AarambhError, TokenizerLike};
 use aarambh_ai_finetune::{Verifier, VerifierKind};
 use aarambh_ai_inference::{
     GenerationConfig, GenerationOutput, GenerationPhase, GenerationStep, InferenceEngine, Sampler,
-    SpeculativeConfig, SpeculativeEngine, ThinkingMode,
+    SpeculativeConfig, SpeculativeEngine, ThinkingMode, ToolCallingConfig, ToolChoice,
+    ToolDefinition,
 };
 use aarambh_ai_safety::{
     SafeResponse, SafetyGenerator, SafetyGuard, SafetyMode, SafetyPolicy, SafetyVerdict,
@@ -75,6 +76,10 @@ pub struct InferArgs {
     pub draft_tokens: usize,
     #[arg(long)]
     pub stats: bool,
+    #[arg(long)]
+    pub tools: Option<PathBuf>,
+    #[arg(long, default_value = "auto")]
+    pub tool_choice: String,
     #[arg(long, default_value = "strict")]
     pub safety: String,
     #[arg(long, default_value = "safety_audit.jsonl")]
@@ -124,14 +129,20 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
     let safety_mode = parse_safety_mode(&args.safety)?;
     let self_learn_mode = parse_self_learn_mode(&args.self_learn)?;
     validate_speculative_args(&args, self_learn_mode)?;
+    let tool_calling = load_tool_calling_config(&args, self_learn_mode)?;
     let config = GenerationConfig {
         max_new_tokens: args.max_tokens,
         sampler,
         thinking_mode,
         top_candidates: 5,
+        tool_calling,
     };
 
-    let prompt = prompt_for_mode(&args.prompt, thinking_mode);
+    let prompt = if config.tool_calling.is_some() {
+        args.prompt.clone()
+    } else {
+        prompt_for_mode(&args.prompt, thinking_mode)
+    };
     if args.speculative {
         return run_speculative_infer(
             &args,
@@ -422,6 +433,78 @@ fn validate_speculative_args(
     }
     SpeculativeConfig::new(args.draft_tokens)?;
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ToolFile {
+    Array(Vec<ToolEntry>),
+    Object { tools: Vec<ToolEntry> },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ToolEntry {
+    Native(ToolDefinition),
+    OpenAi {
+        r#type: String,
+        function: ToolDefinition,
+    },
+}
+
+fn load_tool_calling_config(
+    args: &InferArgs,
+    self_learn_mode: SelfLearnMode,
+) -> anyhow::Result<Option<ToolCallingConfig>> {
+    let Some(path) = &args.tools else {
+        if !args.tool_choice.eq_ignore_ascii_case("auto") {
+            return Err(AarambhError::Config("--tool-choice requires --tools".into()).into());
+        }
+        return Ok(None);
+    };
+    if args.image.is_some() {
+        return Err(AarambhError::Unsupported(
+            "Phase 26 tool calling supports text inference only; --image is not supported".into(),
+        )
+        .into());
+    }
+    if self_learn_mode.is_enabled() {
+        return Err(AarambhError::Unsupported(
+            "Phase 26 tool calling cannot be combined with --self-learn".into(),
+        )
+        .into());
+    }
+    let metadata = fs::metadata(path)?;
+    if metadata.len() > 1024 * 1024 {
+        return Err(AarambhError::Config(
+            "tool definition file exceeds the 1 MiB request limit".into(),
+        )
+        .into());
+    }
+    let file = fs::File::open(path)?;
+    let parsed: ToolFile = serde_json::from_reader(file)?;
+    let entries = match parsed {
+        ToolFile::Array(entries) | ToolFile::Object { tools: entries } => entries,
+    };
+    let definitions = entries
+        .into_iter()
+        .map(|entry| match entry {
+            ToolEntry::Native(definition) => Ok(definition),
+            ToolEntry::OpenAi { r#type, function } if r#type == "function" => Ok(function),
+            ToolEntry::OpenAi {
+                r#type: tool_type, ..
+            } => Err(AarambhError::Config(format!(
+                "unsupported OpenAI tool type {tool_type:?}; expected \"function\""
+            ))),
+        })
+        .collect::<aarambh_ai_core::Result<Vec<_>>>()?;
+    let choice = match args.tool_choice.trim() {
+        value if value.eq_ignore_ascii_case("auto") => ToolChoice::Auto,
+        value if value.eq_ignore_ascii_case("none") => ToolChoice::None,
+        value if value.eq_ignore_ascii_case("required") => ToolChoice::Required,
+        value => ToolChoice::Named(value.to_string()),
+    };
+    Ok(Some(ToolCallingConfig::new(definitions, choice)?))
 }
 
 fn print_generation_stats(mode: &str, output: &GenerationOutput, elapsed: Duration) {
@@ -1097,18 +1180,14 @@ struct StreamState {
     dim_active: bool,
     header_printed: bool,
     thinking_tokens: usize,
+    tool_buffer: String,
 }
 
 fn stream_step(
     step: &GenerationStep,
-    thinking_mode: ThinkingMode,
+    _thinking_mode: ThinkingMode,
     state: &mut StreamState,
 ) -> io::Result<()> {
-    if !thinking_mode.is_enabled() {
-        print!("{}", step.token_text);
-        return Ok(());
-    }
-
     match step.phase {
         GenerationPhase::Thinking => {
             if !state.header_printed {
@@ -1129,6 +1208,8 @@ fn stream_step(
             }
             print!("{}", step.token_text);
         }
+        GenerationPhase::ToolCall => state.tool_buffer.push_str(&step.token_text),
+        GenerationPhase::Control => {}
     }
     Ok(())
 }
@@ -1138,6 +1219,10 @@ fn finish_stream(state: &mut StreamState) {
         println!("{ANSI_RESET}");
         println!("[thinking: {} tokens]", state.thinking_tokens);
         state.dim_active = false;
+    }
+    if !state.tool_buffer.is_empty() {
+        print!("{}", state.tool_buffer);
+        state.tool_buffer.clear();
     }
     println!();
 }
@@ -1213,6 +1298,8 @@ mod tests {
             draft_tokenizer: None,
             draft_tokens: 4,
             stats: false,
+            tools: None,
+            tool_choice: "auto".into(),
             safety: "none".into(),
             safety_audit_log: "safety.jsonl".into(),
             self_learn: "disabled".into(),

@@ -21,6 +21,8 @@ pub mod lora;
 pub mod model;
 /// Supervised fine-tuning datasets, templates, and batches.
 pub mod sft;
+/// Function-calling supervised datasets and protocol formatting.
+pub mod tool_sft;
 /// SFT trainer and adapter merge entrypoints.
 pub mod trainer;
 /// Rule-based verifiers used by GRPO and self-learning.
@@ -45,9 +47,11 @@ pub use sft::{
     ChatTemplate, SftBatch, SftDataLoader, SftDataset, SftExample, ThinkingSftExample,
     format_thinking_sft,
 };
+pub use tool_sft::{ToolSftCall, ToolSftDataset, ToolSftDefinition, ToolSftExample};
 pub use trainer::{
     AdapterSftModel, DoraTrainer, SftRunConfig, SftTrainer, merge_adapter_from_paths,
     merge_dora_from_paths, merge_lora_from_paths, run_dora_from_config, run_sft_from_config,
+    run_tool_sft_from_config,
 };
 pub use verifier::{
     CodeVerifier, CompositeVerifier, FormatVerifier, MathVerifier, Verifier, VerifierKind,

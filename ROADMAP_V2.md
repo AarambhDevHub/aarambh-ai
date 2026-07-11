@@ -35,7 +35,7 @@ Phase 22 →  Mixture of Experts                  (10–14 days)  [Kaggle] ✅
 Phase 23 →  Multi-GPU training                  (7–10 days)   [Kaggle 2×T4] ✅
 Phase 24 →  DPO preference tuning               (7–10 days)   [Kaggle] ✅
 Phase 25 →  Speculative decoding                (5–7 days)    [Kaggle] ✅
-Phase 26 →  Tool use / function calling         (7–10 days)   [i3 + Kaggle]
+Phase 26 →  Tool use / function calling         (7–10 days)   [i3 + Kaggle] ✅
 Phase 27 →  Inference server                    (10–14 days)  [i3]
 Phase 28 →  crates.io publish (v2.0.0)          (5–7 days)    [all]
 ```
@@ -909,7 +909,7 @@ git tag v2.0.0-alpha.10
 
 ---
 
-## Phase 26 — Tool Use / Function Calling
+## Phase 26 — Tool Use / Function Calling ✅
 
 **Duration:** 7–10 days | **Hardware:** i3 (inference) + Kaggle (SFT training)
 
@@ -922,13 +922,13 @@ SFT alone.
 
 **`aarambh-ai-inference`:**
 ```
-[ ] src/grammar.rs
+[x] src/grammar.rs
       JsonSchemaGrammar — compiles a JSON Schema into a token-level
       constraint (valid-next-token mask) applied during sampling
       Reuses the existing KV-cache decode loop; only the sampling step gains
       a mask derived from current grammar state
 
-[ ] src/tool_calling.rs
+[x] src/tool_calling.rs
       ToolDefinition { name, description, parameters: JsonSchema }
       ToolCallController wraps ThinkingController (Phase 7) — tool-call
       decoding composes with thinking budgets: model may think, then either
@@ -937,14 +937,14 @@ SFT alone.
 
 **`aarambh-ai-finetune`:**
 ```
-[ ] src/tool_sft.rs
+[x] src/tool_sft.rs
       Tool-call JSONL schema: {"instruction", "tools": [...], "tool_call": {...} | null, "response"}
       Loss masking extends Phase 9's build_loss_mask to tool_call token spans
 ```
 
 **CLI:**
 ```
-[ ] aarambh-ai infer --config <cfg> --tools tools.json --prompt "..."
+[x] aarambh-ai infer --config <cfg> --tools tools.json --prompt "..."
 ```
 
 ### Tests
@@ -968,6 +968,14 @@ Model correctly selects and formats tool calls for a held-out set of
 multi-tool prompts (free/public function-calling eval subset, e.g. a
 Gorilla or ToolBench sample), 100% JSON-schema-valid by construction,
 correct-tool-selected rate tracked via the eval harness.
+
+Implemented as a single-call, emit-only boundary: Aarambh returns a typed
+`ToolCall` but does not execute it. `auto|none|required|<name>` choices,
+thinking, safety, streaming, predict-view, and exact speculative text decoding
+share one controller. Vision, self-learning, parallel calls, tool execution,
+and result ingestion are deferred. The practical schema compiler rejects
+unsupported JSON Schema keywords up front and post-validates every completed
+call.
 
 git commit -m "feat: Phase 26 — grammar-constrained tool use / function calling"
 git tag v2.0.0-alpha.11

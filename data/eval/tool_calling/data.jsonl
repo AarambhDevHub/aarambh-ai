@@ -1,0 +1,2 @@
+{"instruction":"Calculate 9 plus 8.","tools":[{"name":"calculate","description":"Evaluate arithmetic.","parameters":{"type":"object","properties":{"expression":{"type":"string"}},"required":["expression"],"additionalProperties":false}}],"tool_call":{"name":"calculate","arguments":{"expression":"9 + 8"}}}
+{"instruction":"Write a friendly greeting.","tools":[{"name":"calculate","description":"Evaluate arithmetic.","parameters":{"type":"object","properties":{"expression":{"type":"string"}},"required":["expression"],"additionalProperties":false}}],"tool_call":null}

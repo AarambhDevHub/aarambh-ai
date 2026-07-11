@@ -20,6 +20,7 @@ use crate::dora::DoraAarambhModel;
 use crate::lora::LoraConfig;
 use crate::model::LoraAarambhModel;
 use crate::sft::{SftDataLoader, SftDataset};
+use crate::tool_sft::ToolSftDataset;
 
 #[derive(Debug, Clone)]
 /// Configuration for one SFT adapter training run.
@@ -396,6 +397,60 @@ pub fn run_sft_from_config(config: SftRunConfig) -> Result<()> {
     );
 
     let dataset = SftDataset::from_jsonl(&config.data_path, &tokenizer, model_config.max_seq_len)?;
+    let loader = SftDataLoader::new(
+        &dataset,
+        config.train_config.batch_size,
+        config.shuffle,
+        config.train_config.seed,
+        config.device.clone(),
+    )?;
+    let metadata = AdapterMetadata::new(
+        model_config,
+        config.lora_config.clone(),
+        Some(config.base_model_path.display().to_string()),
+        config.qlora,
+    );
+    let mut trainer = SftTrainer::new(
+        model,
+        varmap,
+        loader,
+        config.train_config,
+        config.output_dir,
+        metadata,
+    )?;
+    trainer.train()
+}
+
+/// Build and run a LoRA or QLoRA tool-calling SFT trainer.
+pub fn run_tool_sft_from_config(config: SftRunConfig) -> Result<()> {
+    config.lora_config.validate()?;
+    let candle_device = config.device.to_candle()?;
+    let tokenizer = BpeTokenizer::from_pretrained(&config.tokenizer_path)?;
+    tokenizer.validate_special_tokens()?;
+    let mut model_config = config.model_config.clone();
+    model_config.vocab_size = tokenizer.vocab_size();
+    reject_moe_adapters(&model_config)?;
+
+    let base = load_any_model(&config.base_model_path, &model_config, &candle_device)?;
+    let base_tensors = base.named_tensors();
+    drop(base);
+    let (model, varmap) = LoraAarambhModel::from_tensors(
+        &model_config,
+        &base_tensors,
+        &config.lora_config,
+        config.qlora,
+        &candle_device,
+    )?;
+    eprintln!(
+        "tool adapter params: {} / {} ({:.3}%)",
+        model.adapter_param_count(),
+        model.base_param_count(),
+        model.trainable_ratio() * 100.0
+    );
+
+    let dataset =
+        ToolSftDataset::from_jsonl(&config.data_path, &tokenizer, model_config.max_seq_len)?
+            .into_inner();
     let loader = SftDataLoader::new(
         &dataset,
         config.train_config.batch_size,

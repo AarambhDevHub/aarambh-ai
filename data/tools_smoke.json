@@ -1,0 +1,27 @@
+[
+  {
+    "name": "calculate",
+    "description": "Evaluate a basic arithmetic expression.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "expression": {"type": "string", "minLength": 1, "maxLength": 64}
+      },
+      "required": ["expression"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_weather",
+    "description": "Get current weather for a city.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "city": {"type": "string", "minLength": 1, "maxLength": 80},
+        "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}
+      },
+      "required": ["city"],
+      "additionalProperties": false
+    }
+  }
+]
