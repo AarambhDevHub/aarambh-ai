@@ -33,7 +33,7 @@ Phase 20 →  Vision-language training            (10–14 days)  [Kaggle] ✅
 Phase 21 →  Vision-aware self-learning          (7–10 days)   [Kaggle only] ✅
 Phase 22 →  Mixture of Experts                  (10–14 days)  [Kaggle] ✅
 Phase 23 →  Multi-GPU training                  (7–10 days)   [Kaggle 2×T4] ✅
-Phase 24 →  DPO preference tuning               (7–10 days)   [Kaggle]
+Phase 24 →  DPO preference tuning               (7–10 days)   [Kaggle] ✅
 Phase 25 →  Speculative decoding                (5–7 days)    [Kaggle]
 Phase 26 →  Tool use / function calling         (7–10 days)   [i3 + Kaggle]
 Phase 27 →  Inference server                    (10–14 days)  [i3]
@@ -779,7 +779,7 @@ git tag v2.0.0-alpha.8
 
 ---
 
-## Phase 24 — DPO Preference Tuning
+## Phase 24 — DPO Preference Tuning ✅
 
 **Duration:** 7–10 days | **Hardware:** Kaggle
 
@@ -794,25 +794,29 @@ apply well.
 
 **`aarambh-ai-finetune`:**
 ```
-[ ] src/dpo.rs
-      DpoConfig { beta, reference_free: bool }
-      DpoDataset — { prompt, chosen, rejected } triples, JSONL
-      dpo_loss(policy_logps, ref_logps, chosen_mask, rejected_mask, beta)
-        Standard DPO loss: -log sigmoid(beta * (chosen_logratio - rejected_logratio))
-      Reference model: frozen copy of the pre-DPO checkpoint (or
-      reference_free variant using the implicit reward reformulation)
+[x] src/dpo.rs
+      DpoConfig { beta, reference_free, max_prompt_tokens, max_completion_tokens }
+      canonical { prompt, chosen, rejected } JSONL loading and validation
+      dynamic pair batching: one [2B, S] policy forward per preference batch
+      completion-only summed sequence log-probabilities and stable DPO loss
+      one-time frozen-reference log-probability precomputation
 
-[ ] src/trainer.rs
-      DpoTrainer — can wrap a DoRA adapter (Phase 18) instead of full
-      fine-tune, keeping this affordable on Kaggle T4
+[x] DpoTrainer
+      DoRA policy for `finetune dpo`; quantized QDoRA policy for `finetune qdpo`
+      adapter-only AdamW, accumulation, clipping, cosine schedule, step/final saves
+      reference defaults to base; explicit reference-free mode supported
+
+[x] aarambh-ai-eval
+      `preference` task reports held-out chosen/rejected win rate using mean
+      completion log-probability
 ```
 
 ### Data Setup
 
 ```bash
 # Free, public preference datasets:
-scripts/phase24_prepare_hh_rlhf.sh data       # Anthropic HH-RLHF
-scripts/phase24_prepare_ultrafeedback.sh data # UltraFeedback
+scripts/phase24_prepare_hh_rlhf.sh data/dpo/hh_rlhf
+scripts/phase24_prepare_ultrafeedback.sh data/dpo/ultrafeedback
 ```
 
 ### Tests
@@ -822,10 +826,13 @@ scripts/phase24_prepare_ultrafeedback.sh data # UltraFeedback
 fn dpo_loss_decreases_when_chosen_logprob_increases_relative_to_rejected() {}
 
 #[test]
-fn reference_free_variant_matches_standard_dpo_at_beta_limit() {}
+fn reference_free_matches_standard_dpo_with_zero_reference_ratio() {}
 
 #[test]
 fn dpo_dora_trainer_only_updates_adapter_params() {}
+
+#[test]
+fn preference_eval_uses_mean_completion_logprob() {}
 ```
 
 ### Milestone
@@ -1091,7 +1098,7 @@ git commit -m "chore: v2.0.0 — crates.io publish, source release"
 | 21 | Vision-Aware Self-Learning | ✅ Image-grounded replay + verifier, Kaggle-only | Kaggle only | 7–10 days |
 | 22 | Mixture of Experts | ✅ Top-k router, load-balancing loss | Kaggle | 10–14 days |
 | 23 | Multi-GPU Training | ✅ Single-node NCCL DDP, sharded loaders, rank-0 checkpoints | Kaggle 2×T4 | 7–10 days |
-| 24 | DPO Preference Tuning | Preference optimization alongside GRPO | Kaggle | 7–10 days |
+| 24 | DPO Preference Tuning | ✅ DoRA/QDoRA pairwise objective, cached refs, preference eval | Kaggle | 7–10 days |
 | 25 | Speculative Decoding | Tiny-draft / Large-target speedup | Kaggle | 5–7 days |
 | 26 | Tool Use / Function Calling | Grammar-constrained JSON tool calls | i3 + Kaggle | 7–10 days |
 | 27 | Inference Server | OpenAI-compatible server, continuous batching, local-only | i3 | 10–14 days |

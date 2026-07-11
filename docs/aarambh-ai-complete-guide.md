@@ -1045,10 +1045,10 @@ Multi-GPU (4 GPUs):
 
 ## Phase 24: DPO (Direct Preference Optimization)
 
-**Definition:** DPO is a technique for aligning model behavior with human preferences by directly comparing pairs of "better" vs "worse" responses, without needing a separate reward model (unlike GRPO/classic RLHF).
+**Definition:** DPO is a technique for aligning model behavior with human preferences by directly comparing pairs of "better" vs "worse" responses, without fitting a separate reward model or sampling an online rollout group.
 
 **Beginner explanation:**
-Similar goal to GRPO (Phase 11) — teach the model to prefer better responses — but a simpler, more direct mathematical approach. Instead of scoring a whole group of candidate answers and training a separate reward model, DPO works directly from pairs: "response A is better than response B," and adjusts the model's math to make A more likely and B less likely, in one relatively simple step.
+Similar goal to GRPO — teach the model to prefer better responses — but a simpler, offline approach. GRPO generates a group and scores it with a deterministic verifier. DPO reads fixed pairs: "response A is better than response B," and increases the chosen-vs-rejected likelihood margin relative to a frozen copy of the starting policy.
 
 **Why we need it:**
 DPO tends to be simpler to implement, more stable to train, and requires less infrastructure than older reinforcement-learning-based alignment methods — a practical, efficient way to fine-tune preferences.
@@ -1062,6 +1062,15 @@ Preference pair example:
 
 DPO training: adjusts model to make Response-A-style outputs
 more likely for similar prompts in the future.
+```
+
+In Aarambh-AI, `finetune dpo` trains a DoRA adapter and `finetune qdpo`
+trains the same objective over a quantized QDoRA base. Chosen and rejected
+responses are scored together in one batch. The frozen reference scores are
+computed once before training, so a second full model does not stay in memory.
+
+```jsonl
+{"prompt":"Explain gravity to a 5-year-old.","chosen":"Gravity is like an invisible pull that keeps your feet on the ground.","rejected":"Gravity is described by a curvature tensor."}
 ```
 
 **Diagram:**
@@ -1082,8 +1091,9 @@ more likely for similar prompts in the future.
 ```
 
 **Common beginner questions:**
-- *Q: Is DPO better than GRPO?* → Neither is strictly "better" — DPO is simpler and more stable; GRPO can capture richer group-based comparisons. Different tools for different needs.
+- *Q: Is DPO better than GRPO?* → Neither is universally better. Aarambh-AI uses GRPO for math/code/format tasks with deterministic correctness checks and DPO for open-ended response preferences.
 - *Q: Where do the preference pairs come from?* → Can be human-labeled, or generated/scored automatically depending on the task.
+- *Q: What is QDPO here?* → It is normal DPO training with Aarambh-AI's QDoRA quantized policy base, not a different preference objective.
 
 ---
 

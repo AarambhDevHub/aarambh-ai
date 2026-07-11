@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org)
 
-A decoder-only transformer with four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA/DoRA fine-tuning, GRPO reinforcement learning, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, evaluation harness, and a frozen-encoder vision projector path — all in one clean 16-crate Rust workspace.
+A decoder-only transformer with four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA/DoRA fine-tuning, GRPO and DPO alignment, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, evaluation harness, and a frozen-encoder vision projector path — all in one clean 16-crate Rust workspace.
 
 v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, and pretrained checkpoints are not attached to the release.
 
@@ -45,6 +45,7 @@ v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, an
 | Vision-aware self-learning: image replay cache, grounded VQA verifier, CUDA gate | Phase 21 ✅ |
 | Mixture of Experts: top-k router, dense masked dispatch, load-balanced training | Phase 22 ✅ |
 | Multi-GPU training: single-node NCCL data parallelism, sharded loaders, rank-0 checkpoints | Phase 23 ✅ |
+| DPO/QDPO preference tuning: cached references, pairwise loss, preference win-rate eval | Phase 24 ✅ |
 
 ---
 
@@ -257,8 +258,8 @@ for user-run continuation from locally trained or converted model weights.
 
 Phase 17 adds `aarambh-ai eval` for comparable before/after model quality
 tracking. It reports JSON and Markdown scorecards for perplexity,
-MMLU-lite, HellaSwag, GSM8K-subset, HumanEval-lite, and the Phase 19
-image-caption smoke task.
+MMLU-lite, HellaSwag, GSM8K-subset, HumanEval-lite, pairwise preference
+win rate, and the Phase 19 image-caption smoke task.
 
 ```sh
 # Prepare public eval subsets. Requires Python's datasets package.
@@ -602,12 +603,13 @@ quantised, so Q4 artifacts are much smaller than SafeTensors checkpoints.
 
 ---
 
-## Fine-Tune With LoRA, QLoRA, DoRA, QDoRA, Or GRPO
+## Fine-Tune With LoRA, QLoRA, DoRA, QDoRA, GRPO, Or DPO
 
 Phase 9 adds adapter-only SFT for instruction data. Phase 10 adds GRPO
 reinforcement learning with deterministic verifiers. Phase 18 adds DoRA/QDoRA
-weight-decomposed adapters. Training updates only adapter tensors, saves a tiny
-adapter directory, and can merge SFT adapters back into a normal
+weight-decomposed adapters. Phase 24 adds DPO/QDPO preference tuning for
+open-ended response quality. Training updates only adapter tensors, saves a tiny
+adapter directory, and can merge adapters back into a normal
 `model.safetensors` for existing inference commands.
 
 Input data is JSONL:
@@ -716,6 +718,60 @@ GRPO uses deterministic `MathVerifier`, `FormatVerifier`, or `math-format`
 composite rewards. It does not use Self-Critique; critique is reserved for the
 Phase 12 replay buffer.
 
+DPO data contains one shared prompt and a preferred/dispreferred response pair:
+
+```jsonl
+{"prompt":"Explain recursion simply.","chosen":"Recursion solves a problem by calling the same function on a smaller input.","rejected":"Recursion is computer magic."}
+```
+
+```sh
+# Two-step local DoRA-backed DPO smoke run. --reference defaults to --base.
+cargo run --release -p aarambh-ai -- finetune dpo \
+  --config configs/tiny_shakespeare.toml \
+  --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --data data/dpo_tiny_preferences.jsonl \
+  --output adapters/tiny_dpo_smoke \
+  --lora-rank 4 \
+  --batch-size 2 \
+  --max-steps 2 \
+  --grad-accum-steps 1 \
+  --lr 0.00001 \
+  --log-every-n-steps 1 \
+  --save-every-n-steps 0
+
+# QDPO uses the same DPO objective with a quantized QDoRA policy base.
+cargo run --release -p aarambh-ai -- finetune qdpo \
+  --config configs/tiny_shakespeare.toml \
+  --base checkpoints/tiny_shakespeare/tiny-q4.gguf \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --data data/dpo_tiny_preferences.jsonl \
+  --output adapters/tiny_qdpo \
+  --reference-free \
+  --lora-rank 16
+```
+
+Standard DPO precomputes frozen-reference sequence log-probabilities once and
+then releases the reference model before optimizer steps. `--reference-free`
+omits the reference log-ratio. Chosen and rejected responses share one batched
+policy forward, and only response tokens contribute to the objective. Use GRPO
+for checkable math/code/format rewards and DPO for human or model-ranked
+open-ended preferences.
+
+```sh
+# Prepare public preference datasets (requires Python's datasets package).
+scripts/phase24_prepare_hh_rlhf.sh data/dpo/hh_rlhf
+scripts/phase24_prepare_ultrafeedback.sh data/dpo/ultrafeedback
+
+# Evaluate pairwise preference win rate after merging the DPO adapter.
+cargo run --release -p aarambh-ai -- eval \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tiny_dpo_merged/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --tasks preference \
+  --data-dir data/eval
+```
+
 Adapter layout:
 
 ```text
@@ -730,8 +786,9 @@ adapters/tiny_sft/
         └── train_state.json
 ```
 
-GRPO adapter directories additionally write `grpo_config.json` with the
-reference checkpoint, verifier, GRPO sampling settings, and train settings.
+GRPO adapter directories additionally write `grpo_config.json`. DPO/QDPO
+directories write `dpo_config.json` with beta, sequence limits, reference mode,
+quantized-policy mode, and train settings.
 
 ---
 
@@ -923,6 +980,7 @@ aarambh-ai/
 | 21 | Vision-aware self-learning | GPU | ✅ |
 | 22 | Mixture of Experts | GPU | ✅ |
 | 23 | Multi-GPU training | 2×T4 | ✅ |
+| 24 | DPO/QDPO preference tuning | GPU | ✅ |
 
 See [ROADMAP.md](ROADMAP.md) for the full phased delivery plan with tests and milestones.
 

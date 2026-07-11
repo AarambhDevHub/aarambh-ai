@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.0.0-alpha.9] - 2026-07-11
+
+### Added
+
+- **Phase 24 DPO Preference Tuning**
+  - Added canonical `{prompt, chosen, rejected}` JSONL loading, validation, truncation, and dynamic pair batching
+  - Added numerically stable standard and reference-free DPO objectives with completion-only sequence scoring
+  - Added `finetune dpo` for DoRA policies and `finetune qdpo` for quantized QDoRA policies
+  - Added one-time frozen-reference log-probability precomputation so the reference model is not retained during optimizer steps
+  - Added adapter-only DPO training with accumulation, clipping, cosine scheduling, periodic saves, and `dpo_config.json`
+  - Added `preference` evaluation task and tracked local train/eval smoke pairs
+  - Added HH-RLHF and UltraFeedback normalization scripts with deterministic held-out splits
+
+### Changed
+
+- `aarambh-ai-finetune` now exports documented DPO dataset, batch, loss, metrics, trainer, and run APIs
+- The eval harness can report pairwise preference win rate using mean completion log-probability
+- README, ROADMAP_V2, and ARCHITECTURE_V2 now document DPO/QDPO commands, reference behavior, and GRPO/DPO responsibilities
+
+### Verified
+
+- `cargo test -p aarambh-ai-finetune -p aarambh-ai-eval --no-fail-fast`
+- `cargo fmt --all --check`
+- `cargo check --workspace`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace --no-fail-fast`
+- `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
+- Local two-step DoRA DPO run, adapter merge, preference eval, and one-step reference-free QDPO run
+
 ## [2.0.0-alpha.8] - 2026-07-10
 
 ### Added

@@ -4,12 +4,15 @@
 //! Phase 10 adds deterministic-verifier GRPO for adapter-only RL fine-tuning.
 //! Phase 18 adds DoRA and QDoRA supervised fine-tuning.
 //! Phase 20 adds vision-language DoRA instruction tuning.
+//! Phase 24 adds DoRA/QDoRA Direct Preference Optimization.
 #![deny(missing_docs)]
 
 /// Adapter metadata and serialization helpers.
 pub mod adapter;
 /// DoRA adapter layers and DoRA-wrapped model implementation.
 pub mod dora;
+/// Direct Preference Optimization data loading, loss, and adapter training.
+pub mod dpo;
 /// Group Relative Policy Optimization data loading, rollout, and training.
 pub mod grpo;
 /// LoRA adapter layers and configuration.
@@ -27,6 +30,10 @@ pub mod vlm_dora;
 
 pub use adapter::{AdapterMetadata, AdapterMethod, load_adapter_metadata, save_adapter};
 pub use dora::{DoraAarambhModel, DoraConfig, DoraLinear};
+pub use dpo::{
+    DpoBatch, DpoConfig, DpoDataLoader, DpoDataset, DpoExample, DpoMetrics, DpoRunConfig,
+    DpoSaveMetadata, DpoTrainer, dpo_loss, run_dpo_from_config, sequence_log_probs,
+};
 pub use grpo::{
     GrpoConfig, GrpoDataset, GrpoExample, GrpoMetrics, GrpoRunConfig, GrpoThinkingMode,
     GrpoTrainer, Rollout, RolloutFinish, compute_advantages, grpo_loss, run_grpo_from_config,

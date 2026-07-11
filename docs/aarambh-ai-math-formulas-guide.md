@@ -762,7 +762,7 @@ Original: -0.75 → Recovered: -0.7333  (again, a small, acceptable rounding err
 
 ---
 
-## 13. KL Divergence (used in DPO / preference tuning)
+## 13. KL Divergence and the DPO Reference Ratio
 
 **Definition:** KL (Kullback-Leibler) divergence measures how different one probability distribution is from another — used to make sure a fine-tuned model doesn't drift *too* far from its original behavior while still learning new preferences.
 
@@ -775,7 +775,16 @@ Say it as: "for every possible outcome x, take the probability under P, multiply
 - `Q` = the original (reference) model's probability distribution
 - Result = 0 if P and Q are identical; grows larger the more they differ
 
-**Why we use it:** In DPO/preference tuning (Phase 24), we want the model to shift toward preferred answers *without* forgetting everything else it knew. KL divergence acts as a "leash," penalizing the model if it strays too far from its original well-behaved distribution while chasing the new preference signal.
+**Why we use it:** Preference tuning should move toward preferred answers without discarding the starting model's behavior. GRPO includes an explicit KL term. Standard DPO does not add this full-distribution KL formula as a separate loss term; instead, its pairwise objective compares policy log-probabilities against frozen-reference log-probabilities.
+
+```text
+DPO loss = -log sigmoid(beta * [
+    (log policy(chosen) - log reference(chosen))
+  - (log policy(rejected) - log reference(rejected))
+])
+```
+
+The reference ratios provide DPO's connection to KL-regularized reward optimization. Aarambh-AI precomputes those frozen-reference sequence scores once. Its explicit `--reference-free` mode sets the reference log-ratio to zero; that is a lower-memory variant and is not generally identical to standard DPO.
 
 **Formula:**
 ```

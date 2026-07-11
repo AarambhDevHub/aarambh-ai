@@ -488,7 +488,23 @@ dpo_loss = -log σ(β × [(log π(chosen|prompt) − log π_ref(chosen|prompt))
 
 where `π` is the model being trained and `π_ref` is a frozen reference
 checkpoint (typically the pre-DPO model). A `reference_free` variant
-exists for when keeping a second frozen copy in memory isn't affordable.
+sets the reference log-ratio to zero. It is an explicit low-memory ablation,
+not a claim that the frozen reference and reference-free objectives are
+generally equivalent.
+
+The implementation tokenizes both responses against one shared `ChatTemplate`
+prefix and concatenates chosen rows followed by rejected rows. One dynamically
+padded `[2B, S]` policy forward therefore scores the complete preference batch.
+Prompt and padding positions are masked before completion log-probabilities are
+summed, and the pairwise objective uses a stable two-class `log_softmax` rather
+than directly evaluating `log(sigmoid(x))`.
+
+Standard DPO precomputes frozen-reference chosen/rejected sequence
+log-probabilities once. When the reference equals the policy base, the initial
+adapter-disabled DoRA/QDoRA policy supplies those values exactly; for a distinct
+reference checkpoint, the reference model is loaded first and released before
+the trainable policy starts optimizer steps. This keeps peak training memory in
+the Phase 18 adapter class instead of permanently retaining two full models.
 
 **Division of labour going forward:** GRPO (verifier-based) stays the
 preferred path for math/code/format tasks where correctness is checkable.
@@ -496,8 +512,12 @@ DPO (preference-based) is the new preferred path for open-ended chat
 quality, where "better" is a judgment call rather than a checkable fact.
 Both remain available; they are complementary, not competing.
 
-Like DoRA fine-tuning, `DpoTrainer` can wrap a DoRA adapter instead of doing
-a full fine-tune, keeping it affordable on a single Kaggle T4.
+`finetune dpo` uses DoRA and `finetune qdpo` uses a QDoRA quantized base. Both
+save normal DoRA adapter metadata, so the existing auto-detecting merge command
+produces an inference-ready SafeTensors checkpoint. The eval harness adds a
+`preference` task that reports held-out chosen-vs-rejected win rate using mean
+completion log-probability; training itself retains the original summed-logprob
+DPO objective.
 
 ---
 
