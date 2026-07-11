@@ -5,7 +5,7 @@ use aarambh_ai_finetune::{
     AdapterMethod, DpoConfig, DpoRunConfig, GrpoConfig, GrpoRunConfig, GrpoThinkingMode,
     LoraConfig, SftRunConfig, VerifierKind, VlmDoraRunConfig, merge_adapter_from_paths,
     run_dora_from_config, run_dpo_from_config, run_grpo_from_config, run_sft_from_config,
-    run_vlm_dora_from_config,
+    run_tool_sft_from_config, run_vlm_dora_from_config,
 };
 use aarambh_ai_train::TrainingRunConfig;
 use clap::{Args, Subcommand};
@@ -20,6 +20,8 @@ pub struct FinetuneArgs {
 pub enum FinetuneCommand {
     Sft(FinetuneRunArgs),
     Qlora(FinetuneRunArgs),
+    ToolSft(FinetuneRunArgs),
+    ToolQlora(FinetuneRunArgs),
     Dora(FinetuneRunArgs),
     Qdora(FinetuneRunArgs),
     VlmDora(VlmFinetuneArgs),
@@ -247,6 +249,8 @@ pub fn run(args: FinetuneArgs) -> anyhow::Result<()> {
     match args.command {
         FinetuneCommand::Sft(args) => run_lora_finetune(args, false),
         FinetuneCommand::Qlora(args) => run_lora_finetune(args, true),
+        FinetuneCommand::ToolSft(args) => run_tool_finetune(args, false),
+        FinetuneCommand::ToolQlora(args) => run_tool_finetune(args, true),
         FinetuneCommand::Dora(args) => run_dora_finetune(args, false),
         FinetuneCommand::Qdora(args) => run_dora_finetune(args, true),
         FinetuneCommand::VlmDora(args) => run_vlm_dora_finetune(args, false),
@@ -256,6 +260,35 @@ pub fn run(args: FinetuneArgs) -> anyhow::Result<()> {
         FinetuneCommand::Qdpo(args) => run_dpo(args, true),
         FinetuneCommand::Merge(args) => run_merge(args),
     }
+}
+
+fn run_tool_finetune(args: FinetuneRunArgs, qlora: bool) -> anyhow::Result<()> {
+    let run_config = TrainingRunConfig::from_toml(&args.config)?;
+    let device = run_config.device()?;
+    let tokenizer_path = tokenizer_path(args.tokenizer.as_ref(), &run_config);
+    let mut train_config = run_config.train.clone();
+    apply_train_overrides(&mut train_config, &args);
+    train_config.checkpoint_dir = args.output.clone();
+    let lora_config = LoraConfig {
+        rank: args.lora_rank,
+        alpha: args.lora_alpha.unwrap_or(args.lora_rank as f64 * 2.0),
+        dropout: args.lora_dropout,
+        target_modules: LoraConfig::from_target_csv(&args.target_modules),
+        ..Default::default()
+    };
+    run_tool_sft_from_config(SftRunConfig {
+        model_config: run_config.model,
+        train_config,
+        base_model_path: args.base,
+        tokenizer_path,
+        data_path: args.data,
+        output_dir: args.output,
+        lora_config,
+        device,
+        qlora,
+        shuffle: !args.no_shuffle && run_config.shuffle,
+    })?;
+    Ok(())
 }
 
 fn run_lora_finetune(args: FinetuneRunArgs, qlora: bool) -> anyhow::Result<()> {

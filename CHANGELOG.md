@@ -1,5 +1,36 @@
 # Changelog
 
+## [2.0.0-alpha.11] - 2026-07-11
+
+### Added
+
+- **Phase 26 Tool Use / Function Calling**
+  - Added a practical JSON Schema compiler, incremental token grammar, and schema post-validation
+  - Added typed tool definitions, calls, choices, and a controller composed with thinking budgets
+  - Added `infer --tools` and `--tool-choice auto|none|required|<name>`
+  - Added direct-answer and tool-call protocol branches without changing reserved tokenizer IDs
+  - Added grammar-constrained standard and exact speculative text decoding
+  - Added atomic tool-call streaming, constrained predict-view candidates, and safety-aware blocking
+  - Added LoRA/QLoRA `tool-sft` training with strict validated JSONL examples
+  - Added tool-calling evaluation metrics, local fixtures, xLAM normalization, and pinned BFCL preparation
+
+### Changed
+
+- Generation output now carries an optional typed tool call and tool-specific finish/phase metadata
+- Sampling can apply sparse allowed-token constraints before top-k/top-p filtering
+- Evaluation scorecards support backward-compatible secondary task metrics
+- README, ROADMAP_V2, ARCHITECTURE_V2, and the complete guide document Phase 26 behavior
+
+### Security
+
+- Phase 26 emits calls only and never executes commands, URLs, filesystem operations, or APIs
+- PII-bearing structured calls are blocked instead of text-redacted into schema-invalid JSON
+
+### Verified
+
+- Grammar prefix, schema validation, unsupported-keyword, tool-data, and eval metric unit tests
+- Workspace formatting, check, Clippy, tests, rustdoc, release build, and local CLI smoke paths
+
 ## [2.0.0-alpha.10] - 2026-07-11
 
 ### Added

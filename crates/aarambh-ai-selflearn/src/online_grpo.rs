@@ -752,6 +752,7 @@ where
         finish_reason,
         steps,
         speculative_stats: None,
+        tool_call: None,
     })
 }
 
@@ -854,6 +855,7 @@ where
         finish_reason,
         steps,
         speculative_stats: None,
+        tool_call: None,
     })
 }
 
@@ -896,6 +898,7 @@ fn sample_vision_group(
             sampler,
             thinking_mode: grpo_to_thinking(config.thinking),
             top_candidates: 0,
+            tool_calling: None,
         };
         let output = generate_lora_with_image(
             model,
@@ -916,6 +919,7 @@ fn sample_vision_group(
             FinishReason::EosToken => aarambh_ai_finetune::grpo::RolloutFinish::Eos,
             FinishReason::ContextLimit => aarambh_ai_finetune::grpo::RolloutFinish::ContextLimit,
             FinishReason::MaxTokens => aarambh_ai_finetune::grpo::RolloutFinish::MaxTokens,
+            FinishReason::ToolCall => aarambh_ai_finetune::grpo::RolloutFinish::MaxTokens,
         };
         rollouts.push(Rollout {
             prompt_len: fused_len(&prompt_ids, image_token_count),
@@ -1411,6 +1415,7 @@ fn rollout_to_generation_output(
         },
         steps,
         speculative_stats: None,
+        tool_call: None,
     })
 }
 

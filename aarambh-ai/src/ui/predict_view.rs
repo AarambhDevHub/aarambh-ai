@@ -65,5 +65,7 @@ fn phase_label(phase: GenerationPhase) -> &'static str {
     match phase {
         GenerationPhase::Thinking => "thinking",
         GenerationPhase::Answer => "answer",
+        GenerationPhase::ToolCall => "tool-call",
+        GenerationPhase::Control => "control",
     }
 }

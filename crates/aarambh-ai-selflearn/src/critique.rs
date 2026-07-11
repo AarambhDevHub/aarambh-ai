@@ -122,6 +122,7 @@ fn critique_generation_config(config: &CritiqueConfig) -> GenerationConfig {
         sampler: Sampler::greedy(),
         thinking_mode: ThinkingMode::None,
         top_candidates: 5,
+        tool_calling: None,
     }
 }
 
@@ -132,6 +133,7 @@ fn rewrite_generation_config(config: &CritiqueConfig) -> GenerationConfig {
             .unwrap_or_else(|_| Sampler::greedy()),
         thinking_mode: ThinkingMode::None,
         top_candidates: 5,
+        tool_calling: None,
     }
 }
 

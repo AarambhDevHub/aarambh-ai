@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org)
 
-A decoder-only transformer with four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA/DoRA fine-tuning, GRPO and DPO alignment, exact speculative decoding, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, evaluation harness, and a frozen-encoder vision projector path — all in one clean 16-crate Rust workspace.
+A decoder-only transformer with four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA/DoRA fine-tuning, GRPO and DPO alignment, exact speculative decoding, grammar-constrained function calling, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, evaluation harness, and a frozen-encoder vision projector path — all in one clean 16-crate Rust workspace.
 
 v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, and pretrained checkpoints are not attached to the release.
 
@@ -47,6 +47,7 @@ v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, an
 | Multi-GPU training: single-node NCCL data parallelism, sharded loaders, rank-0 checkpoints | Phase 23 ✅ |
 | DPO/QDPO preference tuning: cached references, pairwise loss, preference win-rate eval | Phase 24 ✅ |
 | Exact speculative decoding: Tiny draft, block verification, rejection sampling, telemetry | Phase 25 ✅ |
+| Tool use: schema-constrained JSON calls, Tool SFT/QLoRA, selection evaluation | Phase 26 ✅ |
 
 ---
 
@@ -462,6 +463,81 @@ RUNS=3 MAX_TOKENS=128 DRAFT_TOKENS=4 \
   checkpoints/shared/tokenizer.json \
   configs/wikitext103_tiny.toml checkpoints/tiny/model.safetensors
 ```
+
+### Tool Use / Function Calling
+
+Phase 26 lets the model choose between a direct answer and one structured tool
+call. Tool calls are constrained during sampling and validated again before
+being returned. Aarambh AI emits the call but does not execute commands, HTTP
+requests, or other host actions.
+
+```sh
+cargo run --release -p aarambh-ai -- infer \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --tools data/tools_smoke.json \
+  --tool-choice auto \
+  --prompt "What is 17 multiplied by 23?" \
+  --max-tokens 96 \
+  --greedy \
+  --safety none
+```
+
+A completed call is printed as compact JSON and ends with
+`finish_reason=ToolCall`:
+
+```json
+{"name":"calculate","arguments":{"expression":"17 * 23"}}
+```
+
+`--tool-choice required` prevents direct answers; `--tool-choice <name>` pins
+one function; `none` forces the direct-answer branch. The tool path composes
+with thinking, safety, streaming, predict-view, and speculative decoding.
+Streaming buffers tool JSON until it is complete. `--image` and
+`--self-learn` combinations are intentionally rejected in Phase 26.
+
+The supported schema subset covers nested objects and arrays, required and
+optional properties, strings, numbers, integers, booleans, null, scalar
+`enum`/`const`, nullable types, length/item limits, and numeric bounds.
+Recursive references, schema composition, regex patterns, conditionals, and
+parallel calls are rejected while loading the tools file.
+
+Train a LoRA tool adapter with the tracked four-example smoke set:
+
+```sh
+cargo run --release -p aarambh-ai -- finetune tool-sft \
+  --config configs/tiny_shakespeare.toml \
+  --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --data data/tool_sft_tiny.jsonl \
+  --output adapters/tool_sft_smoke \
+  --lora-rank 4 --batch-size 1 --max-steps 2 \
+  --log-every-n-steps 1 --save-every-n-steps 0
+```
+
+Use `finetune tool-qlora` for a quantized base. Larger single-call SFT data can
+be normalized from the gated xLAM dataset after accepting its terms:
+
+```sh
+MAX_EXAMPLES=10000 scripts/phase26_prepare_xlam.sh
+```
+
+Evaluate exact actions, schema validity, tool-name selection, and no-tool
+accuracy with:
+
+```sh
+cargo run --release -p aarambh-ai -- eval \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --tasks tool-calling --data-dir data/eval \
+  --max-examples 2 --max-new-tokens 96
+```
+
+`scripts/phase26_prepare_bfcl.sh` prepares a pinned BFCL v1.2 single-call
+subset for larger held-out runs. Downloaded datasets, adapters, and checkpoints
+remain untracked.
 
 Phase 11 enables the safety layer by default for `infer`. Use
 `--safety strict|permissive|research|none` to choose policy behavior and

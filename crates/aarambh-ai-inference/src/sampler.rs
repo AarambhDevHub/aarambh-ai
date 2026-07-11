@@ -117,6 +117,27 @@ impl Sampler {
         }
     }
 
+    /// Convert logits into this sampler's distribution after restricting token ids.
+    pub fn probabilities_allowed(&self, logits: &[f32], allowed: &[u32]) -> Result<Vec<f32>> {
+        if allowed.is_empty() {
+            return Err(AarambhError::Config(
+                "constrained sampler received no allowed tokens".into(),
+            ));
+        }
+        let mut masked = vec![f32::NEG_INFINITY; logits.len()];
+        for &token_id in allowed {
+            let index = token_id as usize;
+            if index >= logits.len() {
+                return Err(AarambhError::Shape(format!(
+                    "allowed token {token_id} exceeds vocabulary size {}",
+                    logits.len()
+                )));
+            }
+            masked[index] = logits[index];
+        }
+        self.probabilities(&masked)
+    }
+
     /// Sample from an already normalized probability distribution.
     pub fn sample_probabilities(&mut self, probabilities: &[f32]) -> Result<u32> {
         validate_probabilities(probabilities)?;
@@ -381,5 +402,14 @@ mod tests {
             sampler.probabilities(&[1.0, 3.0, 2.0]).unwrap(),
             [0.0, 1.0, 0.0]
         );
+    }
+
+    #[test]
+    fn allowed_tokens_are_masked_before_top_k() {
+        let sampler = Sampler::top_k_top_p(1.0, Some(1), None, Some(42)).unwrap();
+        let probabilities = sampler
+            .probabilities_allowed(&[100.0, 10.0, 9.0], &[1, 2])
+            .unwrap();
+        assert_eq!(probabilities, [0.0, 1.0, 0.0]);
     }
 }

@@ -1144,6 +1144,16 @@ Main model verifies:
 
 ## Phase 26: Tool Use / Function Calling
 
+In Aarambh v2, Phase 26 is deliberately split at a safe systems boundary. The
+model selects a function and emits validated JSON arguments; Aarambh does not
+execute that function. An application can inspect `GenerationOutput.tool_call`,
+apply its own permissions, run the tool, and provide a result in a later turn.
+
+The decoder forces either `<final>` or `<tool_call>` after any thinking block.
+Inside a tool call, invalid next tokens receive zero probability before
+temperature, top-k, and top-p are applied. This guarantees valid final JSON and
+works with the same KV cache and speculative decoder as normal text generation.
+
 **Definition:** The ability for the model to call external functions or APIs (like "search the web," "run a calculation," "check the weather") as part of generating a response, instead of only producing plain text.
 
 **Beginner explanation:**

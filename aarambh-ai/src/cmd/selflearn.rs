@@ -161,6 +161,8 @@ fn run_start(args: StartArgs) -> anyhow::Result<()> {
         draft_tokenizer: None,
         draft_tokens: 4,
         stats: false,
+        tools: None,
+        tool_choice: "auto".into(),
         safety: args.safety,
         safety_audit_log: args.safety_audit_log,
         self_learn,

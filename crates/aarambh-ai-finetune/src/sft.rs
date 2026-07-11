@@ -166,6 +166,56 @@ impl SftDataset {
         })
     }
 
+    pub(crate) fn from_id_sequences(
+        pairs: &[(Vec<u32>, Vec<u32>)],
+        max_seq_len: usize,
+        strict: bool,
+    ) -> Result<Self> {
+        if max_seq_len == 0 {
+            return Err(AarambhError::Config("max_seq_len must be non-zero".into()));
+        }
+        let mut sequences = Vec::with_capacity(pairs.len());
+        for (prefix, target) in pairs {
+            if target.is_empty() {
+                return Err(AarambhError::Config(
+                    "SFT target encoded to zero tokens".into(),
+                ));
+            }
+            let total = prefix.len() + target.len();
+            if strict && total > max_seq_len + 1 {
+                return Err(AarambhError::Config(format!(
+                    "tool SFT sequence has {total} tokens and would truncate at max_seq_len {max_seq_len}"
+                )));
+            }
+            let mut ids = prefix.clone();
+            ids.extend_from_slice(target);
+            ids.truncate(max_seq_len + 1);
+            if ids.len() < 2 {
+                return Err(AarambhError::Config(
+                    "SFT sequence must contain at least two tokens".into(),
+                ));
+            }
+            let prefix_len = prefix.len();
+            let input_ids = ids[..ids.len() - 1].to_vec();
+            let labels = ids[1..].to_vec();
+            let loss_mask = build_loss_mask(prefix_len, ids.len());
+            sequences.push(SftSequence {
+                input_ids,
+                labels,
+                loss_mask,
+            });
+        }
+        if sequences.is_empty() {
+            return Err(AarambhError::Config(
+                "SFT dataset must contain at least one example".into(),
+            ));
+        }
+        Ok(Self {
+            sequences,
+            max_seq_len,
+        })
+    }
+
     /// Return the number of tokenized examples.
     pub fn len(&self) -> usize {
         self.sequences.len()

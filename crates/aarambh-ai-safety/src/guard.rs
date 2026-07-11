@@ -315,13 +315,20 @@ impl<G: SafetyGenerator> SafetyGuard<G> {
                     PiiPolicy::Off => {}
                     PiiPolicy::Warn => {}
                     PiiPolicy::Redact => {
-                        output.raw_text = redact_pii(&output.raw_text, &raw_findings);
-                        output.answer_text = redact_pii(&output.answer_text, &answer_findings);
-                        output.thinking_text =
-                            redact_pii(&output.thinking_text, &thinking_findings);
-                        output.text = redact_pii(&output.text, &text_findings);
-                        output_redacted = true;
-                        verdict = SafetyVerdict::Redact("output PII redacted".to_string());
+                        if output.tool_call.is_some() {
+                            verdict = SafetyVerdict::Block(
+                                "tool call contains PII and cannot be safely redacted without violating its schema"
+                                    .to_string(),
+                            );
+                        } else {
+                            output.raw_text = redact_pii(&output.raw_text, &raw_findings);
+                            output.answer_text = redact_pii(&output.answer_text, &answer_findings);
+                            output.thinking_text =
+                                redact_pii(&output.thinking_text, &thinking_findings);
+                            output.text = redact_pii(&output.text, &text_findings);
+                            output_redacted = true;
+                            verdict = SafetyVerdict::Redact("output PII redacted".to_string());
+                        }
                     }
                     PiiPolicy::Block => {
                         verdict = SafetyVerdict::Block("output PII detected".to_string());
@@ -379,7 +386,7 @@ fn should_block(action: ViolationAction) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aarambh_ai_inference::{FinishReason, GenerationPhase, Sampler};
+    use aarambh_ai_inference::{FinishReason, GenerationPhase, Sampler, ToolCall};
 
     #[derive(Debug, Clone)]
     struct MockGenerator {
@@ -436,6 +443,7 @@ mod tests {
                 forced: false,
             }],
             speculative_stats: None,
+            tool_call: None,
         }
     }
 
@@ -445,6 +453,7 @@ mod tests {
             sampler: Sampler::greedy(),
             thinking_mode: aarambh_ai_inference::ThinkingMode::None,
             top_candidates: 1,
+            tool_calling: None,
         }
     }
 
@@ -490,5 +499,27 @@ mod tests {
         let mut guard = SafetyGuard::new(generator, policy);
         let response = guard.generate("hello", test_config()).unwrap();
         assert_eq!(response.text, "safe answer");
+    }
+
+    #[test]
+    fn guard_blocks_pii_in_structured_tool_call_instead_of_corrupting_json() {
+        let text = r#"{"name":"send","arguments":{"email":"dev@example.com"}}"#;
+        let mut generated = output(text);
+        generated.tool_call = Some(ToolCall {
+            name: "send".into(),
+            arguments: serde_json::json!({"email":"dev@example.com"}),
+        });
+        let generator = MockGenerator {
+            outputs: vec![generated],
+            prompts: Vec::new(),
+        };
+        let mut policy = SafetyPolicy::strict();
+        policy.audit_enabled = false;
+        policy.check_prompt_injection = false;
+        policy.check_jailbreak = false;
+        let mut guard = SafetyGuard::new(generator, policy);
+        let response = guard.generate("send this", test_config()).unwrap();
+        assert!(response.is_blocked());
+        assert!(response.output.is_none());
     }
 }
