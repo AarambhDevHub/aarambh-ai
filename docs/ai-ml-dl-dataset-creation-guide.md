@@ -732,6 +732,16 @@ Without consistent formatting, the training pipeline can't reliably parse the da
 {"instruction": "Write a haiku about rain", "response": "Soft drops on the roof / Whispering secrets to earth / Grey skies turn to green"}
 ```
 
+**Example (formatted for preference tuning, DPO-style):**
+```jsonl
+{"prompt":"Explain gravity simply","chosen":"Gravity is a pull between objects.","rejected":"Gravity is impossible to explain."}
+```
+
+For DPO, `chosen` and `rejected` must answer the same prompt, must both be
+non-empty, and must not be identical. Keep a held-out preference split so the
+evaluation harness can measure how often the model assigns a higher normalized
+completion score to the chosen answer.
+
 **Diagram:**
 ```
    Cleaned/Filtered Text

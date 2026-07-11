@@ -9,3 +9,9 @@ adapters/
 checkpoints/
 data/*
 !data/grpo_tiny_math.jsonl
+!data/dpo_tiny_preferences.jsonl
+!data/eval/
+data/eval/*
+!data/eval/preference/
+data/eval/preference/*
+!data/eval/preference/data.jsonl

@@ -52,6 +52,13 @@ impl TaskScore {
         score
     }
 
+    /// Create a pairwise preference win-rate score.
+    pub fn win_rate(name: impl Into<String>, wins: usize, examples: usize) -> Self {
+        let mut score = Self::accuracy(name, wins, examples);
+        score.metric = "win_rate".into();
+        score
+    }
+
     /// Create a perplexity score from loss and token count.
     pub fn perplexity(loss: f64, ppl: f64, examples: usize) -> Self {
         Self {

@@ -16,6 +16,8 @@ pub mod image_caption;
 pub mod mmlu_lite;
 /// Perplexity task wrapper.
 pub mod ppl_task;
+/// Pairwise preference-ranking task.
+pub mod preference;
 /// Vision-question-answering task.
 pub mod vqa;
 
@@ -25,6 +27,7 @@ pub use humaneval_lite::HumanEvalLiteTask;
 pub use image_caption::ImageCaptionTask;
 pub use mmlu_lite::MmluLiteTask;
 pub use ppl_task::PplTask;
+pub use preference::PreferenceTask;
 pub use vqa::VqaTask;
 
 fn read_jsonl<T: DeserializeOwned>(path: &Path, max_examples: Option<usize>) -> Result<Vec<T>> {

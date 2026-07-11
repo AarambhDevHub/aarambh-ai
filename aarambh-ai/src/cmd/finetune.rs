@@ -2,9 +2,10 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use aarambh_ai_finetune::{
-    AdapterMethod, GrpoConfig, GrpoRunConfig, GrpoThinkingMode, LoraConfig, SftRunConfig,
-    VerifierKind, VlmDoraRunConfig, merge_adapter_from_paths, run_dora_from_config,
-    run_grpo_from_config, run_sft_from_config, run_vlm_dora_from_config,
+    AdapterMethod, DpoConfig, DpoRunConfig, GrpoConfig, GrpoRunConfig, GrpoThinkingMode,
+    LoraConfig, SftRunConfig, VerifierKind, VlmDoraRunConfig, merge_adapter_from_paths,
+    run_dora_from_config, run_dpo_from_config, run_grpo_from_config, run_sft_from_config,
+    run_vlm_dora_from_config,
 };
 use aarambh_ai_train::TrainingRunConfig;
 use clap::{Args, Subcommand};
@@ -24,6 +25,8 @@ pub enum FinetuneCommand {
     VlmDora(VlmFinetuneArgs),
     VlmQdora(VlmFinetuneArgs),
     Grpo(GrpoArgs),
+    Dpo(DpoArgs),
+    Qdpo(DpoArgs),
     Merge(MergeArgs),
 }
 
@@ -138,6 +141,56 @@ pub struct GrpoArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct DpoArgs {
+    #[arg(long, default_value = "configs/tiny_shakespeare.toml")]
+    pub config: PathBuf,
+    #[arg(long)]
+    pub base: PathBuf,
+    #[arg(long, conflicts_with = "reference_free")]
+    pub reference: Option<PathBuf>,
+    #[arg(long, conflicts_with = "reference")]
+    pub reference_free: bool,
+    #[arg(long)]
+    pub tokenizer: Option<PathBuf>,
+    #[arg(long)]
+    pub data: PathBuf,
+    #[arg(long)]
+    pub output: PathBuf,
+    #[arg(long, default_value_t = 0.1)]
+    pub beta: f64,
+    #[arg(long)]
+    pub max_prompt_tokens: Option<usize>,
+    #[arg(long)]
+    pub max_completion_tokens: Option<usize>,
+    #[arg(long, default_value_t = 16)]
+    pub lora_rank: usize,
+    #[arg(long)]
+    pub lora_alpha: Option<f64>,
+    #[arg(long, default_value_t = 0.0)]
+    pub lora_dropout: f32,
+    #[arg(long, default_value = "attn.wq,attn.wk,attn.wv,attn.wo")]
+    pub target_modules: String,
+    #[arg(long)]
+    pub batch_size: Option<usize>,
+    #[arg(long)]
+    pub max_steps: Option<usize>,
+    #[arg(long)]
+    pub max_epochs: Option<usize>,
+    #[arg(long)]
+    pub lr: Option<f64>,
+    #[arg(long)]
+    pub grad_accum_steps: Option<usize>,
+    #[arg(long)]
+    pub warmup_steps: Option<usize>,
+    #[arg(long)]
+    pub save_every_n_steps: Option<usize>,
+    #[arg(long)]
+    pub log_every_n_steps: Option<usize>,
+    #[arg(long)]
+    pub no_shuffle: bool,
+}
+
+#[derive(Debug, Args)]
 pub struct VlmFinetuneArgs {
     #[arg(long, default_value = "configs/vision_vqa_instruct.toml")]
     pub config: PathBuf,
@@ -199,6 +252,8 @@ pub fn run(args: FinetuneArgs) -> anyhow::Result<()> {
         FinetuneCommand::VlmDora(args) => run_vlm_dora_finetune(args, false),
         FinetuneCommand::VlmQdora(args) => run_vlm_dora_finetune(args, true),
         FinetuneCommand::Grpo(args) => run_grpo(args),
+        FinetuneCommand::Dpo(args) => run_dpo(args, false),
+        FinetuneCommand::Qdpo(args) => run_dpo(args, true),
         FinetuneCommand::Merge(args) => run_merge(args),
     }
 }
@@ -384,6 +439,66 @@ fn run_grpo(args: GrpoArgs) -> anyhow::Result<()> {
         shuffle: !args.no_shuffle && run_config.shuffle,
     };
     run_grpo_from_config(config)?;
+    Ok(())
+}
+
+fn run_dpo(args: DpoArgs, qdpo: bool) -> anyhow::Result<()> {
+    let run_config = TrainingRunConfig::from_toml(&args.config)?;
+    let device = run_config.device()?;
+    let tokenizer_path = tokenizer_path(args.tokenizer.as_ref(), &run_config);
+    let mut train_config = run_config.train.clone();
+    train_config.checkpoint_dir = args.output.clone();
+    train_config.lr = args.lr.unwrap_or(1e-5);
+    if let Some(value) = args.batch_size {
+        train_config.batch_size = value;
+    }
+    if let Some(value) = args.max_steps {
+        train_config.max_steps = value;
+    }
+    if let Some(value) = args.max_epochs {
+        train_config.max_epochs = value;
+    }
+    if let Some(value) = args.grad_accum_steps {
+        train_config.grad_accum_steps = value;
+    }
+    if let Some(value) = args.warmup_steps {
+        train_config.warmup_steps = value;
+    }
+    if let Some(value) = args.save_every_n_steps {
+        train_config.save_every_n_steps = value;
+    }
+    if let Some(value) = args.log_every_n_steps {
+        train_config.log_every_n_steps = value;
+    }
+
+    let dora_config = LoraConfig {
+        rank: args.lora_rank,
+        alpha: args.lora_alpha.unwrap_or(args.lora_rank as f64 * 2.0),
+        dropout: args.lora_dropout,
+        target_modules: LoraConfig::from_target_csv(&args.target_modules),
+        ..Default::default()
+    };
+    let dpo_config = DpoConfig {
+        beta: args.beta,
+        reference_free: args.reference_free,
+        max_prompt_tokens: args.max_prompt_tokens,
+        max_completion_tokens: args.max_completion_tokens,
+    };
+    let config = DpoRunConfig {
+        model_config: run_config.model,
+        train_config,
+        dpo_config,
+        base_model_path: args.base,
+        reference_model_path: args.reference,
+        tokenizer_path,
+        data_path: args.data,
+        output_dir: args.output,
+        dora_config,
+        device,
+        qdpo,
+        shuffle: !args.no_shuffle && run_config.shuffle,
+    };
+    run_dpo_from_config(config)?;
     Ok(())
 }
 

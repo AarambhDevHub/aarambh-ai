@@ -1,4 +1,4 @@
-//! Evaluation harness for perplexity, multiple-choice, math, and code tasks.
+//! Evaluation harness for language modeling, reasoning, preference, and vision tasks.
 #![deny(missing_docs)]
 
 /// Greedy generation helpers used by generative eval tasks.

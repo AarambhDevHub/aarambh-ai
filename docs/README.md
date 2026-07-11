@@ -84,7 +84,7 @@ No prior ML background is assumed anywhere in these three files. If something is
 
 ## Keeping these docs updated
 
-As new phases ship (especially the rest of the v2 roadmap — DoRA, vision, MoE, DPO, speculative decoding, the inference server), these files get updated to match. If a phase's implementation changes significantly, the corresponding section in `aarambh-ai-complete-guide.md` should be revisited.
+As new phases ship (especially the rest of the v2 roadmap — speculative decoding, tool use, and the inference server), these files get updated to match. If a phase's implementation changes significantly, the corresponding section in `aarambh-ai-complete-guide.md` should be revisited.
 
 ---
 

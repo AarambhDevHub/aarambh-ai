@@ -9,13 +9,13 @@ use candle_core::{DType, Device};
 use crate::report::{Scorecard, TaskScore};
 use crate::tasks::{
     Gsm8kSubsetTask, HellaSwagTask, HumanEvalLiteTask, ImageCaptionTask, MmluLiteTask, PplTask,
-    VqaTask,
+    PreferenceTask, VqaTask,
 };
 
 /// Evaluation run configuration.
 #[derive(Debug, Clone)]
 pub struct EvalConfig {
-    /// Task selectors such as `ppl`, `mmlu`, `hellaswag`, `gsm8k`, `humaneval`, `image-caption`, or `all`.
+    /// Task selectors such as `ppl`, `mmlu`, `hellaswag`, `gsm8k`, `preference`, `image-caption`, or `all`.
     pub tasks: Vec<String>,
     /// Root directory containing normalized eval data.
     pub data_dir: PathBuf,
@@ -165,9 +165,12 @@ fn selected_tasks(selectors: &[String], allow_code_exec: bool) -> Result<Vec<Box
             "vqa" | "vision-qa" | "vision_qa" | "vqa-smoke" | "vqa_smoke" => {
                 tasks.push(Box::new(VqaTask));
             }
+            "preference" | "dpo" | "preference-win-rate" | "preference_win_rate" => {
+                tasks.push(Box::new(PreferenceTask));
+            }
             other => {
                 return Err(AarambhError::Config(format!(
-                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,humaneval,image-caption,vqa,all"
+                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,humaneval,preference,image-caption,vqa,all"
                 )));
             }
         }
