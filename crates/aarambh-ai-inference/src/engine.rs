@@ -7,6 +7,7 @@ use candle_core::{DType, Tensor};
 
 use crate::kvcache::KvCache;
 use crate::sampler::{Sampler, TokenCandidate};
+use crate::speculative::SpeculativeStats;
 use crate::thinking::{ThinkingController, ThinkingMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +95,8 @@ pub struct GenerationOutput {
     pub finish_reason: FinishReason,
     /// Per-token generation metadata.
     pub steps: Vec<GenerationStep>,
+    /// Speculative-decoding counters when a draft model was used.
+    pub speculative_stats: Option<SpeculativeStats>,
 }
 
 /// Stateful autoregressive inference engine.
@@ -111,6 +114,13 @@ impl InferenceEngine {
         device: candle_core::Device,
     ) -> Result<Self> {
         tokenizer.validate_special_tokens()?;
+        if model.config().vocab_size != tokenizer.vocab_size() {
+            return Err(AarambhError::Shape(format!(
+                "model vocabulary size {} does not match tokenizer vocabulary size {}",
+                model.config().vocab_size,
+                tokenizer.vocab_size()
+            )));
+        }
         Ok(Self {
             model,
             tokenizer,
@@ -392,6 +402,7 @@ impl InferenceEngine {
             thinking_tokens: thinking.tokens_used(),
             finish_reason,
             steps,
+            speculative_stats: None,
         })
     }
 }
@@ -415,6 +426,7 @@ fn empty_output(finish_reason: FinishReason) -> GenerationOutput {
         thinking_tokens: 0,
         finish_reason,
         steps: Vec::new(),
+        speculative_stats: None,
     }
 }
 

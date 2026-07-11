@@ -7,6 +7,8 @@ pub mod engine;
 pub mod kvcache;
 /// Temperature, top-k, top-p, and greedy sampling.
 pub mod sampler;
+/// Exact draft-model speculative decoding.
+pub mod speculative;
 /// Streaming callback event types.
 pub mod stream;
 /// Thinking budget and forced-token controls.
@@ -18,5 +20,6 @@ pub use engine::{
 };
 pub use kvcache::KvCache;
 pub use sampler::{Sampler, TokenCandidate};
+pub use speculative::{SpeculativeConfig, SpeculativeEngine, SpeculativeStats};
 pub use stream::StreamEvent;
 pub use thinking::{ForceToken, ThinkingController, ThinkingMode};

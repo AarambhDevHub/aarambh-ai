@@ -1,12 +1,13 @@
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use aarambh_ai_core::{AarambhError, TokenizerLike};
 use aarambh_ai_finetune::{Verifier, VerifierKind};
 use aarambh_ai_inference::{
     GenerationConfig, GenerationOutput, GenerationPhase, GenerationStep, InferenceEngine, Sampler,
-    ThinkingMode,
+    SpeculativeConfig, SpeculativeEngine, ThinkingMode,
 };
 use aarambh_ai_safety::{
     SafeResponse, SafetyGenerator, SafetyGuard, SafetyMode, SafetyPolicy, SafetyVerdict,
@@ -62,6 +63,18 @@ pub struct InferArgs {
     pub stream: bool,
     #[arg(long)]
     pub greedy: bool,
+    #[arg(long)]
+    pub speculative: bool,
+    #[arg(long)]
+    pub draft_model: Option<PathBuf>,
+    #[arg(long)]
+    pub draft_config: Option<PathBuf>,
+    #[arg(long)]
+    pub draft_tokenizer: Option<PathBuf>,
+    #[arg(long, default_value_t = 4)]
+    pub draft_tokens: usize,
+    #[arg(long)]
+    pub stats: bool,
     #[arg(long, default_value = "strict")]
     pub safety: String,
     #[arg(long, default_value = "safety_audit.jsonl")]
@@ -110,6 +123,7 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
     let thinking_mode = parse_thinking_mode(&args.thinking)?;
     let safety_mode = parse_safety_mode(&args.safety)?;
     let self_learn_mode = parse_self_learn_mode(&args.self_learn)?;
+    validate_speculative_args(&args, self_learn_mode)?;
     let config = GenerationConfig {
         max_new_tokens: args.max_tokens,
         sampler,
@@ -118,6 +132,20 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
     };
 
     let prompt = prompt_for_mode(&args.prompt, thinking_mode);
+    if args.speculative {
+        return run_speculative_infer(
+            &args,
+            &run_config,
+            model_path,
+            tokenizer_path,
+            device,
+            dtype,
+            config,
+            prompt,
+            safety_mode,
+            thinking_mode,
+        );
+    }
     if self_learn_mode.is_enabled() {
         if let Some(image_path) = args.image.clone() {
             return run_vision_self_learn_infer(
@@ -178,6 +206,7 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
     {
         let mut guard = SafetyGuard::new(engine, policy);
         let mut stream_state = StreamState::default();
+        let started = Instant::now();
         let response = guard.generate_with_callback(&prompt, config, |step| {
             if args.predict_view {
                 print!(
@@ -193,10 +222,14 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
             }
             Ok(())
         })?;
+        let elapsed = started.elapsed();
         print_safe_response(&response, thinking_mode, args.stream, &mut stream_state)?;
         io::stdout().flush()?;
         if let Some(output) = &response.output {
             eprintln!("finish_reason={:?}", output.finish_reason);
+            if args.stats {
+                print_generation_stats("target", output, elapsed);
+            }
         } else {
             eprintln!("finish_reason=SafetyBlocked");
         }
@@ -204,6 +237,7 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
     }
 
     let mut stream_state = StreamState::default();
+    let started = Instant::now();
     let output = engine.generate_with_callback(&prompt, config, |step| {
         if args.predict_view {
             print!(
@@ -219,6 +253,7 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
         }
         Ok(())
     })?;
+    let elapsed = started.elapsed();
 
     if args.stream {
         finish_stream(&mut stream_state);
@@ -227,7 +262,193 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
     }
     io::stdout().flush()?;
     eprintln!("finish_reason={:?}", output.finish_reason);
+    if args.stats {
+        print_generation_stats("target", &output, elapsed);
+    }
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_speculative_infer(
+    args: &InferArgs,
+    target_config: &TrainingRunConfig,
+    target_model: PathBuf,
+    target_tokenizer: PathBuf,
+    device: candle_core::Device,
+    dtype: candle_core::DType,
+    generation_config: GenerationConfig,
+    prompt: String,
+    safety_mode: SafetyMode,
+    thinking_mode: ThinkingMode,
+) -> anyhow::Result<()> {
+    let draft_model = args
+        .draft_model
+        .as_ref()
+        .expect("validated draft model")
+        .clone();
+    let draft_config_path = args.draft_config.as_ref().expect("validated draft config");
+    let draft_config = TrainingRunConfig::from_toml(draft_config_path)?;
+    let draft_tokenizer = args
+        .draft_tokenizer
+        .clone()
+        .unwrap_or_else(|| target_tokenizer.clone());
+    let speculative_config = SpeculativeConfig::new(args.draft_tokens)?;
+    let mut engine = SpeculativeEngine::from_paths_with_dtype(
+        target_model,
+        &target_config.model,
+        &target_tokenizer,
+        draft_model,
+        &draft_config.model,
+        draft_tokenizer,
+        device,
+        dtype,
+        speculative_config,
+    )?;
+    let tokenizer_for_view = engine.tokenizer().clone();
+
+    if let Some(policy) = SafetyPolicy::for_mode(safety_mode)
+        .map(|policy| policy.with_audit_path(&args.safety_audit_log))
+    {
+        let mut guard = SafetyGuard::new(engine, policy);
+        let mut stream_state = StreamState::default();
+        let started = Instant::now();
+        let response = guard.generate_with_callback(&prompt, generation_config, |step| {
+            render_text_step(
+                args,
+                step,
+                thinking_mode,
+                &tokenizer_for_view,
+                &mut stream_state,
+            )
+        })?;
+        let elapsed = started.elapsed();
+        print_safe_response(&response, thinking_mode, args.stream, &mut stream_state)?;
+        io::stdout().flush()?;
+        if let Some(output) = &response.output {
+            eprintln!("finish_reason={:?}", output.finish_reason);
+            if args.stats {
+                print_generation_stats("speculative", output, elapsed);
+            }
+        } else {
+            eprintln!("finish_reason=SafetyBlocked");
+        }
+        return Ok(());
+    }
+
+    let mut stream_state = StreamState::default();
+    let started = Instant::now();
+    let output = engine.generate_with_callback(&prompt, generation_config, |step| {
+        render_text_step(
+            args,
+            step,
+            thinking_mode,
+            &tokenizer_for_view,
+            &mut stream_state,
+        )
+    })?;
+    let elapsed = started.elapsed();
+    if args.stream {
+        finish_stream(&mut stream_state);
+    } else {
+        print_generation_output(&output, thinking_mode)?;
+    }
+    io::stdout().flush()?;
+    eprintln!("finish_reason={:?}", output.finish_reason);
+    if args.stats {
+        print_generation_stats("speculative", &output, elapsed);
+    }
+    Ok(())
+}
+
+fn render_text_step(
+    args: &InferArgs,
+    step: &GenerationStep,
+    thinking_mode: ThinkingMode,
+    tokenizer: &BpeTokenizer,
+    stream_state: &mut StreamState,
+) -> aarambh_ai_core::Result<()> {
+    if args.predict_view {
+        print!(
+            "{}",
+            predict_view::render(step, tokenizer, args.temperature, args.top_p)
+        );
+    }
+    if args.stream {
+        stream_step(step, thinking_mode, stream_state)?;
+    }
+    if args.predict_view || args.stream {
+        io::stdout().flush()?;
+    }
+    Ok(())
+}
+
+fn validate_speculative_args(
+    args: &InferArgs,
+    self_learn_mode: SelfLearnMode,
+) -> anyhow::Result<()> {
+    if !args.speculative {
+        if args.draft_model.is_some()
+            || args.draft_config.is_some()
+            || args.draft_tokenizer.is_some()
+        {
+            return Err(
+                AarambhError::Config("draft model options require --speculative".into()).into(),
+            );
+        }
+        return Ok(());
+    }
+    if args.draft_model.is_none() {
+        return Err(
+            AarambhError::Config("--draft-model is required with --speculative".into()).into(),
+        );
+    }
+    if args.draft_config.is_none() {
+        return Err(
+            AarambhError::Config("--draft-config is required with --speculative".into()).into(),
+        );
+    }
+    if args.image.is_some() {
+        return Err(AarambhError::Unsupported(
+            "Phase 25 speculative decoding supports text inference only; --image is not supported"
+                .into(),
+        )
+        .into());
+    }
+    if self_learn_mode.is_enabled() {
+        return Err(AarambhError::Unsupported(
+            "Phase 25 speculative decoding cannot be combined with --self-learn".into(),
+        )
+        .into());
+    }
+    SpeculativeConfig::new(args.draft_tokens)?;
+    Ok(())
+}
+
+fn print_generation_stats(mode: &str, output: &GenerationOutput, elapsed: Duration) {
+    let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
+    let tokens_per_second = if elapsed.is_zero() {
+        0.0
+    } else {
+        output.token_ids.len() as f64 / elapsed.as_secs_f64()
+    };
+    if let Some(stats) = &output.speculative_stats {
+        eprintln!(
+            "generation_stats mode={mode} tokens={} elapsed_ms={elapsed_ms:.3} tok_s={tokens_per_second:.3} target_decode_forwards={} draft_decode_forwards={} proposed={} accepted={} rejected={} acceptance_rate={:.4} accepted_per_target_forward={:.3}",
+            output.token_ids.len(),
+            stats.target_decode_forwards,
+            stats.draft_decode_forwards,
+            stats.draft_tokens_proposed,
+            stats.draft_tokens_accepted,
+            stats.draft_tokens_rejected,
+            stats.acceptance_rate(),
+            stats.accepted_tokens_per_target_forward(),
+        );
+    } else {
+        eprintln!(
+            "generation_stats mode={mode} tokens={} elapsed_ms={elapsed_ms:.3} tok_s={tokens_per_second:.3}",
+            output.token_ids.len(),
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -964,4 +1185,72 @@ fn print_generation_output(
 
 fn is_thinking_marker(token_id: u32) -> bool {
     token_id == THINK_START_ID || token_id == THINK_END_ID
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args() -> InferArgs {
+        InferArgs {
+            config: "target.toml".into(),
+            model: Some("target.safetensors".into()),
+            tokenizer: Some("tokenizer.json".into()),
+            image: None,
+            prompt: "test".into(),
+            max_tokens: 8,
+            temperature: 0.7,
+            top_p: 0.9,
+            top_k: 50,
+            seed: Some(42),
+            thinking: "none".into(),
+            predict_view: false,
+            stream: false,
+            greedy: true,
+            speculative: true,
+            draft_model: Some("draft.safetensors".into()),
+            draft_config: Some("draft.toml".into()),
+            draft_tokenizer: None,
+            draft_tokens: 4,
+            stats: false,
+            safety: "none".into(),
+            safety_audit_log: "safety.jsonl".into(),
+            self_learn: "disabled".into(),
+            replay_path: None,
+            self_learn_state_dir: "adapters/selflearn".into(),
+            self_learn_reference: None,
+            self_learn_verifier: "none".into(),
+            self_learn_vision_verifier: "none".into(),
+            self_learn_ground_truth: None,
+        }
+    }
+
+    #[test]
+    fn speculative_cli_requires_draft_model_and_config() {
+        let mut args = args();
+        args.draft_model = None;
+        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled).is_err());
+        args.draft_model = Some("draft.safetensors".into());
+        args.draft_config = None;
+        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled).is_err());
+    }
+
+    #[test]
+    fn speculative_cli_rejects_unsupported_modes() {
+        let mut args = args();
+        args.image = Some("image.png".into());
+        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled).is_err());
+        args.image = None;
+        assert!(validate_speculative_args(&args, SelfLearnMode::Cpu).is_err());
+    }
+
+    #[test]
+    fn draft_options_require_speculative_flag() {
+        let mut args = args();
+        args.speculative = false;
+        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled).is_err());
+        args.draft_model = None;
+        args.draft_config = None;
+        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled).is_ok());
+    }
 }

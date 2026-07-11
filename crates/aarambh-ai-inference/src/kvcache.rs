@@ -1,5 +1,6 @@
 use aarambh_ai_model::AarambhModel;
 use aarambh_ai_nn::KVCache;
+use candle_core::Result;
 
 #[derive(Debug, Clone)]
 /// Multi-layer KV cache used by the inference engine.
@@ -32,6 +33,15 @@ impl KvCache {
         for layer in &mut self.layers {
             layer.clear();
         }
+    }
+
+    /// Roll every layer back to a previously committed sequence length.
+    pub fn truncate(&mut self, new_len: usize) -> Result<()> {
+        for layer in &mut self.layers {
+            layer.truncate(new_len)?;
+        }
+        debug_assert!(self.layers.iter().all(|layer| layer.seq_len() == new_len));
+        Ok(())
     }
 
     /// Return cached sequence length from the first layer.

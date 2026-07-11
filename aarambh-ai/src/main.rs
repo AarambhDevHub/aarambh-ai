@@ -15,7 +15,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Train(cmd::train::TrainArgs),
-    Infer(cmd::infer::InferArgs),
+    Infer(Box<cmd::infer::InferArgs>),
     Eval(cmd::eval::EvalArgs),
     Quantise(cmd::quantise::QuantiseArgs),
     Convert(cmd::convert::ConvertArgs),
@@ -27,7 +27,7 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Train(args) => cmd::train::run(args),
-        Command::Infer(args) => cmd::infer::run(args),
+        Command::Infer(args) => cmd::infer::run(*args),
         Command::Eval(args) => cmd::eval::run(args),
         Command::Quantise(args) => cmd::quantise::run(args),
         Command::Convert(args) => cmd::convert::run(args),

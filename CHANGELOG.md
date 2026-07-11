@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.0.0-alpha.10] - 2026-07-11
+
+### Added
+
+- **Phase 25 Speculative Decoding**
+  - Added exact Tiny-draft/Medium-or-Large-target decoding with configurable proposal width
+  - Added modified rejection sampling, residual correction, and target bonus-token generation
+  - Added block target verification with independent preallocated draft and target KV caches
+  - Added `infer --speculative`, explicit draft model/config/tokenizer options, and generation telemetry
+  - Added support for greedy/sampled decoding, thinking modes, streaming, predict view, and safety
+  - Added statistical distribution, rejection, greedy parity, tokenizer compatibility, and cache rollback tests
+  - Added a reproducible Kaggle benchmark script with output-equivalence verification
+
+### Changed
+
+- The sampler now exposes documented normalized-distribution operations used by exact decoding
+- KV caches can truncate rejected suffixes without reallocating preallocated storage
+- Generation outputs optionally include speculative acceptance and forward-pass counters
+- README, ROADMAP_V2, and ARCHITECTURE_V2 now document Phase 25 commands and guarantees
+
+### Verified
+
+- `cargo fmt --all --check`
+- `cargo check --workspace`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace --no-fail-fast`
+- `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
+- `cargo build --release -p aarambh-ai`
+- Local release-mode Tiny checkpoint target/draft smoke tests for greedy output, streaming, thinking, and telemetry
+
 ## [2.0.0-alpha.9] - 2026-07-11
 
 ### Added

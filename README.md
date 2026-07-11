@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org)
 
-A decoder-only transformer with four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA/DoRA fine-tuning, GRPO and DPO alignment, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, evaluation harness, and a frozen-encoder vision projector path — all in one clean 16-crate Rust workspace.
+A decoder-only transformer with four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA/DoRA fine-tuning, GRPO and DPO alignment, exact speculative decoding, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, evaluation harness, and a frozen-encoder vision projector path — all in one clean 16-crate Rust workspace.
 
 v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, and pretrained checkpoints are not attached to the release.
 
@@ -46,6 +46,7 @@ v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, an
 | Mixture of Experts: top-k router, dense masked dispatch, load-balanced training | Phase 22 ✅ |
 | Multi-GPU training: single-node NCCL data parallelism, sharded loaders, rank-0 checkpoints | Phase 23 ✅ |
 | DPO/QDPO preference tuning: cached references, pairwise loss, preference win-rate eval | Phase 24 ✅ |
+| Exact speculative decoding: Tiny draft, block verification, rejection sampling, telemetry | Phase 25 ✅ |
 
 ---
 
@@ -423,6 +424,44 @@ wraps the prompt with user/assistant markers, forces `<think>` as the first
 generated token, enforces the mode budget, force-closes with `</think>` when
 needed, and prints the final answer separately from the dimmed thinking block.
 Reasoning quality still depends on Phase 9/10 thinking SFT and GRPO training.
+
+Phase 25 adds exact speculative decoding for text generation. The draft and
+target models may use different architectures but must use identical tokenizer
+vocabularies, merge order, and special-token IDs. The target config controls the
+device and dtype; `--draft-config` supplies the draft model architecture.
+
+```sh
+cargo run --release --features cuda -p aarambh-ai -- infer \
+  --config configs/wikitext103_large.toml \
+  --model checkpoints/large/model.safetensors \
+  --tokenizer checkpoints/shared/tokenizer.json \
+  --prompt "The future of efficient inference" \
+  --max-tokens 128 \
+  --temperature 0.7 --top-p 0.9 --top-k 50 \
+  --speculative \
+  --draft-config configs/wikitext103_tiny.toml \
+  --draft-model checkpoints/tiny/model.safetensors \
+  --draft-tokens 4 \
+  --stream --stats --safety none
+```
+
+Only committed tokens reach streaming and predict-view callbacks. Safety modes
+remain supported and retain their buffered-output behavior. Phase 25 is text
+only: `--image` and `--self-learn` combinations return explicit errors. Both
+SafeTensors and Aarambh GGUF files use the existing universal loader, although
+the GGUF path currently dequantises tensors at load time.
+
+Benchmark a Tiny draft against a Medium/Large target on Kaggle after building
+with CUDA. Greedy mode verifies byte-identical output while the script reports
+the average speed and acceptance rate; the 1.8x roadmap target is not a CI gate.
+
+```sh
+RUNS=3 MAX_TOKENS=128 DRAFT_TOKENS=4 \
+  scripts/phase25_benchmark_speculative.sh \
+  configs/wikitext103_large.toml checkpoints/large/model.safetensors \
+  checkpoints/shared/tokenizer.json \
+  configs/wikitext103_tiny.toml checkpoints/tiny/model.safetensors
+```
 
 Phase 11 enables the safety layer by default for `infer`. Use
 `--safety strict|permissive|research|none` to choose policy behavior and
