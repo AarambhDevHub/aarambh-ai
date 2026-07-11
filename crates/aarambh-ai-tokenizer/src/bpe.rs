@@ -18,6 +18,28 @@ pub struct BpeTokenizer {
 }
 
 impl BpeTokenizer {
+    /// Verify that another tokenizer has the same vocabulary and merge rules.
+    pub fn validate_compatible(&self, other: &Self) -> Result<()> {
+        if self.vocab.token_to_id != other.vocab.token_to_id {
+            return Err(AarambhError::Tokenizer(
+                "draft and target tokenizer vocabularies do not match".into(),
+            ));
+        }
+        if self.vocab.id_to_token != other.vocab.id_to_token {
+            return Err(AarambhError::Tokenizer(
+                "draft and target tokenizer token ids do not match".into(),
+            ));
+        }
+        if self.merges != other.merges {
+            return Err(AarambhError::Tokenizer(
+                "draft and target tokenizer merge rules do not match".into(),
+            ));
+        }
+        self.validate_special_tokens()?;
+        other.validate_special_tokens()?;
+        Ok(())
+    }
+
     /// Train a BPE tokenizer from a whitespace corpus file.
     pub fn train(corpus_path: impl AsRef<Path>, vocab_size: usize) -> Result<Self> {
         use tokenizers::models::bpe::{BPE, BpeTrainer};

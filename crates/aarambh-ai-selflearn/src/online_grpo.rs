@@ -751,6 +751,7 @@ where
         thinking_tokens: thinking.tokens_used(),
         finish_reason,
         steps,
+        speculative_stats: None,
     })
 }
 
@@ -852,6 +853,7 @@ where
         thinking_tokens: thinking.tokens_used(),
         finish_reason,
         steps,
+        speculative_stats: None,
     })
 }
 
@@ -1408,6 +1410,7 @@ fn rollout_to_generation_output(
             aarambh_ai_finetune::RolloutFinish::ContextLimit => FinishReason::ContextLimit,
         },
         steps,
+        speculative_stats: None,
     })
 }
 

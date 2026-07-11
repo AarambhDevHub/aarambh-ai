@@ -529,24 +529,32 @@ time, no new model needed:
 ```
 Draft model (Tiny):  proposes K tokens ahead, cheaply
 Target model (Large): verifies all K tokens in a single forward pass
-
-Accept the longest correct prefix.
-Resample the first rejected token from the target model's own (corrected)
-distribution — this is what makes speculative decoding exact rather than
-an approximation: the final output distribution is statistically
-identical to decoding with the target model alone, just faster.
 ```
 
-This requires draft and target to share a tokenizer/vocabulary — both
-already use the same `aarambh-ai-tokenizer` BPE vocab (`ARCHITECTURE.md`
-§6.1), so no new tokenizer work is needed. A mismatched-vocab guard errors
-clearly rather than silently producing garbage if someone points it at
-incompatible checkpoints.
+For greedy decoding, accept the longest prefix whose draft tokens match the
+target argmax. For sampled decoding, proposal `x` is accepted with probability
+`min(1, p(x) / q(x))`, where `p` is the target distribution and `q` is the draft
+distribution after applying the same temperature/top-k/top-p policy. On the
+first rejection, sample from normalized `max(0, p - q)`; when all proposals are
+accepted, sample one bonus token from the target. This modified rejection
+sampling is what keeps the final distribution identical to target-only decoding.
+
+This requires draft and target to share a tokenizer/vocabulary. Phase 25 checks
+the complete token-to-id mapping, ordered BPE merges, and special IDs rather
+than trusting equal vocabulary sizes. The target and draft maintain independent
+preallocated KV caches; rejection truncates both caches to the accepted prefix.
+The target cache keeps a replacement or bonus token pending and prepends it to
+the next verification block, avoiding an extra target forward per round.
+
+The CLI requires both `--draft-model` and `--draft-config`; the latter is needed
+because a Tiny draft and Large target have different model shapes. Streaming,
+predict view, thinking modes, and safety compose with speculative text decoding.
+Vision and self-learning integration are deferred beyond Phase 25.
 
 Speculative decoding is validated two ways: wall-clock speedup (target
-≥1.8× tokens/second) and, more importantly, an eval-harness (§22) check
-that the *output distribution* is unchanged — confirming the speedup isn't
-coming from a quality regression.
+≥1.8× tokens/second) and, more importantly, a statistical rejection-sampling
+test that the output distribution is unchanged. Greedy end-to-end parity tests
+also compare committed tokens, thinking behavior, callbacks, and context limits.
 
 ---
 

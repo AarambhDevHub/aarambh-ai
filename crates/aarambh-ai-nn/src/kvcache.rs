@@ -59,6 +59,38 @@ impl KVCache {
         }
     }
 
+    /// Roll the cache back to a previously committed sequence length.
+    pub fn truncate(&mut self, new_len: usize) -> Result<()> {
+        if new_len > self.len {
+            return Err(candle_core::Error::msg(format!(
+                "cannot grow KV cache from {} to {new_len} with truncate",
+                self.len
+            )));
+        }
+        if self.capacity.is_some() {
+            self.len = new_len;
+            return Ok(());
+        }
+        if new_len == 0 {
+            self.clear();
+            return Ok(());
+        }
+        self.k = Some(
+            self.k
+                .as_ref()
+                .ok_or_else(|| candle_core::Error::msg("KV cache has no key tensor"))?
+                .narrow(1, 0, new_len)?,
+        );
+        self.v = Some(
+            self.v
+                .as_ref()
+                .ok_or_else(|| candle_core::Error::msg("KV cache has no value tensor"))?
+                .narrow(1, 0, new_len)?,
+        );
+        self.len = new_len;
+        Ok(())
+    }
+
     /// Return the cached sequence length.
     pub fn seq_len(&self) -> usize {
         self.len
@@ -102,5 +134,57 @@ impl KVCache {
             cached_k.narrow(1, 0, self.len)?,
             cached_v.narrow(1, 0, self.len)?,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use candle_core::Device;
+
+    fn values(values: &[f32], device: &Device) -> Tensor {
+        Tensor::from_vec(values.to_vec(), (1, values.len(), 1, 1), device).unwrap()
+    }
+
+    #[test]
+    fn dynamic_cache_truncates_and_regrows() {
+        let device = Device::Cpu;
+        let mut cache = KVCache::new();
+        cache
+            .update(&values(&[1.0, 2.0], &device), &values(&[3.0, 4.0], &device))
+            .unwrap();
+        cache.truncate(1).unwrap();
+        let (keys, _) = cache
+            .update(&values(&[9.0], &device), &values(&[8.0], &device))
+            .unwrap();
+        assert_eq!(cache.seq_len(), 2);
+        assert_eq!(
+            keys.flatten_all().unwrap().to_vec1::<f32>().unwrap(),
+            [1.0, 9.0]
+        );
+    }
+
+    #[test]
+    fn preallocated_cache_overwrites_rolled_back_suffix() {
+        let device = Device::Cpu;
+        let mut cache = KVCache::with_capacity(4);
+        cache
+            .update(&values(&[1.0, 2.0], &device), &values(&[3.0, 4.0], &device))
+            .unwrap();
+        cache.truncate(1).unwrap();
+        let (keys, _) = cache
+            .update(&values(&[9.0], &device), &values(&[8.0], &device))
+            .unwrap();
+        assert_eq!(cache.seq_len(), 2);
+        assert_eq!(
+            keys.flatten_all().unwrap().to_vec1::<f32>().unwrap(),
+            [1.0, 9.0]
+        );
+    }
+
+    #[test]
+    fn truncate_cannot_grow_cache() {
+        let mut cache = KVCache::with_capacity(4);
+        assert!(cache.truncate(1).is_err());
     }
 }

@@ -87,6 +87,59 @@ impl Sampler {
         }
     }
 
+    /// Return true when sampling always selects the highest-logit token.
+    pub fn is_deterministic(&self) -> bool {
+        matches!(self, Self::Greedy)
+            || matches!(
+                self,
+                Self::TopKTopP { temperature, .. } if *temperature <= f32::EPSILON
+            )
+    }
+
+    /// Convert logits into the normalized distribution used by this sampler.
+    ///
+    /// Deterministic samplers return a one-hot distribution at the argmax.
+    pub fn probabilities(&self, logits: &[f32]) -> Result<Vec<f32>> {
+        if logits.is_empty() {
+            return Err(AarambhError::Shape("logits must be non-empty".into()));
+        }
+        match self {
+            Self::Greedy => Ok(one_hot_argmax(logits)),
+            Self::TopKTopP {
+                temperature,
+                top_k,
+                top_p,
+                ..
+            } if *temperature > f32::EPSILON => {
+                filtered_probs(logits, *temperature, *top_k, *top_p)
+            }
+            Self::TopKTopP { .. } => Ok(one_hot_argmax(logits)),
+        }
+    }
+
+    /// Sample from an already normalized probability distribution.
+    pub fn sample_probabilities(&mut self, probabilities: &[f32]) -> Result<u32> {
+        validate_probabilities(probabilities)?;
+        let deterministic = self.is_deterministic();
+        match self {
+            Self::Greedy => Ok(argmax(probabilities) as u32),
+            Self::TopKTopP { rng, .. } if !deterministic => {
+                sample_from_probs(probabilities, rng.as_mut())
+            }
+            Self::TopKTopP { .. } => Ok(argmax(probabilities) as u32),
+        }
+    }
+
+    /// Draw a uniform value in `[0, 1)` from this sampler's random stream.
+    ///
+    /// Deterministic samplers return zero and do not allocate an RNG.
+    pub fn draw_uniform(&mut self) -> f32 {
+        match self {
+            Self::Greedy => 0.0,
+            Self::TopKTopP { rng, .. } => rng.r#gen::<f32>(),
+        }
+    }
+
     /// Return the highest-probability candidate tokens for display.
     pub fn top_candidates(&self, logits: &[f32], n: usize) -> Result<Vec<TokenCandidate>> {
         if logits.is_empty() {
@@ -104,7 +157,16 @@ impl Sampler {
             }
             Self::TopKTopP { .. } => softmax(logits, 1.0)?,
         };
-        let mut candidates = probs
+        Self::top_candidates_from_probabilities(&probs, n)
+    }
+
+    /// Return the highest-probability candidates from a normalized distribution.
+    pub fn top_candidates_from_probabilities(
+        probabilities: &[f32],
+        n: usize,
+    ) -> Result<Vec<TokenCandidate>> {
+        validate_probabilities(probabilities)?;
+        let mut candidates = probabilities
             .iter()
             .copied()
             .enumerate()
@@ -117,6 +179,12 @@ impl Sampler {
         candidates.truncate(n.min(candidates.len()));
         Ok(candidates)
     }
+}
+
+fn one_hot_argmax(values: &[f32]) -> Vec<f32> {
+    let mut probabilities = vec![0.0; values.len()];
+    probabilities[argmax(values)] = 1.0;
+    probabilities
 }
 
 fn argmax(values: &[f32]) -> usize {
@@ -216,6 +284,29 @@ fn renormalize(probs: &mut [f32]) -> Result<()> {
     Ok(())
 }
 
+fn validate_probabilities(probabilities: &[f32]) -> Result<()> {
+    if probabilities.is_empty() {
+        return Err(AarambhError::Shape(
+            "probability distribution must be non-empty".into(),
+        ));
+    }
+    if probabilities
+        .iter()
+        .any(|probability| !probability.is_finite() || *probability < 0.0)
+    {
+        return Err(AarambhError::Config(
+            "probability distribution contains invalid values".into(),
+        ));
+    }
+    let sum = probabilities.iter().sum::<f32>();
+    if !sum.is_finite() || (sum - 1.0).abs() > 1e-4 {
+        return Err(AarambhError::Config(format!(
+            "probability distribution must sum to one, got {sum}"
+        )));
+    }
+    Ok(())
+}
+
 fn sample_from_probs(probs: &[f32], rng: &mut StdRng) -> Result<u32> {
     let draw = rng.r#gen::<f32>();
     let mut cumulative = 0.0f32;
@@ -272,6 +363,23 @@ mod tests {
             candidates
                 .windows(2)
                 .all(|w| w[0].probability >= w[1].probability)
+        );
+    }
+
+    #[test]
+    fn probabilities_match_sampling_filters() {
+        let sampler = Sampler::top_k_top_p(1.0, Some(2), None, Some(42)).unwrap();
+        let probabilities = sampler.probabilities(&[10.0, 9.0, 8.0]).unwrap();
+        assert_eq!(probabilities[2], 0.0);
+        assert!((probabilities.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn deterministic_probabilities_are_one_hot() {
+        let sampler = Sampler::greedy();
+        assert_eq!(
+            sampler.probabilities(&[1.0, 3.0, 2.0]).unwrap(),
+            [0.0, 1.0, 0.0]
         );
     }
 }
