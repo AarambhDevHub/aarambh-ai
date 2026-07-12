@@ -3,58 +3,75 @@ name: Release
 on:
   push:
     tags:
-      - v1.0.0
+      - v2.0.0
 
 permissions:
   contents: write
+  checks: write
+  issues: write
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   release:
+    name: Validate and release v2.0.0 source
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
           components: clippy, rustfmt
 
-      - name: Verify version
-        run: cargo run -p aarambh-ai -- --version
+      - name: Verify release tag
+        run: test "${GITHUB_REF_NAME}" = "v2.0.0"
 
       - name: Format
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
       - name: Check
-        run: cargo check --workspace
+        run: cargo check --workspace --all-targets --locked
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast --locked
 
       - name: Documentation
-        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+        run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --locked
+
+      - name: Release audit
+        run: scripts/phase28_release_audit.sh
 
       - name: Build release binary
-        run: cargo build --release -p aarambh-ai
+        run: cargo build --release -p aarambh-ai --locked
 
-      - name: CLI smoke
+      - name: Verify CLI
         run: |
-          target/release/aarambh-ai --version
+          test "$(target/release/aarambh-ai --version)" = "aarambh-ai 2.0.0"
           target/release/aarambh-ai --help
           target/release/aarambh-ai train --help
           target/release/aarambh-ai infer --help
+          target/release/aarambh-ai eval --help
           target/release/aarambh-ai quantise --help
           target/release/aarambh-ai convert --help
           target/release/aarambh-ai finetune --help
           target/release/aarambh-ai selflearn --help
+          target/release/aarambh-ai serve --help
+
+      - name: Dependency audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          body_path: .github/release-notes/v1.0.0.md
+          name: aarambh-ai v2.0.0
+          body_path: .github/release-notes/v2.0.0.md
           generate_release_notes: true
+          make_latest: true

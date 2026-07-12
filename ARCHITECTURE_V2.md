@@ -27,6 +27,7 @@
 33. [Updated Memory & Compute Estimates](#33-updated-memory--compute-estimates)
 34. [Updated Hardware Strategy](#34-updated-hardware-strategy)
 35. [What's Explicitly Out of Scope](#35-whats-explicitly-out-of-scope)
+36. [Production Release Contract](#36-production-release-contract)
 
 ---
 
@@ -47,9 +48,10 @@ extends that pipeline in three directions:
    parallelism, both explicitly framed as systems-learning phases whose
    payoff is measured by the new evaluation harness rather than assumed.
 
-**Still true in v2.0, unchanged from v1:** no pretrained checkpoints,
-adapters, or GGUF files are released. This is a source/engineering release.
-See `RELEASE.md`.
+**v2.0.0 release policy:** no workspace crate is published to crates.io and no
+pretrained checkpoint, adapter, tokenizer, GGUF, or compiled binary is
+released. Aarambh AI ships as a locked GitHub application source release; see
+`RELEASE.md`.
 
 ---
 
@@ -93,9 +95,10 @@ aarambh-ai/
 │   └── aarambh-ai-serve/             ← NEW, LAYER 6: Inference server
 │       └── src/
 │           ├── lib.rs
-│           ├── server.rs             ← routing, OpenAI-compatible endpoints
+│           ├── api.rs                ← OpenAI-compatible request/response types
 │           ├── batching.rs           ← ContinuousBatcher
-│           └── session.rs            ← per-request KV cache + safety layer
+│           ├── metrics.rs            ← lock-free server counters
+│           └── server.rs             ← routing, auth, limits, lifecycle
 │
 └── aarambh-ai/                       ← LAYER 6: CLI binary
     └── src/cmd/
@@ -794,3 +797,28 @@ Carried over from `ROADMAP_V2.md` for architectural completeness:
   version; sparse dispatch is a documented future optimisation)
 
 These are natural v3 candidates once budget and a released model exist.
+
+---
+
+## 36. Production Release Contract
+
+Phase 28 freezes the complete workspace as application version 2.0.0. The 16
+library crates are internal layering boundaries rather than independently
+distributed products, so every package retains `publish = false`.
+
+Release invariants:
+
+- Rust 1.89 is the MSRV and current stable Rust is validated independently.
+- All 17 packages inherit one workspace version.
+- `Cargo.lock` is committed and release commands use `--locked`.
+- The portable release profile uses `opt-level=3`, Thin LTO, one codegen unit,
+  and stripped debug information without host-specific `target-cpu` flags.
+- Every exported API is documented; missing docs are a compile-time error.
+- Unsafe mmap, CUDA, and SIMD boundaries require explicit safety rationale.
+- Release automation rejects unfinished source markers, unchecked roadmap
+  tasks, publishable packages, and tracked model artifacts.
+- The `v2.0.0` tag creates a GitHub Release from the checked-in release notes.
+  No binary, model, tokenizer, adapter, or GGUF asset is uploaded.
+
+This contract changes packaging and validation, not model math, checkpoint
+formats, CLI command names, configuration schemas, or HTTP routes.

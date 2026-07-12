@@ -40,6 +40,8 @@ pub fn load_model_with_dtype(
     dtype: DType,
 ) -> Result<AarambhModel> {
     let path = path.as_ref();
+    // SAFETY: Aarambh only reads the checkpoint mapping while constructing owned
+    // tensors, and never mutates checkpoint files during this load operation.
     let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[path], dtype, device)? };
     AarambhModel::new(cfg, vb)
 }

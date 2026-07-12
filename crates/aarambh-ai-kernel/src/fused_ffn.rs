@@ -174,6 +174,8 @@ mod cuda {
             .arg(&gate_slice)
             .arg(&up_slice)
             .arg(&total);
+        // SAFETY: The validated contiguous slices cover every element addressed
+        // by the launch configuration and all buffers belong to this CUDA device.
         unsafe { builder.launch(cfg).w()? };
         Ok((CudaStorage::wrap_cuda_slice(out, dev), shape))
     }

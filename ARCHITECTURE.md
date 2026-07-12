@@ -96,12 +96,14 @@ safety guard — all in one workspace, all in Rust, all explained in this docume
 
 > **Pin these versions.** Candle's public API has changed across minor releases.
 > Using a different version from what is listed here may break compilation.
-> Run `rustup update stable` before starting. Phase 4 SIMD uses stable intrinsics.
+> Rust 1.89 is the minimum supported version. Phase 4's AVX-512 intrinsics
+> require 1.89; CI also verifies the current stable toolchain.
 
 ### Rust Toolchain
 
 ```
-stable:   rustup override set stable        ← default for all phases
+MSRV:     rustup override set 1.89.0
+stable:   rustup override set stable        ← recommended for development
 ```
 
 > **Phase 4 note:** `aarambh-ai-kernel` uses stable `std::arch` intrinsics with
@@ -113,8 +115,7 @@ stable:   rustup override set stable        ← default for all phases
 ```toml
 candle-core    = "0.10"          # confirmed latest stable on crates.io
 candle-nn      = "0.10"
-tokenizers     = "0.21"          # HuggingFace tokenizers Rust crate (stable API)
-safetensors    = "0.8"
+tokenizers     = "0.22"          # aligned with candle-core 0.10
 thiserror      = "2"
 serde          = { version = "1", features = ["derive"] }
 serde_json     = "1"
@@ -333,7 +334,7 @@ aarambh-ai/
 │           ├── metrics.rs            ← lock-free server counters
 │           └── server.rs             ← HTTP/SSE routes, auth, lifecycle
 │
-└── aarambh-ai/                       ← LAYER 6: CLI binary (source-built from GitHub v1.0 tag)
+└── aarambh-ai/                       ← LAYER 6: CLI binary (source-built from GitHub v2.0.0 tag)
     └── src/
         ├── main.rs
         ├── cmd/
@@ -1025,10 +1026,11 @@ train_state.json        ← step, epoch, micro-step, train/val/best losses
 
 ### 10.1 Why a Kernel Crate
 
-The kernel crate is the **only** place in the workspace that contains CUDA C code,
-unsafe Rust, and raw pointer arithmetic. All other crates stay 100% safe Rust.
-This boundary is intentional: you can verify every layer's correctness in pure Rust
-first, then drop in the kernel for speed without touching higher-level code.
+The kernel crate is the only place containing CUDA C code and raw SIMD pointer
+arithmetic. Two audited SafeTensors loader boundaries in `aarambh-ai-weights`
+and `aarambh-ai-vision` also use Candle's memory-mapped loader. Every unsafe
+block carries an explicit safety rationale and CI denies undocumented unsafe
+blocks. This keeps the optimized boundary small and reviewable.
 
 ### 10.2 Toolchain Requirements for SIMD
 
@@ -1848,14 +1850,17 @@ aarambh-ai selflearn flush-gradients \
 | `aarambh-ai-nn` | 2 | `RMSNorm`, `RopeCache`, `GroupedQueryAttention`, `SwiGluFfn`, `TransformerBlock` | `core`, `candle-nn`, `kernel` |
 | `aarambh-ai-kernel` | 2 | `flash_attn::forward()`, `fused_norm::rms_norm()`, dispatch | `core`, `candle-core`, `cc`, `rayon` |
 | `aarambh-ai-model` | 3 | `AarambhModel`, `TokenEmbedding`, `LmHead` | `core`, `nn` |
-| `aarambh-ai-weights` | 3 | `save_model()`, `load_model()`, `GgufReader`, `convert_hf()` (pragmatic slicing) | `core`, `model`, `safetensors` |
+| `aarambh-ai-weights` | 3 | `save_model()`, `load_model()`, `GgufReader`, `convert_hf()` (pragmatic slicing) | `core`, `model`, Candle SafeTensors |
 | `aarambh-ai-quant` | 3 | `quantise_i8()`, `GptqQuantiser`, `AwqQuantiser`, `QuantisedKvCache`, `QatNode` | `core`, `model` |
 | `aarambh-ai-train` | 4 | `Trainer`, `AdamW`, `CosineScheduler`, `CheckpointManager` | `core`, `model`, `data`, `weights` |
 | `aarambh-ai-finetune` | 4 | `LoraLayer`, `inject_lora()`, `merge_lora()`, `SftTrainer`, `GrpoTrainer` (deterministic verifier) | `core`, `model`, `train`, `quant` |
 | `aarambh-ai-inference` | 5 | `InferenceEngine`, `KvCache`, `Sampler`, `ThinkingController` | `core`, `model`, `weights` |
 | `aarambh-ai-safety` | 5 | `SafetyGuard`, `SafetyPolicy`, `SafetyVerdict` | `core`, `inference` |
 | `aarambh-ai-selflearn` | 5 | `SelfLearnLoop` (owns OnlineGrpo, Replay), `critique_response` (free fn), `LearningMetrics` | `core`, `tokenizer`, `model`, `weights`, `train`, `inference`, `finetune` |
-| `aarambh-ai` (binary) | 6 | CLI commands: train / infer / finetune / quantise / convert / eval / selflearn | all crates |
+| `aarambh-ai-eval` | 5 | `EvalTask`, `EvalContext`, `Scorecard`, benchmark tasks | `model`, `inference`, `finetune`, `vision` |
+| `aarambh-ai-vision` | 3 | `ClipVisionEncoder`, `VisionProjector`, image fusion | `core`, `candle`, `image` |
+| `aarambh-ai-serve` | 6 | `ServeConfig`, `BatcherHandle`, OpenAI API types | `inference`, `safety`, `axum` |
+| `aarambh-ai` (binary) | 6 | CLI commands: train / infer / eval / finetune / quantise / convert / selflearn / serve | all crates |
 
 ---
 

@@ -1,3 +1,7 @@
+//! Command-line interface for training, tuning, evaluating, and serving Aarambh AI models.
+
+#![deny(missing_docs)]
+
 mod cmd;
 mod ui;
 

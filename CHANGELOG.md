@@ -1,5 +1,54 @@
 # Changelog
 
+## [2.0.0] - 2026-07-12
+
+### Added
+
+- Completed the v2 engineering roadmap across Phases 16–28:
+  - YaRN/NTK/linear long-context RoPE scaling and progressive context schedules
+  - Evaluation harness with language, reasoning, preference, vision, and tool tasks
+  - DoRA/QDoRA, VLM DoRA/QDoRA, DPO/QDPO, and tool-call fine-tuning
+  - Frozen CLIP-style vision encoder, projector, image fusion, VQA training, and vision self-learning
+  - Mixture-of-Experts FFNs and single-node NCCL data-parallel training
+  - Exact speculative decoding and grammar-constrained function calling
+  - Axum 0.8.9 OpenAI-compatible inference server with continuous batching
+- Added `.github/release-notes/v2.0.0.md` and a source-only v2 tag workflow.
+- Added `scripts/phase28_release_audit.sh` for version, publishing, artifact,
+  roadmap, CLI, lockfile, and unfinished-marker validation.
+- Added the held-out tiny preference fixture expected by the preference eval task.
+
+### Changed
+
+- Set the complete 17-package workspace to version 2.0.0 through shared package metadata.
+- Raised the MSRV to Rust 1.89, the first release supporting the AVX-512 intrinsics used by the kernel path.
+- Committed `Cargo.lock` and changed CI, release, installation, and validation commands to `--locked`.
+- Aligned the direct `tokenizers` dependency with Candle's 0.22 line and removed an unused workspace dependency.
+- Enabled a portable optimized release profile with `opt-level=3`, Thin LTO, one codegen unit, and stripped debug information.
+- Updated README, architecture, roadmaps, guides, contributing, security, and release policy for the completed v2 release.
+- v2.0.x is now the supported release line; v1.0.x is no longer maintained.
+
+### Fixed
+
+- Removed the final dead-code suppression and unused scalar helper.
+- Added explicit safety rationale to memory-mapped checkpoint and CUDA/SIMD unsafe boundaries.
+- Corrected stale Rust 1.80, v1-current, v2-in-progress, and crates.io-future wording.
+
+### Security
+
+- Streaming safety now evaluates rolling cross-token windows before SSE release,
+  redacts PII, blocks toxic continuations, and keeps structured tool calls atomic.
+- Release checks deny undocumented unsafe blocks, missing public API docs, known
+  RustSec vulnerabilities, tracked model artifacts, and crates.io publishing steps.
+- Non-loopback serving requires bearer authentication; request size, queue capacity,
+  CORS, error exposure, and shutdown behavior remain bounded.
+
+### Release Policy
+
+- v2.0.0 is a GitHub application source release only.
+- All workspace packages remain `publish = false` and are not released to crates.io.
+- No pretrained checkpoints, adapters, tokenizer artifacts, GGUF files, optimizer
+  state, or compiled CPU/CUDA binaries are attached.
+
 ## [2.0.0-alpha.12] - 2026-07-12
 
 ### Added

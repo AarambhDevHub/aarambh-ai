@@ -4,7 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
+| 2.0.x   | :white_check_mark: |
+| 1.0.x   | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -28,6 +29,8 @@ Security concerns for aarambh-ai include:
 - Training data poisoning vectors
 - Inference-time prompt injection
 - Denial of service via crafted inputs
+- Unsafe CUDA/SIMD or memory-mapped checkpoint boundary violations
+- Inference server authentication, isolation, or streaming-safety bypasses
 
 ## Responsible Disclosure
 

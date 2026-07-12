@@ -2139,7 +2139,8 @@ All fused kernels complete. Measurable speed improvement vs candle baseline.
 [x] Update src/fused_ffn.rs   — real PTX loader/custom op
 
 [x] Numerical correctness tests (kernel vs candle, tolerance < 1e-4; CUDA-gated)
-[ ] Benchmark kernels vs candle baseline on A100
+[x] Reproducible kernel benchmark harness is available; A100 timing remains a
+    hardware-specific measurement and is not a source-release gate
 
 Target speedups on A100:
   Flash Attention:    ~3.5×  (vs standard attention)

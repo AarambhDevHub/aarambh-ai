@@ -243,6 +243,8 @@ mod cuda {
             .arg(&heads)
             .arg(&head_dim)
             .arg(&seqlen_offset);
+        // SAFETY: Shape, offset, dtype, contiguity, and device ownership are
+        // validated before the kernel receives these device pointers.
         unsafe { builder.launch(cfg).w()? };
         Ok((CudaStorage::wrap_cuda_slice(out, dev), shape))
     }
