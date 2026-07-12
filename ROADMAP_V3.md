@@ -1,0 +1,1236 @@
+# ROADMAP_V3.md — aarambh-ai v3.0
+
+> Step-by-step build plan for v3.0. Every phase ends with working, testable
+> code. Builds on the completed v2.0.0 base (Phases 0–28, all ✅). No
+> pretrained checkpoints are released as part of v3.0 — this is a
+> source/engineering release, same policy as v1.0.0 and v2.0.0.
+
+---
+
+## How to Read This Roadmap
+
+Each phase has:
+- **Goal** — exactly what you will have when this phase is done
+- **Tasks** — the checklist to follow, in order, grouped by crate
+- **Tests** — what you write to prove it works
+- **Milestone** — how you know you are done, with the git tag to cut
+
+Work top to bottom. Do not skip phases — each phase depends on the ones
+before it. Phases 29–32 are architecture-core changes and are deliberately
+sequenced first because everything after them (MoE, distillation, QAT)
+trains *on top of* the new attention stack, not the old one. Phases 33–36
+are training/efficiency phases. Phases 35–36 are multimodal. Phase 37 is
+agentic. Phase 38 is memory/self-learning. Phase 39 adds the Max thinking
+mode. Phase 40 is the crates.io publish.
+
+---
+
+## Phase Map (Quick Reference)
+
+```
+Phase 29 →  Gated DeltaNet (hybrid linear attention)   (10–14 days)  [Kaggle]
+Phase 30 →  DeepSeek Sparse Attention (DSA)             (10–14 days)  [Kaggle]
+Phase 31 →  DeepSeek-style fine-grained MoE + shared    (10–14 days)  [Kaggle]
+            expert routing (v3 upgrade of v2 dense MoE)
+Phase 32 →  Multi-Token Prediction (MTP)                (7–10 days)   [Kaggle]
+Phase 33 →  On-policy distillation                      (10–14 days)  [Kaggle]
+Phase 34 →  Native QAT (quantization-aware training)    (7–10 days)   [i3 + Kaggle]
+Phase 35 →  Native video understanding                  (14–18 days)  [Kaggle]
+Phase 36 →  Native document understanding               (10–14 days)  [Kaggle]
+Phase 37 →  Long-horizon tool-use chains                (10–14 days)  [i3 + Kaggle]
+Phase 38 →  Forgetting diagnostics tied to Manas         (7–10 days)   [i3 + Kaggle]
+Phase 39 →  Max thinking mode (5th reasoning depth)      (5–7 days)    [i3 + Kaggle]
+Phase 40 →  crates.io publish (v3.0.0)                   (5–7 days)    [all]
+```
+
+**Total realistic estimate: 105–145 days (~3.5–4.8 months)**
+
+---
+
+## Why This Order
+
+1. **29–30 (Gated DeltaNet, DSA) come first** because they replace the
+   attention primitive that every later phase trains on top of. Doing
+   attention surgery *after* MoE or distillation is built would mean
+   re-validating both against a moving target. Get the attention stack
+   stable and eval-harness-verified (`aarambh-ai-eval`, v2 Phase 17) before
+   anything else touches it.
+2. **31 (fine-grained MoE)** comes right after because it is the other
+   half of the "efficient frontier architecture" story, and because v2's
+   Phase 22 already shipped a dense-masked-matmul MoE — this phase is an
+   upgrade path on an existing, tested crate, not a fresh build. It
+   benefits from having the new attention stack (29–30) already in place
+   so routing is tuned against the real v3 forward pass, not the old one.
+2. **32 (MTP)** follows MoE directly because multi-token prediction heads
+   are cheapest to validate once the router is stable, and MTP's auxiliary
+   loss is reused as a training signal by both Phase 33 (distillation) and
+   the base pretraining recipe going forward.
+3. **33–34 (distillation, QAT)** are training-efficiency phases that make
+   sense once the target architecture (attention + MoE + MTP) is frozen —
+   distilling or quantizing a model whose architecture is still moving is
+   wasted work.
+4. **35–36 (video, document understanding)** come together because they
+   share a vision encoder and multimodal fusion path (both build on v2's
+   Phase 19 `aarambh-ai-vision` crate). Video first because it is the
+   larger architectural lift (temporal fusion); document understanding
+   reuses the same patch encoder with a layout-aware head, so it is
+   naturally the smaller follow-on phase.
+5. **37 (long-horizon tool use)** comes after multimodal because real
+   agent chains increasingly need to reason over tool outputs that include
+   images and documents (a search result page, a screenshot, a PDF
+   attachment) — this phase upgrades v2 Phase 26's single-call, emit-only
+   tool use into multi-step chains, and benefits from 35–36 being done
+   first so chains can include multimodal tool results.
+6. **38 (forgetting diagnostics)** comes late deliberately — it needs a
+   model with enough moving parts (new attention, MoE, distillation, new
+   modalities) to actually have something worth diagnosing. This phase
+   also directly informs Manas's own anti-forgetting design, hence "tied
+   to Manas" — see `SELF_LEARNING_V3.md`.
+7. **39 (Max thinking mode)** is placed near the end so it inherits every
+   v3 architecture change — a longer thinking budget is only worth adding
+   once the model underneath it (new attention stack, MoE, MTP, QAT) is
+   the version that will actually use those extra tokens well, not the
+   pre-v3 architecture.
+8. **40 (crates.io)** is last, exactly like v1's Phase 15 and v2's Phase 28
+   discipline: ship the *code* as source once it is proven, never ship
+   unproven code or unreleased weights.
+
+---
+
+## Workspace `Cargo.toml` Additions
+
+```toml
+[workspace]
+members = [
+    # ...existing v1.0.0 + v2.0.0 members unchanged...
+    "crates/aarambh-ai-core",
+    "crates/aarambh-ai-tokenizer",
+    "crates/aarambh-ai-data",
+    "crates/aarambh-ai-nn",
+    "crates/aarambh-ai-kernel",
+    "crates/aarambh-ai-model",
+    "crates/aarambh-ai-weights",
+    "crates/aarambh-ai-quant",
+    "crates/aarambh-ai-train",
+    "crates/aarambh-ai-finetune",
+    "crates/aarambh-ai-inference",
+    "crates/aarambh-ai-safety",
+    "crates/aarambh-ai-selflearn",
+    "crates/aarambh-ai-eval",
+    "crates/aarambh-ai-vision",
+    "crates/aarambh-ai-serve",
+
+    # new in v3.0
+    "crates/aarambh-ai-distill",     # Phase 33
+    "crates/aarambh-ai-agent",       # Phase 37
+
+    "aarambh-ai",
+]
+```
+
+Two new crates (`aarambh-ai-distill`, `aarambh-ai-agent`). Everything else
+extends existing crates, most heavily `aarambh-ai-nn` (attention, MoE, MTP),
+`aarambh-ai-vision` (video, documents), and `aarambh-ai-quant` (native QAT).
+No new external dependencies beyond what's listed in each phase's
+Dependency Policy note.
+
+---
+
+## Phase 29 — Gated DeltaNet (Hybrid Linear Attention)
+
+**Duration:** 10–14 days | **Hardware:** Kaggle (free quota)
+
+### Goal
+A hybrid attention block that interleaves Gated DeltaNet linear-attention
+layers with a minority of full-attention layers, retrofitted onto an
+existing pretrained checkpoint via continued pretraining rather than a
+from-scratch rebuild — matching how 2026 open-weight labs (Qwen3-Next and
+successors) describe adopting this mechanism as a "low-commitment"
+modification slotted in during fine-tuning.
+
+### Tasks
+
+**`aarambh-ai-nn`:**
+```
+[ ] src/gated_deltanet.rs
+      DeltaNet recurrence: chunked linear-attention update rule with a
+      per-channel gate controlling how much of the running state is kept
+      vs overwritten at each step (state = state * gate + update)
+      GatedDeltaNetLayer::forward() — chunk-parallel form for training
+      (matmul-friendly, avoids literal sequential recurrence), sequential
+      recurrent form for autoregressive inference (O(1) state per step,
+      no KV cache growth)
+      DeltaNetState — fixed-size recurrent state, replaces growing KV
+      cache for linear-attention layers specifically
+
+[ ] src/attention.rs
+      AttentionKind enum: Full | GatedDeltaNet
+      HybridAttentionSchedule — which layer indices use which kind (e.g.
+      1 full-attention layer per N GatedDeltaNet layers, N configurable)
+      Full-attention layers keep the existing GQA + RoPE/YaRN path
+      (`ARCHITECTURE.md` §6.3, `ARCHITECTURE_V2.md` §21) completely
+      unchanged — hybrid means "some layers differ," not "attention is
+      replaced everywhere"
+```
+
+**`aarambh-ai-model`:**
+```
+[ ] Model config gains `attention_schedule: Option<HybridAttentionSchedule>`
+[ ] Backward compatible: attention_schedule = None reproduces exact v1/v2
+    all-full-attention behaviour
+[ ] New hybrid variants of Medium/Large configs
+      configs/medium_hybrid.toml
+      configs/large_hybrid.toml
+```
+
+**`aarambh-ai-train`:**
+```
+[ ] Continued-pretraining recipe: load an existing v2 checkpoint, replace
+    the scheduled layers' weights with freshly-initialised GatedDeltaNet
+    parameters, keep untouched layers' weights loaded as-is, train at a
+    reduced learning rate so the untouched layers do not drift far from
+    their pretrained state while the new layers learn
+[ ] Retrofit validation: eval-harness score (v2 Phase 17) before and after
+    retrofit, on the same holdout, must not regress beyond an documented
+    tolerance band before the retrofit is considered successful
+```
+
+**`aarambh-ai-weights`:**
+```
+[ ] Partial-checkpoint loading: load full-attention layer weights from an
+    existing SafeTensors checkpoint while initialising GatedDeltaNet layer
+    weights fresh, in a single load call
+```
+
+### Data Setup
+
+```bash
+# Reuses the same continued-pretraining corpus style as v2 Phase 16
+# (long-document data), since Gated DeltaNet's main payoff is long-context
+# efficiency — retrofit on documents long enough to exercise it.
+scripts/phase29_prepare_hybrid_retrofit.sh data
+```
+
+### Tests
+
+```rust
+#[test]
+fn attention_schedule_none_matches_v2_full_attention_exactly() {
+    // No hybrid schedule configured -> bit-identical to pre-v3 output.
+}
+
+#[test]
+fn gated_deltanet_chunk_parallel_matches_sequential_recurrence() {
+    // Training-time chunked form and inference-time recurrent form must
+    // produce numerically equivalent outputs (within float tolerance).
+}
+
+#[test]
+fn deltanet_state_size_is_constant_regardless_of_sequence_length() {
+    // Unlike KV cache, linear-attention state must not grow with tokens
+    // generated — this is the whole point of the mechanism.
+}
+
+#[test]
+fn partial_checkpoint_load_preserves_full_attention_layer_weights_exactly() {}
+
+#[test]
+fn retrofit_eval_score_within_tolerance_of_pre_retrofit_baseline() {}
+```
+
+### Milestone
+```
+Hybrid Medium/Large configs retrofit successfully from an existing v2
+checkpoint via continued pretraining, with eval-harness scores within the
+documented tolerance band of the pre-retrofit baseline, and generation
+throughput measurably improved at long context lengths (16K+, using the
+Phase 16 long-context setup) versus the all-full-attention baseline.
+
+git commit -m "feat: Phase 29 — Gated DeltaNet hybrid linear attention"
+git tag v3.0.0-alpha.1
+```
+
+---
+
+## Phase 30 — DeepSeek Sparse Attention (DSA)
+
+**Duration:** 10–14 days | **Hardware:** Kaggle (free quota)
+
+### Goal
+A sparse-attention mechanism for the remaining full-attention layers
+(those not converted to Gated DeltaNet in Phase 29) that reduces KV-cache
+pressure at long context by having each query attend to a learned/scored
+subset of keys rather than the full causal history, cutting memory and
+compute at long sequence lengths without a proportional quality loss.
+
+### Tasks
+
+**`aarambh-ai-nn`:**
+```
+[ ] src/sparse_attention.rs
+      DsaConfig — top_k (how many key blocks each query attends to),
+      block_size (granularity of key selection, coarser than per-token)
+      lightning_indexer() — a small auxiliary scoring path that ranks key
+      blocks per query cheaply, before the expensive full attention matmul
+      runs only over the selected blocks
+      DsaAttention::forward() — two-stage: (1) index/score, (2) sparse
+      gather + standard scaled-dot-product attention over selected blocks
+      Falls back to full attention automatically when sequence length is
+      below a configurable threshold (sparsity has no payoff on short
+      sequences, only adds overhead)
+
+[ ] src/attention.rs
+      AttentionKind gains a third variant: Full | GatedDeltaNet | Sparse
+      HybridAttentionSchedule extended to place Sparse on the "full
+      attention" layer slots from Phase 29's schedule
+```
+
+**`aarambh-ai-model`:**
+```
+[ ] Model config gains `dsa_config: Option<DsaConfig>`, applies to
+    whichever layers HybridAttentionSchedule marks as Sparse
+[ ] New configs layering DSA on top of Phase 29's hybrid schedules
+      configs/medium_hybrid_dsa.toml
+      configs/large_hybrid_dsa.toml
+```
+
+**`aarambh-ai-train`:**
+```
+[ ] Indexer training: the lightning indexer needs its own small
+    supervised signal (distilled from full-attention scores on a subset
+    of training steps) so it learns to rank the same key blocks a full
+    attention pass would have weighted highly
+[ ] KV-cache memory benchmark harness: measures peak KV-cache memory at
+    4K/16K/32K context with and without DSA, on the same config
+```
+
+### Tests
+
+```rust
+#[test]
+fn dsa_falls_back_to_full_attention_below_length_threshold() {}
+
+#[test]
+fn lightning_indexer_selected_blocks_overlap_full_attention_top_blocks() {
+    // Statistical check: indexer's top-ranked blocks agree with a full
+    // attention pass's actual top-weighted blocks above a set threshold,
+    // on a held-out sample.
+}
+
+#[test]
+fn sparse_attention_output_shape_matches_full_attention_output_shape() {}
+
+#[test]
+fn kv_cache_memory_at_32k_context_is_below_full_attention_baseline() {}
+```
+
+### Milestone
+```
+DSA-enabled configs show measured KV-cache memory reduction at 16K/32K
+context versus the Phase 29 hybrid-only baseline, with eval-harness scores
+within documented tolerance. Combined with Phase 29, the attention stack
+for v3.0 is now: mostly Gated DeltaNet, a minority of DSA-sparse layers,
+zero fully-dense full-attention layers by default (dense full attention
+remains available as a config fallback for debugging/comparison).
+
+git commit -m "feat: Phase 30 — DeepSeek Sparse Attention (DSA)"
+git tag v3.0.0-alpha.2
+```
+
+---
+
+## Phase 31 — DeepSeek-Style Fine-Grained MoE + Shared Expert
+
+**Duration:** 10–14 days | **Hardware:** Kaggle (free quota)
+
+### Goal
+Upgrade v2 Phase 22's dense-masked-matmul MoE into a fine-grained routing
+design: many small experts (rather than few large ones) plus one or more
+always-active "shared" experts that every token passes through regardless
+of router decisions — the pattern MiniMax and DeepSeek-derived
+architectures use to reach near-frontier scores at low active-parameter
+counts.
+
+### Tasks
+
+**`aarambh-ai-nn`:**
+```
+[ ] src/moe.rs (extends v2's implementation)
+      MoeConfig gains: num_shared_experts (default 1), fine_grained_factor
+      (splits each v2-era expert into fine_grained_factor smaller experts
+      of proportionally smaller FFN width, keeping total FFN capacity
+      roughly constant while increasing expert count and specialisation)
+      SharedExpertPath — always-active FFN, output added unconditionally
+      to every token's routed-expert output before the residual connection
+      Router unchanged in kind (top-k softmax gate) but now scores a
+      larger, finer-grained expert pool
+
+[ ] src/dispatch.rs (extends v2's implementation)
+      Dense-masked-matmul dispatch (v2's shipped approach) remains the
+      default for Kaggle-scale training — sparse/grouped dispatch stays
+      documented out-of-scope per v2 §35, still true in v3 unless
+      hardware access changes
+      Load-balancing auxiliary loss extended to account for the shared
+      expert's fixed activation (it is excluded from the balancing loss
+      since it is never routed, only always-on)
+```
+
+**`aarambh-ai-model`:**
+```
+[ ] Model config's existing `moe: Option<MoeConfig>` (v2 §20) gains the
+    new fields above; old MoeConfig values remain valid (fine_grained_factor
+    defaults to 1, num_shared_experts defaults to 0 — reproduces v2 MoE
+    exactly when unset)
+[ ] New fine-grained + shared-expert configs
+      configs/medium_finegrained_moe.toml
+      configs/large_finegrained_moe.toml
+```
+
+**`aarambh-ai-train`:**
+```
+[ ] Router warm-start: initialise the finer-grained router from the
+    already-trained v2 coarse router's weights where dimensions allow,
+    rather than training routing from scratch
+[ ] Expert-count vs quality sweep script: trains small runs across a range
+    of (num_experts, fine_grained_factor, top_k) combinations and logs
+    eval-harness deltas, mirroring the MiniMax-M2.7-style observation that
+    fine-grained routing can beat coarse routing at equal active-parameter
+    budgets
+```
+
+### Tests
+
+```rust
+#[test]
+fn moe_config_defaults_reproduce_v2_dense_moe_exactly() {
+    // fine_grained_factor=1, num_shared_experts=0 -> byte-identical to
+    // Phase 22's behaviour.
+}
+
+#[test]
+fn shared_expert_output_is_added_for_every_token_unconditionally() {}
+
+#[test]
+fn shared_expert_excluded_from_load_balancing_auxiliary_loss() {}
+
+#[test]
+fn total_ffn_capacity_roughly_conserved_across_fine_grained_factor_values() {
+    // Splitting into more, smaller experts should not silently change the
+    // total parameter budget by more than the documented tolerance.
+}
+
+#[test]
+fn router_warm_start_loads_compatible_dimensions_from_v2_checkpoint() {}
+```
+
+### Milestone
+```
+Fine-grained + shared-expert MoE configs trained and eval-harness scored
+against the v2 dense-MoE baseline at matched active-parameter budgets,
+following the same "does the trade pay off" discipline v2 Phase 22
+established. Sweep results documented in docs/phase31_moe_sweep.md.
+
+git commit -m "feat: Phase 31 — fine-grained MoE routing with shared expert"
+git tag v3.0.0-alpha.3
+```
+
+---
+
+## Phase 32 — Multi-Token Prediction (MTP)
+
+**Duration:** 7–10 days | **Hardware:** Kaggle (free quota)
+
+### Goal
+Add auxiliary prediction heads that predict multiple future tokens per
+position during training (not just the next token), giving a denser
+training signal per forward pass and a reusable draft mechanism for
+inference-time speedups — and providing the auxiliary supervision that
+Phase 33's on-policy distillation builds on.
+
+### Tasks
+
+**`aarambh-ai-nn`:**
+```
+[ ] src/mtp.rs
+      MtpConfig — num_future_tokens (how many extra positions ahead each
+      head predicts, e.g. 2–3 following the MTP-3-style setups used by
+      GLM-4.7/MiniMax M2.1-derived architectures)
+      MtpHead — lightweight additional transformer block + LM head per
+      future-token offset, each conditioned on the shared trunk's hidden
+      state plus the (real or previously-predicted) token embeddings for
+      intervening positions
+      MtpHead::forward() used only during training; discarded (or reused
+      as a speculative draft head, see below) at plain inference time
+```
+
+**`aarambh-ai-train`:**
+```
+[ ] src/mtp_loss.rs
+      Auxiliary loss: weighted sum of the main next-token loss and each
+      MTP head's future-token loss, weight configurable and typically
+      small relative to the main loss (auxiliary signal, not the primary
+      objective)
+      Loss logging reports main-loss and each MTP-head loss separately in
+      the training scorecard
+```
+
+**`aarambh-ai-inference`:**
+```
+[ ] MTP heads optionally reused as the draft model for Phase 25's
+    speculative decoding (v2 §29) — since they already predict several
+    tokens ahead from the same trunk, they are a natural free draft
+    source, avoiding the need for a separate small draft checkpoint in
+    configs where MTP is enabled
+```
+
+### Tests
+
+```rust
+#[test]
+fn mtp_head_output_shape_matches_num_future_tokens_config() {}
+
+#[test]
+fn mtp_disabled_config_trains_identically_to_pre_v3_next_token_only_loss() {}
+
+#[test]
+fn mtp_auxiliary_loss_does_not_dominate_main_loss_at_default_weight() {}
+
+#[test]
+fn mtp_heads_usable_as_speculative_draft_source_without_separate_checkpoint() {}
+```
+
+### Milestone
+```
+MTP-enabled training runs show improved sample efficiency (eval-harness
+score at matched token budget) versus a matched non-MTP run, and MTP-heads-
+as-draft speculative decoding shows a measured throughput improvement over
+Phase 25's separate-draft-checkpoint approach where a draft checkpoint
+would otherwise be needed.
+
+git commit -m "feat: Phase 32 — multi-token prediction heads"
+git tag v3.0.0-alpha.4
+```
+
+---
+
+## Phase 33 — On-Policy Distillation
+
+**Duration:** 10–14 days | **Hardware:** Kaggle (free quota)
+
+### Goal
+A distillation pipeline where the student model is trained on its own
+on-policy rollouts scored/corrected by a larger teacher (rather than
+static teacher-generated data), reducing the train/inference distribution
+mismatch that plain offline distillation suffers from.
+
+### Tasks
+
+**New crate `aarambh-ai-distill`:**
+```
+[ ] src/rollout.rs
+      Student generates completions for a batch of prompts using its own
+      current weights (on-policy) — reuses aarambh-ai-inference's decode
+      path directly, no separate generation code
+
+[ ] src/teacher_score.rs
+      TeacherScorer trait — abstracts over "teacher" being either a larger
+      local aarambh-ai checkpoint or a scored-reference dataset; scores or
+      corrects the student's own rollouts rather than only supplying
+      independently-generated teacher text
+      KL-style or reward-style scoring paths, both supported behind the
+      trait so the same distillation loop works with either teacher kind
+
+[ ] src/distill_loss.rs
+      On-policy distillation loss: student is trained to match
+      teacher-assigned quality on its *own* generated sequences, blending
+      with the MTP auxiliary loss (Phase 32) where enabled
+```
+
+**`aarambh-ai-train`:**
+```
+[ ] Distillation training loop: alternates rollout generation (inference
+    mode, no gradient) with gradient updates on the scored rollouts
+    (training mode) — structurally similar to v1's Online GRPO loop
+    (`SELF_LEARNING.md` §5) but using teacher scoring instead of
+    verifier-based reward
+```
+
+### Tests
+
+```rust
+#[test]
+fn rollout_generation_reuses_inference_decode_path_unmodified() {}
+
+#[test]
+fn teacher_scorer_trait_accepts_both_local_checkpoint_and_dataset_backends() {}
+
+#[test]
+fn distill_loss_gradient_flows_only_through_student_not_teacher() {}
+
+#[test]
+fn on_policy_distillation_reduces_train_inference_distribution_gap_metric() {
+    // Measures a documented proxy metric (e.g. KL between student's
+    // training-time and inference-time output distributions) before/after.
+}
+```
+
+### Milestone
+```
+A Small or Medium student distilled on-policy from a Large teacher shows
+an eval-harness improvement over the same student trained with plain
+offline distillation at a matched compute budget, documented in
+docs/phase33_distillation_results.md.
+
+git commit -m "feat: Phase 33 — on-policy distillation pipeline"
+git tag v3.0.0-alpha.5
+```
+
+---
+
+## Phase 34 — Native QAT (Quantization-Aware Training)
+
+**Duration:** 7–10 days | **Hardware:** i3 (small scales) + Kaggle (larger)
+
+### Goal
+Fold quantization into training itself — rather than v1's post-hoc
+INT4/GGUF conversion (`ARCHITECTURE.md` §16) applied only after training
+finishes, QAT simulates quantization noise during training so the model
+learns weights that are robust to it, matching the 2026 pattern of
+shipping official quantized variants as part of the release itself, not
+an afterthought.
+
+### Tasks
+
+**`aarambh-ai-quant`:**
+```
+[ ] src/qat.rs
+      FakeQuantize — forward pass simulates INT4/INT8 rounding (quantize
+      then immediately dequantize) so the forward numerics match what a
+      quantized model would see, while the backward pass uses a
+      straight-through estimator so gradients still flow
+      QatConfig — target bit-width, which layers are QAT-wrapped (usually
+      linear/FFN weights, not norms or embeddings, matching v1's existing
+      INT4 scope in §16)
+      Reuses v1's existing quantization scale/zero-point calculation code
+      (`ARCHITECTURE.md` §16) for the fake-quant forward pass — no new
+      quantization math, just applied earlier and differentiably
+```
+
+**`aarambh-ai-train`:**
+```
+[ ] QAT training recipe: start from an existing full-precision checkpoint,
+    continue training a modest number of steps with FakeQuantize enabled
+    (short recipe, not a from-scratch run — same "retrofit via continued
+    training" pattern as Phase 29)
+[ ] Post-QAT conversion reuses v1's existing GGUF export path unchanged —
+    QAT changes what the weights *are*, not how they get exported
+```
+
+### Tests
+
+```rust
+#[test]
+fn fake_quantize_forward_matches_post_hoc_quantization_numerically() {}
+
+#[test]
+fn fake_quantize_straight_through_backward_produces_finite_gradients() {}
+
+#[test]
+fn qat_trained_checkpoint_loses_less_eval_score_than_post_hoc_quantized_baseline() {
+    // The actual point of QAT: quantized-after-QAT should beat
+    // quantized-after-the-fact at the same bit-width, on the eval harness.
+}
+
+#[test]
+fn qat_config_default_off_reproduces_v1_full_precision_training_exactly() {}
+```
+
+### Milestone
+```
+QAT-trained Small/Medium checkpoints, quantized to INT4, show a smaller
+eval-harness score drop versus their full-precision baseline than v1's
+post-hoc-quantized equivalents at the same bit-width, on the same holdout
+set. INT4/INT8 QAT variants documented as first-class config options
+alongside the existing post-hoc path (which remains available and is not
+removed).
+
+git commit -m "feat: Phase 34 — native quantization-aware training"
+git tag v3.0.0-alpha.6
+```
+
+---
+
+## Phase 35 — Native Video Understanding
+
+**Duration:** 14–18 days | **Hardware:** Kaggle (free quota)
+
+### Goal
+Extend v2's frozen-ViT vision pipeline (`ARCHITECTURE_V2.md` §24–25) to
+video: sample and encode frames, fuse them with temporal position
+information, and train on free public video-QA data — built in as a
+first-class modality path from this phase forward rather than adapted
+onto the text model as an afterthought, matching how MiniMax M3 and
+Qwen3.5 integrate video/vision early rather than bolting it on.
+
+### Tasks
+
+**`aarambh-ai-vision` (extends v2's crate):**
+```
+[ ] src/video_sample.rs
+      FrameSampler — uniform or scene-change-aware frame sampling from a
+      video file at a configurable target frame count, reusing the
+      `image` crate decode path already allowed in v2's dependency policy
+      (§32) for the per-frame images; video container decode uses a
+      permitted, license-compatible crate documented in the Dependency
+      Policy update below
+
+[ ] src/temporal_fusion.rs
+      TemporalPositionEmbedding — adds a learned or sinusoidal temporal
+      offset to each sampled frame's projected tokens, distinguishing
+      "frame 1 of 8" from "frame 8 of 8" before fusion into the language
+      model's token stream
+      interleave_video_tokens() — extends v2's interleave_image_tokens()
+      (§24) to handle a sequence of frame-token blocks rather than one
+      image's tokens
+
+[ ] src/instruct_data.rs (extends v2's schema)
+      VideoQaExample — JSONL schema for video-question-answer training
+      pairs, alongside v2's existing VqaExample
+```
+
+**`aarambh-ai-finetune`:**
+```
+[ ] Video instruction tuning reuses v2 Phase 20's DoRA-adapted VLM
+    training path (`vlm_dora.rs`), extended to accept a sequence of frame
+    embeddings per example instead of a single image's embeddings
+```
+
+**`aarambh-ai-tokenizer`:**
+```
+[ ] New reserved special tokens: <video>, <video_end>, <frame_sep> — IDs
+    allocated adjacent to v2's existing <image>/<image_end> tokens
+```
+
+### Data Setup
+
+```bash
+# Free public video-QA data (e.g. a small public video-caption/QA dataset
+# subset that fits Kaggle's free storage/compute quota — same "free and
+# public only" policy as every prior phase, no paid synthetic data).
+scripts/phase35_prepare_video_qa.sh data
+```
+
+### Tests
+
+```rust
+#[test]
+fn frame_sampler_returns_configured_frame_count_for_variable_length_video() {}
+
+#[test]
+fn temporal_position_embedding_distinguishes_frame_order() {
+    // Shuffling frame order changes the fused embedding sequence, proving
+    // temporal information is actually encoded, not just concatenated.
+}
+
+#[test]
+fn interleave_video_tokens_extends_image_interleaving_without_regressing_it() {
+    // Single-frame ("image") case must still behave exactly as v2's
+    // interleave_image_tokens() did.
+}
+
+#[test]
+fn video_qa_instruction_tuning_reuses_vlm_dora_path_without_duplication() {}
+```
+
+### Milestone
+```
+Model correctly answers a held-out set of video-QA prompts (free/public
+subset) with accuracy tracked via the eval harness's new video task,
+following the same frozen-encoder-plus-trainable-projector economics v2
+established for images — only the temporal fusion and per-frame sampling
+are new trainable/engineering surface.
+
+git commit -m "feat: Phase 35 — native video understanding"
+git tag v3.0.0-alpha.7
+```
+
+---
+
+## Phase 36 — Native Document Understanding
+
+**Duration:** 10–14 days | **Hardware:** Kaggle (free quota)
+
+### Goal
+Extend the same vision pipeline to documents (PDFs, scanned pages,
+multi-column layouts, tables) with layout-aware encoding, sharing the
+frozen ViT encoder and fusion path from Phases 19/20/35 rather than
+standing up a separate document-specific model.
+
+### Tasks
+
+**`aarambh-ai-vision` (extends the crate again):**
+```
+[ ] src/document_sample.rs
+      PageRasterizer — renders PDF/document pages to images for the
+      existing frozen ViT encoder path (documents are treated as a
+      sequence of page-images, reusing v2's per-image encoder rather than
+      a new architecture)
+      Reuses `image` crate preprocessing (v2 §32 dependency policy);
+      document-to-image rendering uses a permitted crate, documented below
+
+[ ] src/layout_projector.rs
+      LayoutAwareProjector — extends v2's plain Projector MLP (§24) with
+      2D positional information per patch (row/column position on the
+      page), so the model can distinguish "this text is in a table cell"
+      from "this text is a paragraph," which a plain sequential ViT patch
+      stream loses
+      Table/multi-column structure is not separately parsed/OCR'd —
+      the model learns layout from position-augmented patches plus
+      instruction-tuning data, consistent with the "vision-language
+      reasoning" framing of v2's VLM approach rather than a hybrid
+      OCR+LLM pipeline
+
+[ ] src/instruct_data.rs (extends again)
+      DocQaExample — JSONL schema for document-question-answer pairs,
+      covering both born-digital PDFs and scanned/rasterized pages
+```
+
+**`aarambh-ai-finetune`:**
+```
+[ ] Document instruction tuning reuses the same DoRA-adapted VLM path as
+    Phase 35's video tuning and v2 Phase 20's image tuning — one training
+    code path, three data types (image, video, document)
+```
+
+**`aarambh-ai-tokenizer`:**
+```
+[ ] New reserved special tokens: <document>, <document_end>, <page_sep>
+```
+
+### Data Setup
+
+```bash
+# Free public document-QA data (e.g. a small public scanned-document or
+# PDF-QA dataset subset, DocVQA-style, sized for Kaggle's free quota).
+scripts/phase36_prepare_document_qa.sh data
+```
+
+### Tests
+
+```rust
+#[test]
+fn page_rasterizer_produces_consistent_image_size_across_page_orientations() {}
+
+#[test]
+fn layout_aware_projector_encodes_2d_position_distinctly_from_1d_sequence_position() {}
+
+#[test]
+fn document_qa_handles_multi_page_documents_via_page_sep_tokens() {}
+
+#[test]
+fn table_cell_text_and_paragraph_text_produce_distinguishable_embeddings() {
+    // Proxy test: same text string rendered in a table cell vs a
+    // paragraph should not collapse to identical fused embeddings.
+}
+```
+
+### Milestone
+```
+Model correctly answers a held-out set of document-QA prompts (free/public
+DocVQA-style subset), including at least one multi-page and one
+table-containing example class, tracked via the eval harness's new
+document task. Vision pipeline now handles three modalities (image, video,
+document) through one shared frozen-encoder-plus-trainable-projector-and-
+fusion path.
+
+git commit -m "feat: Phase 36 — native document understanding"
+git tag v3.0.0-alpha.8
+```
+
+---
+
+## Phase 37 — Long-Horizon Tool-Use Chains
+
+**Duration:** 10–14 days | **Hardware:** i3 (orchestration) + Kaggle (training)
+
+### Goal
+Upgrade v2 Phase 26's single-call, emit-only tool use
+(`ROADMAP_V2.md` Phase 26, `ARCHITECTURE_V2.md` §30) into multi-step
+chains: the model can call a tool, receive a result, decide whether
+another call is needed, and continue — sustained across many steps rather
+than one typed request per turn.
+
+### Tasks
+
+**New crate `aarambh-ai-agent`:**
+```
+[ ] src/chain.rs
+      ToolChain — orchestrates repeated calls into aarambh-ai-inference's
+      existing single-call tool-call decoding path (v2 §30), feeding each
+      tool's result back into context as the next turn's input
+      MaxSteps / stopping conditions — explicit step budget, explicit
+      "no further tool needed" detection reusing v2's existing fallback
+      path where the model emits a normal (non-tool-call) response
+
+[ ] src/result_ingestion.rs
+      ToolResult — typed wrapper for a tool's returned value, formatted
+      back into the model's context in a consistent schema; supports
+      text, and (building on Phases 35–36) image/video/document results
+      so a chain step can hand back "here is a screenshot" or "here is a
+      retrieved PDF page" and have the next step reason over it natively
+
+[ ] src/state.rs
+      ChainState — the accumulating context across steps (prior calls,
+      results, and the running conversation), with an explicit eviction/
+      summarisation policy once the chain approaches context-length limits
+      (reuses Phase 29/30's long-context attention stack, but even hybrid
+      attention has a practical ceiling worth planning for)
+```
+
+**`aarambh-ai-finetune`:**
+```
+[ ] Multi-step tool-use SFT: extends v2 Phase 26's tool_sft.rs loss-
+    masking scheme (mask everything except the tool-call spans and final
+    response) across multi-turn transcripts, so the model is trained on
+    realistic multi-call sequences, not just single-call examples
+```
+
+**CLI:**
+```
+[ ] aarambh-ai agent --config <cfg> --tools tools.json --prompt "..." --max-steps 8
+```
+
+### Tests
+
+```rust
+#[test]
+fn tool_chain_stops_when_model_emits_non_tool_call_response() {}
+
+#[test]
+fn tool_chain_respects_max_steps_budget_even_if_model_keeps_requesting_calls() {}
+
+#[test]
+fn tool_result_ingestion_accepts_text_image_video_and_document_results() {}
+
+#[test]
+fn chain_state_eviction_triggers_before_context_length_is_exceeded() {}
+
+#[test]
+fn multi_step_sft_loss_mask_covers_all_tool_call_spans_across_a_transcript() {}
+```
+
+### Milestone
+```
+Agent correctly completes a held-out set of multi-step tool-use tasks
+(free/public multi-hop tool-use or agent-benchmark subset) requiring at
+least 3 sequential tool calls with intermediate results feeding later
+decisions, tracked via a new eval-harness task, with a documented ceiling
+on runaway chains (max-steps enforced, no infinite loops observed in
+testing).
+
+Still an emit/orchestrate boundary consistent with v2 §30's framing: tool
+*execution* itself remains the caller's responsibility (the chain
+orchestrates typed requests and ingests typed results, it does not sandbox
+or authorize arbitrary tool execution).
+
+git commit -m "feat: Phase 37 — long-horizon tool-use chains"
+git tag v3.0.0-alpha.9
+```
+
+---
+
+## Phase 38 — Forgetting Diagnostics Tied to Manas
+
+**Duration:** 7–10 days | **Hardware:** i3 (small scales) + Kaggle (larger)
+
+### Goal
+A diagnostic toolkit that measures catastrophic forgetting directly
+(rather than only inferring it from eval-score regressions), producing
+per-capability forgetting curves that both aarambh-ai's own self-learning
+loop (`SELF_LEARNING.md` §8, `SELF_LEARNING_V2.md` §17) and Manas v3's
+anti-forgetting design (`SELF_LEARNING_V3.md` in the Manas repo) can
+consume as a shared signal.
+
+### Tasks
+
+**`aarambh-ai-eval` (extends v2's crate):**
+```
+[ ] src/forgetting.rs
+      CapabilityProbe — a small, fixed held-out set per capability
+      (math, code, reasoning, factual, vision, video, document, tool-use),
+      reusing the eval harness's existing task subsets (v2 §17) as probes
+      rather than inventing new benchmark data
+      ForgettingCurve — tracks a capability probe's score across training
+      checkpoints/steps over time, not just before/after a single phase
+      forgetting_delta() — signed score change per capability between any
+      two checkpoints, with a documented significance threshold below
+      which noise (not real forgetting) is assumed
+
+[ ] src/report.rs (extends v2's Scorecard)
+      Scorecard gains a per-capability forgetting section alongside the
+      existing absolute scores, exported to the same markdown/JSON formats
+```
+
+**`aarambh-ai-selflearn`:**
+```
+[ ] Forgetting diagnostics wired into the existing self-learning loop
+    (`SELF_LEARNING.md` §5, §8): after each online-GRPO update batch, run
+    the lightweight capability probes and log forgetting_delta() per
+    capability, extending the existing catastrophic-forgetting protections
+    with a measured signal instead of only the existing gradient-
+    orthogonalisation defence
+[ ] Shared export format: forgetting curves exported in a schema
+    documented to be directly importable by Manas's associative-memory
+    anti-forgetting tracking (cross-project consistency between
+    aarambh-ai and Manas's own forgetting-diagnostics work)
+```
+
+### Tests
+
+```rust
+#[test]
+fn capability_probe_reuses_eval_harness_task_subsets_without_duplicating_data() {}
+
+#[test]
+fn forgetting_curve_tracks_score_across_multiple_checkpoints_not_just_two() {}
+
+#[test]
+fn forgetting_delta_below_significance_threshold_is_not_flagged() {}
+
+#[test]
+fn forgetting_diagnostics_do_not_alter_training_gradients_diagnostic_only() {
+    // This phase measures forgetting, it does not by itself change how
+    // training proceeds — that stays the existing gradient-orthogonalisation
+    // defence's job.
+}
+
+#[test]
+fn forgetting_export_schema_matches_documented_manas_import_format() {}
+```
+
+### Milestone
+```
+Forgetting diagnostics run automatically as part of both a standard
+training loop and the self-learning loop, producing per-capability
+forgetting curves across a documented sequence of checkpoints/phases
+(29–37), with the existing gradient-orthogonalisation defence's
+effectiveness now measured directly rather than assumed. Export format
+documented and validated against Manas's own anti-forgetting tracking.
+
+git commit -m "feat: Phase 38 — forgetting diagnostics tied to Manas"
+git tag v3.0.0-alpha.10
+```
+
+---
+
+## Phase 39 — Max Thinking Mode
+
+**Duration:** 5–7 days | **Hardware:** i3 (inference) + Kaggle (retraining the thinking-allocation policy)
+
+### Goal
+A fifth thinking mode, **Max**, added above v1's None (0) → Low (≤256) →
+Medium (≤1,024) → High (≤4,096) token-budget lineup
+(`ARCHITECTURE.md` §7.2), for tasks that genuinely need more room to
+reason than High allows — long multi-stage proofs, dense multi-file code
+changes, or (building directly on Phase 37) planning across an entire
+long-horizon tool-use chain before the first tool call is even made.
+
+### Tasks
+
+**`aarambh-ai-inference`:**
+```
+[ ] src/thinking.rs (extends v1's existing module)
+      ThinkingMode gains a fifth variant: None / Low(256) / Medium(1024)
+      / High(4096) / Max(16384) — budget chosen as the next step in the
+      existing ~4x progression between modes, not an arbitrary number
+      ThinkingController's existing force-close-at-budget logic
+      (`take_forced_token()`, `on_token()`, `ARCHITECTURE.md` §7.4)
+      requires no structural change — Max is just another budget value
+      flowing through the same mechanism that already handles the other
+      four modes
+```
+
+**`aarambh-ai-train`:**
+```
+[ ] Sampling defaults for Max mode, extending v1's existing table
+    (`ARCHITECTURE.md` §8.2):
+      Thinking mode Max: temperature=0.85, top_p=0.97 (most exploratory
+      of the five — Max-mode tasks are exactly the ones where premature
+      convergence on a wrong early step is most costly)
+[ ] Stage 2 GRPO re-run (`ARCHITECTURE.md` §7.5) extended to include
+    Max-budget rollouts in the G=8-completions-per-problem sampling, on a
+    held-out set of problems specifically hard enough that High's 4,096-
+    token budget was previously insufficient to reach a correct answer —
+    without such problems in the training mix, the model has no signal
+    for when spending up to 16,384 tokens is actually worth it
+[ ] Reuses the existing format verifier and reward shaping unchanged
+    (correct + concise thinking → high reward; wrong answer → negative
+    reward; excessive empty thinking → penalised) — Max mode does not
+    get a separate reward function, only a larger budget ceiling within
+    the same incentive structure
+```
+
+**`aarambh-ai-eval`:**
+```
+[ ] New eval-harness task: a held-out "hard problems" subset specifically
+    selected because they are unsolved (or solved at low accuracy) under
+    High-mode budget, scoring Max-mode accuracy against that same set —
+    the direct test of whether Max mode earns its larger budget rather
+    than just spending more tokens for the same outcome
+```
+
+**CLI:**
+```
+[ ] aarambh-ai infer --config <cfg> --thinking max --prompt "..."
+[ ] aarambh-ai agent --config <cfg> --thinking max --tools tools.json ...
+      # pairs naturally with Phase 37's tool chains: Max-budget planning
+      # before the first tool call, on the hardest multi-step tasks
+```
+
+### Tests
+
+```rust
+#[test]
+fn thinking_mode_max_budget_is_16384_tokens() {}
+
+#[test]
+fn thinking_controller_force_closes_max_mode_at_budget_exactly_like_other_modes() {
+    // No special-cased logic path for Max — same on_token()/
+    // take_forced_token() mechanism as None/Low/Medium/High.
+}
+
+#[test]
+fn max_mode_sampling_defaults_are_more_exploratory_than_high_mode() {}
+
+#[test]
+fn max_mode_accuracy_on_high_mode_unsolved_holdout_exceeds_high_mode_baseline() {
+    // The actual point of this phase: Max earns its budget on problems
+    // where High previously fell short.
+}
+
+#[test]
+fn existing_none_low_medium_high_modes_are_byte_for_byte_unchanged() {}
+```
+
+### Milestone
+```
+Max mode ships as a fifth ThinkingMode variant with zero structural
+changes to ThinkingController — same forced-token mechanism, same
+budget-tracking, same collapse-on-force-close behaviour every existing
+mode already has. Measured accuracy improvement over High mode on a
+held-out set of problems specifically chosen to be High-mode-insufficient,
+documented in docs/phase39_max_thinking_results.md. `aarambh-ai infer
+--thinking max` and `aarambh-ai agent --thinking max` both work end to end.
+
+git commit -m "feat: Phase 39 — Max thinking mode (16,384-token budget)"
+git tag v3.0.0-alpha.11
+```
+
+---
+
+## Phase 40 — crates.io Publish (v3.0.0 Release)
+
+**Duration:** 5–7 days | **Hardware:** all
+
+### Goal
+Publish all library crates to crates.io under 3.0.0, exactly mirroring
+v1's and v2's release discipline: **source code only, zero model
+artifacts.** No pretrained checkpoints, adapters, or GGUF files are
+attached to this release either — same policy, two major versions later.
+
+### Tasks
+
+```
+[ ] Package manifests: all 18 library crates + CLI set to version 3.0.0
+[ ] Flip `publish = false` → real crates.io metadata for
+    aarambh-ai-distill and aarambh-ai-agent, plus any v2-era crates that
+    matured enough for semver commitment during v3 development
+[ ] cargo publish --dry-run for every publishable crate, in dependency-
+    layer order (see ARCHITECTURE_V3.md §"Updated Dependency Layers")
+[ ] CHANGELOG.md: v3.0.0 entry summarising Phases 29–39
+[ ] README.md, ARCHITECTURE.md, ROADMAP.md, SELF_LEARNING.md: merge in the
+    v3 additions (or keep _V3 docs as addenda, your call — same option v2
+    documented)
+[ ] RELEASE.md: v3.0.0 checklist, explicitly restating "no pretrained
+    checkpoints, no model artifacts" for this release line too
+[ ] .github/release-notes/v3.0.0.md
+[ ] CI: extend existing workflow to cover the 2 new crates + video/document/
+    forgetting-diagnostics eval-harness smoke runs
+```
+
+### Milestone
+```
+cargo install --path aarambh-ai
+aarambh-ai --version  → aarambh-ai 3.0.0
+git tag v3.0.0
+git push origin v3.0.0
+
+Crates resolve from crates.io for any published subset; unpublished crates
+remain source-only exactly as documented. No model weights attached to the
+GitHub Release.
+
+git commit -m "chore: v3.0.0 — crates.io publish, source release"
+```
+
+---
+
+## Complete Phase Summary
+
+| # | Phase | Key Deliverable | Hardware | Duration |
+|---|---|---|---|---|
+| 29 | Gated DeltaNet | Hybrid linear attention, retrofit via continued pretraining | Kaggle | 10–14 days |
+| 30 | DSA | Sparse attention for remaining full-attention layers | Kaggle | 10–14 days |
+| 31 | Fine-Grained MoE | DeepSeek-style routing + shared expert, upgrades v2 dense MoE | Kaggle | 10–14 days |
+| 32 | MTP | Multi-token prediction heads, doubles as speculative-decode draft | Kaggle | 7–10 days |
+| 33 | On-Policy Distillation | New `aarambh-ai-distill`, teacher-scored student rollouts | Kaggle | 10–14 days |
+| 34 | Native QAT | Fake-quantize training, folds INT4/INT8 into the training loop | i3 + Kaggle | 7–10 days |
+| 35 | Video Understanding | Frame sampling + temporal fusion, extends `aarambh-ai-vision` | Kaggle | 14–18 days |
+| 36 | Document Understanding | Layout-aware projector, shares vision encoder with video | Kaggle | 10–14 days |
+| 37 | Long-Horizon Tool Chains | New `aarambh-ai-agent`, multi-step tool calls with result ingestion | i3 + Kaggle | 10–14 days |
+| 38 | Forgetting Diagnostics | Per-capability forgetting curves, shared export format for Manas | i3 + Kaggle | 7–10 days |
+| 39 | Max Thinking Mode | 5th reasoning depth, 16,384-token budget, extends `ThinkingController` | i3 + Kaggle | 5–7 days |
+| 40 | crates.io Publish | Source-only 3.0.0 release, zero model artifacts | all | 5–7 days |
+
+**Total realistic estimate: 105–145 days (~3.5–4.8 months)**
+
+---
+
+## Dependency Policy Additions (v3.0)
+
+| Dependency | Allowed crates | Reason |
+|---|---|---|
+| video container decode crate (permissive-licensed, e.g. an `ffmpeg`-free pure-Rust decoder) | `aarambh-ai-vision` | Frame extraction only, no network calls |
+| PDF/document rasterisation crate | `aarambh-ai-vision` | Page-to-image rendering only, no network calls |
+| (no new dependency for distillation or agent chains — both reuse existing `candle-core` and inference paths) | `aarambh-ai-distill`, `aarambh-ai-agent` | — |
+
+**Still forbidden everywhere, unchanged from v1/v2:** PyTorch bindings
+(`tch-rs`), ONNX Runtime (`ort`), Python FFI, `llama.cpp` as a backend. All
+computation goes through `candle`. Video and document rasterisation
+crates must be pure-Rust or bind to a permissively-licensed system library
+already compatible with the "no PyTorch/ONNX/Python FFI" rule — no
+dependency on Python-based video/PDF ML tooling.
+
+**Version policy:** unchanged from v1/v2 — pin major versions, test the
+whole workspace on any `candle-core` upgrade.
+
+---
+
+## What's Explicitly Out of Scope for v3.0
+
+- Releasing any pretrained checkpoint, adapter, or GGUF file
+- Sparse/grouped MoE dispatch (still dense-masked-matmul, per v2 §35 —
+  carried forward again; genuine sparse dispatch remains a documented
+  future optimisation)
+- Multi-node distributed training (still 2-GPU single-node only, per v2's
+  Phase 23 scope)
+- Public/hosted deployment of the inference server (still local-only, per
+  v2's Phase 27 scope)
+- Audio modality (video understanding in Phase 35 is visual frames only —
+  no audio track processing; a natural v4 candidate)
+- Tool *execution*/sandboxing (Phase 37 orchestrates and ingests results,
+  it does not execute or authorize tools itself — same emit-only
+  boundary v2 §30 established, extended to multi-step, not removed)
+- Synthetic API-generated training data (all v3.0 datasets remain free and
+  public, same policy as every prior phase)
+
+These are natural v4 candidates once budget and a released model exist.
