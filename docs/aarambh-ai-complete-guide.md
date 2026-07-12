@@ -1213,13 +1213,13 @@ With tool use:
 
 ## Phase 27: Inference Server (OpenAI-Compatible)
 
-**Definition:** A server that exposes the model through the same API format that OpenAI's API uses (like `/v1/chat/completions`), so any existing tool or app built for OpenAI's API can work with this model with no code changes.
+**Definition:** An Axum 0.8.9 server that exposes the model through the core OpenAI chat-completions, legacy-completions, models, and SSE shapes, so compatible local tools can use Aarambh AI through a familiar client API.
 
 **Beginner explanation:**
-Many existing chatbot apps, coding assistants, and developer tools are already built to talk to OpenAI's specific API format. Rather than forcing everyone to learn a brand new custom API just to use Aarambh-AI, this server "speaks the same language" as OpenAI's API — so those existing tools can just point at this server instead, and everything works.
+Many existing chatbot apps, coding assistants, and developer tools already understand chat-completion requests. Point those clients at Aarambh AI's local `/v1` base URL and use the loaded local model ID. Phase 27 supports text messages, one choice, sampling, stop strings, thinking effort, and single function calls; it does not claim every OpenAI endpoint or parameter.
 
 **Why we need it:**
-Massive convenience and compatibility — anyone using tools like LangChain, chat UIs, or IDE plugins built for OpenAI's API can plug in Aarambh-AI as a drop-in replacement, with zero extra integration work on their end.
+It provides a practical integration boundary while keeping weights and prompts on the machine. Concurrent requests join shared decode passes, but every request retains its own KV cache and generation state.
 
 **Example:**
 ```
@@ -1227,14 +1227,14 @@ Existing tool sends a request formatted for OpenAI:
 
 POST /v1/chat/completions
 {
-  "model": "gpt-4",
+  "model": "aarambh-tiny",
   "messages": [{"role": "user", "content": "Hello!"}]
 }
 
 Aarambh-AI's server receives this exact same format,
 processes it with its own model, and replies in the
 exact same response format the tool expects.
-→ The external tool never knows the difference.
+→ The client receives a familiar chat.completion response.
 ```
 
 **Diagram:**
@@ -1263,6 +1263,8 @@ exact same response format the tool expects.
 
 **Common beginner questions:**
 - *Q: Does this mean Aarambh-AI IS OpenAI's model?* → No — it just mimics the *API shape/format* so existing tools work seamlessly; the underlying model is entirely Aarambh-AI's own.
+- *Q: Is streaming still checked by safety?* → Yes. A rolling cross-token scanner delays only the unstable suffix, redacts PII before release, and stops toxic output with `content_filter`.
+- *Q: Can I expose it on my network without a key?* → No. Loopback works without authentication, but non-loopback binds require `AARAMBH_AI_API_KEY`.
 - *Q: Why is this the last phase?* → Because it's the "delivery" layer — it only makes sense to build this once the model itself (and all its capabilities from earlier phases) is ready to be served to the world.
 
 ---

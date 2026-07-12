@@ -4,4 +4,5 @@ pub mod finetune;
 pub mod infer;
 pub mod quantise;
 pub mod selflearn;
+pub mod serve;
 pub mod train;

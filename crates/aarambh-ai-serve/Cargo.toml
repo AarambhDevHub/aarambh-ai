@@ -1,0 +1,35 @@
+[package]
+name = "aarambh-ai-serve"
+version = "1.0.0"
+publish = false
+edition = "2024"
+
+[features]
+default = []
+cuda = [
+    "aarambh-ai-core/cuda",
+    "aarambh-ai-inference/cuda",
+    "aarambh-ai-safety/cuda",
+]
+
+[dependencies]
+aarambh-ai-core      = { path = "../aarambh-ai-core" }
+aarambh-ai-inference = { path = "../aarambh-ai-inference" }
+aarambh-ai-safety    = { path = "../aarambh-ai-safety" }
+axum                 = { workspace = true }
+futures-util         = { workspace = true }
+serde                = { workspace = true }
+serde_json           = { workspace = true }
+sha2                 = { workspace = true }
+tokio                = { workspace = true }
+tokio-stream         = { workspace = true, features = ["sync"] }
+tower                = { workspace = true }
+tower-http           = { workspace = true, features = ["cors", "limit", "request-id", "trace"] }
+tracing              = { workspace = true }
+
+[dev-dependencies]
+candle-core = { workspace = true }
+candle-nn   = { workspace = true }
+aarambh-ai-model = { path = "../aarambh-ai-model" }
+aarambh-ai-tokenizer = { path = "../aarambh-ai-tokenizer" }
+http-body-util = { workspace = true }

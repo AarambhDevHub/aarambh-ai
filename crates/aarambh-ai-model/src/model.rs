@@ -314,6 +314,60 @@ impl AarambhModel {
         Ok(self.lm_head.forward(&x)?)
     }
 
+    /// Decode one token for multiple independent sequences in a shared model pass.
+    pub fn forward_decode_batch(
+        &self,
+        token_ids: &Tensor,
+        seqlen_offsets: &[usize],
+        caches: &mut [&mut [KVCache]],
+    ) -> Result<Tensor> {
+        let dims = token_ids.dims();
+        if dims.len() != 2 || dims[1] != 1 {
+            return Err(AarambhError::Shape(format!(
+                "batched decode token ids must have shape [batch, 1], got {dims:?}"
+            )));
+        }
+        let batch = dims[0];
+        if seqlen_offsets.len() != batch || caches.len() != batch {
+            return Err(AarambhError::Shape(format!(
+                "batched decode received batch {batch}, {} offsets, and {} caches",
+                seqlen_offsets.len(),
+                caches.len()
+            )));
+        }
+        for (row, (&offset, cache)) in seqlen_offsets.iter().zip(caches.iter()).enumerate() {
+            if offset >= self.config.max_seq_len {
+                return Err(AarambhError::Shape(format!(
+                    "batch row {row} offset {offset} exceeds max_seq_len {}",
+                    self.config.max_seq_len
+                )));
+            }
+            if cache.len() != self.blocks.len() {
+                return Err(AarambhError::Shape(format!(
+                    "batch row {row} has {} KV layers, expected {}",
+                    cache.len(),
+                    self.blocks.len()
+                )));
+            }
+        }
+
+        let mut x = self.embedding.forward(token_ids)?;
+        for (layer_idx, block) in self.blocks.iter().enumerate() {
+            let mut layer_caches = caches
+                .iter_mut()
+                .map(|cache| &mut cache[layer_idx])
+                .collect::<Vec<_>>();
+            x = block.forward_decode_batch(
+                &x,
+                &self.rope_cache,
+                &mut layer_caches,
+                seqlen_offsets,
+            )?;
+        }
+        let x = self.final_norm.forward(&x)?;
+        Ok(self.lm_head.forward(&x)?)
+    }
+
     /// Create one empty KV cache per transformer block.
     pub fn empty_kv_cache(&self) -> Vec<KVCache> {
         (0..self.blocks.len())

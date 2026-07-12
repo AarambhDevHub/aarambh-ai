@@ -123,6 +123,8 @@ fn critique_generation_config(config: &CritiqueConfig) -> GenerationConfig {
         thinking_mode: ThinkingMode::None,
         top_candidates: 5,
         tool_calling: None,
+        stop_sequences: Vec::new(),
+        capture_steps: true,
     }
 }
 
@@ -134,6 +136,8 @@ fn rewrite_generation_config(config: &CritiqueConfig) -> GenerationConfig {
         thinking_mode: ThinkingMode::None,
         top_candidates: 5,
         tool_calling: None,
+        stop_sequences: Vec::new(),
+        capture_steps: true,
     }
 }
 

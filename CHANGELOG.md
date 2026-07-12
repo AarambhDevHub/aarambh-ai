@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.0.0-alpha.12] - 2026-07-12
+
+### Added
+
+- **Phase 27 Inference Server**
+  - Added `aarambh-ai-serve` with Axum 0.8.9 HTTP routing and OpenAI-compatible chat completions, legacy completions, and model listing
+  - Added JSON and SSE responses, usage accounting, stop sequences, reasoning-effort mapping, function-call responses, and `[DONE]` termination
+  - Added resumable `GenerationSession` state and shared batched decode passes with independent preallocated KV caches
+  - Added bounded admission, chunked prefill, disconnect cancellation, strict request validation, health/readiness, metrics, and graceful shutdown
+  - Added `aarambh-ai serve` with model ID, batching, safety, tool catalog, CORS, bind, and environment-key controls
+  - Added a local release-mode server smoke script and OpenAI SDK/curl guide
+
+### Changed
+
+- Safety-enabled CLI streaming now uses a rolling cross-token filter instead of buffering the complete response
+- Generation output reports prompt, completion, and total token usage
+- Text generation supports up to four stop sequences and can omit retained per-step metadata for server workloads
+- The transformer decode path can batch projections, normalization, and FFN/MoE work while keeping ragged attention caches isolated
+- README, ROADMAP_V2, ARCHITECTURE, ARCHITECTURE_V2, and the complete guide document Phase 27 behavior
+
+### Security
+
+- Non-loopback server binds require bearer authentication; local loopback remains convenient by default
+- Request bodies are capped at 1 MiB, queue capacity is bounded, CORS is opt-in, and internal failures are sanitized
+- Streaming PII is redacted before release, toxic fragments terminate with `content_filter`, and structured tool calls remain atomic
+
+### Verified
+
+- Batched-versus-independent greedy parity and per-session cache isolation
+- Split-token email/toxicity, stop holdback, OpenAI model-list, and SSE `[DONE]` tests
+- Workspace formatting, check, Clippy, tests, rustdoc, release build, and local server smoke paths
+
 ## [2.0.0-alpha.11] - 2026-07-11
 
 ### Added

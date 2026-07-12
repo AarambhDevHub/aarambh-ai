@@ -14,6 +14,7 @@ cuda = [
     "aarambh-ai-inference/cuda",
     "aarambh-ai-quant/cuda",
     "aarambh-ai-safety/cuda",
+    "aarambh-ai-serve/cuda",
     "aarambh-ai-selflearn/cuda",
     "aarambh-ai-train/cuda",
     "aarambh-ai-vision/cuda",
@@ -29,6 +30,7 @@ aarambh-ai-finetune  = { path = "../crates/aarambh-ai-finetune" }
 aarambh-ai-inference = { path = "../crates/aarambh-ai-inference" }
 aarambh-ai-quant     = { path = "../crates/aarambh-ai-quant" }
 aarambh-ai-safety    = { path = "../crates/aarambh-ai-safety" }
+aarambh-ai-serve     = { path = "../crates/aarambh-ai-serve" }
 aarambh-ai-selflearn = { path = "../crates/aarambh-ai-selflearn" }
 aarambh-ai-tokenizer = { path = "../crates/aarambh-ai-tokenizer" }
 aarambh-ai-train     = { path = "../crates/aarambh-ai-train" }
@@ -39,3 +41,6 @@ candle-core          = { workspace = true }
 clap                 = { workspace = true }
 serde                = { workspace = true }
 serde_json           = { workspace = true }
+tokio                = { workspace = true }
+tracing              = { workspace = true }
+tracing-subscriber   = { workspace = true }

@@ -1,0 +1,164 @@
+use std::fs;
+use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
+use std::time::Duration;
+
+use aarambh_ai_inference::{InferenceEngine, ThinkingMode, ToolDefinition};
+use aarambh_ai_safety::{SafetyMode, SafetyPolicy};
+use aarambh_ai_serve::{BatcherConfig, ServeConfig, run_server};
+use aarambh_ai_train::TrainingRunConfig;
+use clap::Args;
+use serde::Deserialize;
+
+#[derive(Debug, Args)]
+/// Start the local OpenAI-compatible inference server.
+pub struct ServeArgs {
+    #[arg(long, default_value = "configs/tiny_shakespeare.toml")]
+    config: PathBuf,
+    #[arg(long)]
+    model: PathBuf,
+    #[arg(long)]
+    tokenizer: Option<PathBuf>,
+    #[arg(long, default_value = "aarambh-ai-local")]
+    model_id: String,
+    #[arg(long, default_value = "127.0.0.1")]
+    host: IpAddr,
+    #[arg(long, default_value_t = 8080)]
+    port: u16,
+    #[arg(long, default_value_t = 8)]
+    max_batch_size: usize,
+    #[arg(long, default_value_t = 128)]
+    queue_capacity: usize,
+    #[arg(long, default_value_t = 2)]
+    batch_wait_ms: u64,
+    #[arg(long, default_value_t = 128)]
+    prefill_chunk_size: usize,
+    #[arg(long, default_value_t = 2048)]
+    max_request_tokens: usize,
+    #[arg(long, default_value = "none")]
+    thinking: String,
+    #[arg(long)]
+    tools: Option<PathBuf>,
+    #[arg(long, default_value = "strict")]
+    safety: String,
+    #[arg(long, default_value = "safety_audit.jsonl")]
+    safety_audit_log: PathBuf,
+    #[arg(long, default_value = "AARAMBH_AI_API_KEY")]
+    api_key_env: String,
+    #[arg(long)]
+    cors_origin: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ToolFile {
+    Array(Vec<ToolEntry>),
+    Object { tools: Vec<ToolEntry> },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ToolEntry {
+    Native(ToolDefinition),
+    OpenAi {
+        r#type: String,
+        function: ToolDefinition,
+    },
+}
+
+pub fn run(args: ServeArgs) -> anyhow::Result<()> {
+    let run_config = TrainingRunConfig::from_toml(&args.config)?;
+    let run_device = run_config.device()?;
+    let dtype = run_config.dtype_for_device(&run_device)?.to_candle();
+    let device = run_device.to_candle()?;
+    let tokenizer = args
+        .tokenizer
+        .clone()
+        .or(run_config.tokenizer_path.clone())
+        .unwrap_or_else(|| run_config.train.checkpoint_dir.join("tokenizer.json"));
+    let engine = InferenceEngine::from_paths_with_dtype(
+        &args.model,
+        &run_config.model,
+        tokenizer,
+        device,
+        dtype,
+    )?;
+    let safety_mode = args
+        .safety
+        .parse::<SafetyMode>()
+        .map_err(anyhow::Error::msg)?;
+    let default_thinking = parse_thinking(&args.thinking)?;
+    let default_tools = args
+        .tools
+        .as_ref()
+        .map(load_tools)
+        .transpose()?
+        .unwrap_or_default();
+    let api_key = std::env::var(&args.api_key_env)
+        .ok()
+        .filter(|key| !key.is_empty());
+    let safety_policy = SafetyPolicy::for_mode(safety_mode)
+        .map(|policy| policy.with_audit_path(&args.safety_audit_log));
+    let config = ServeConfig {
+        bind: SocketAddr::new(args.host, args.port),
+        model_id: args.model_id,
+        max_request_tokens: args.max_request_tokens,
+        default_thinking,
+        safety_policy,
+        api_key,
+        cors_origins: args.cors_origin,
+        default_tools,
+        batcher: BatcherConfig {
+            max_batch_size: args.max_batch_size,
+            queue_capacity: args.queue_capacity,
+            batch_wait: Duration::from_millis(args.batch_wait_ms),
+            prefill_chunk_size: args.prefill_chunk_size,
+        },
+    };
+    config.validate()?;
+
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("aarambh_ai_serve=info")),
+        )
+        .try_init();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(run_server(config, engine))?;
+    Ok(())
+}
+
+fn parse_thinking(value: &str) -> anyhow::Result<ThinkingMode> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "none" => Ok(ThinkingMode::None),
+        "low" => Ok(ThinkingMode::Low),
+        "medium" => Ok(ThinkingMode::Medium),
+        "high" => Ok(ThinkingMode::High),
+        other => Err(anyhow::anyhow!(
+            "invalid thinking mode '{other}', expected none|low|medium|high"
+        )),
+    }
+}
+
+fn load_tools(path: &PathBuf) -> anyhow::Result<Vec<ToolDefinition>> {
+    let metadata = fs::metadata(path)?;
+    if metadata.len() > 1024 * 1024 {
+        return Err(anyhow::anyhow!("tool definition file exceeds 1 MiB"));
+    }
+    let parsed: ToolFile = serde_json::from_slice(&fs::read(path)?)?;
+    let entries = match parsed {
+        ToolFile::Array(entries) | ToolFile::Object { tools: entries } => entries,
+    };
+    entries
+        .into_iter()
+        .map(|entry| match entry {
+            ToolEntry::Native(definition) => Ok(definition),
+            ToolEntry::OpenAi { r#type, function } if r#type == "function" => Ok(function),
+            ToolEntry::OpenAi { r#type, .. } => {
+                Err(anyhow::anyhow!("unsupported tool type '{type}'", type = r#type))
+            }
+        })
+        .collect()
+}

@@ -2,7 +2,7 @@
 
 > A modern, from-scratch LLM in Rust using `candle`. Decoder-only transformer with
 > thinking capability, four model scales, quantisation, fine-tuning, safety guardrails,
-> custom kernels, self-learning, evaluation, and vision projection — all in one clean 16-crate workspace.
+> custom kernels, self-learning, evaluation, vision projection, and local serving — all in one clean 17-crate workspace.
 
 ---
 
@@ -11,7 +11,7 @@
 1. [Project Overview](#1-project-overview)
 2. [Design Philosophy](#2-design-philosophy)
 3. [Dependency Versions & Toolchain](#3-dependency-versions--toolchain)
-4. [Complete Workspace — 16 Crates](#4-complete-workspace--16-crates)
+4. [Complete Workspace — 17 Crates](#4-complete-workspace--17-crates)
 5. [Model Scales](#5-model-scales)
 6. [The Full Journey: Token → Output](#6-the-full-journey-token--output)
    - 6.1 Tokenisation
@@ -164,7 +164,7 @@ curl -L https://huggingface.co/gpt2/resolve/main/tokenizer.json \
 
 ---
 
-## 4. Complete Workspace — 16 Crates
+## 4. Complete Workspace — 17 Crates
 
 ```
 aarambh-ai/
@@ -290,6 +290,7 @@ aarambh-ai/
 │   │       ├── guard.rs              ← SafetyGuard wraps InferenceEngine
 │   │       ├── policy.rs             ← SafetyPolicy: which checks, thresholds
 │   │       ├── verdict.rs            ← Allow / Block / Redact / Regenerate
+│   │       ├── streaming.rs          ← rolling cross-token stream filter
 │   │       ├── input/
 │   │       │   ├── mod.rs
 │   │       │   ├── injection.rs      ← prompt injection detection
@@ -317,13 +318,20 @@ aarambh-ai/
 │   │       ├── generation.rs         ← greedy text generation helpers
 │   │       └── tasks/                ← ppl, MMLU-lite, HellaSwag, GSM8K, HumanEval, image-caption
 │   │
-│   └── aarambh-ai-vision/            ← LAYER 3: Vision encoder + projector
+│   ├── aarambh-ai-vision/            ← LAYER 3: Vision encoder + projector
 │       └── src/
 │           ├── encoder.rs            ← frozen CLIP-style ViT, SafeTensors load
 │           ├── preprocess.rs         ← image crate resize/crop/normalize
 │           ├── projector.rs          ← trainable 2-layer GELU projector
 │           ├── fusion.rs             ← <image> prefix token interleave
 │           └── lib.rs
+│   │
+│   └── aarambh-ai-serve/             ← LAYER 6: Axum inference server
+│       └── src/
+│           ├── api.rs                ← OpenAI-compatible request/response types
+│           ├── batching.rs           ← continuous batching worker
+│           ├── metrics.rs            ← lock-free server counters
+│           └── server.rs             ← HTTP/SSE routes, auth, lifecycle
 │
 └── aarambh-ai/                       ← LAYER 6: CLI binary (source-built from GitHub v1.0 tag)
     └── src/
@@ -348,7 +356,7 @@ Layer 2  aarambh-ai-nn          aarambh-ai-kernel
 Layer 3  aarambh-ai-model       aarambh-ai-weights    aarambh-ai-quant     aarambh-ai-vision
 Layer 4  aarambh-ai-train       aarambh-ai-finetune
 Layer 5  aarambh-ai-inference   aarambh-ai-safety     aarambh-ai-selflearn  aarambh-ai-eval
-Layer 6  aarambh-ai (binary)
+Layer 6  aarambh-ai-serve       aarambh-ai (binary)
 ```
 
 Every crate may only depend on crates in the same or lower layer.
@@ -373,7 +381,8 @@ When you `cargo new` each crate, add exactly these workspace deps to its `Cargo.
 | `aarambh-ai-inference` | `aarambh-ai-core`, `aarambh-ai-model`, `aarambh-ai-weights`, `candle-core`, `tokio` |
 | `aarambh-ai-safety` | `aarambh-ai-core`, `aarambh-ai-inference`, `serde_json` |
 | `aarambh-ai-selflearn` | `aarambh-ai-core`, `aarambh-ai-tokenizer`, `aarambh-ai-model`, `aarambh-ai-weights`, `aarambh-ai-train`, `aarambh-ai-inference`, `aarambh-ai-finetune`, `candle-core`, `candle-nn`, `serde_json`, `rand` |
-| `aarambh-ai` (binary) | all 13 library crates, `clap`, `anyhow`, `tokio`, `tracing-subscriber` |
+| `aarambh-ai-serve` | `aarambh-ai-core`, `aarambh-ai-inference`, `aarambh-ai-safety`, `axum`, `tower-http`, `tokio` |
+| `aarambh-ai` (binary) | all library crates, `clap`, `anyhow`, `tokio`, `tracing-subscriber` |
 
 All deps use the `workspace = true` key, e.g.:
 ```toml
@@ -1350,9 +1359,11 @@ checkpoint so it doesn't drift.
 
 ### 13.1 Architecture
 
-The `SafetyGuard` wraps the mutable `InferenceEngine` and intercepts every
-generation call. Live streaming callbacks are buffered while safety is enabled,
-so output guardrails run before generated text is printed.
+The `SafetyGuard` wraps generation and intercepts every call. Non-streaming
+output is checked as a complete response and may be regenerated. Streaming uses
+`StreamingSafetyFilter`, which retains only an unstable cross-token suffix,
+redacts PII before release, and terminates toxic output before the matching
+fragment is printed. Structured tool calls remain fully buffered and atomic.
 
 ```
 User prompt

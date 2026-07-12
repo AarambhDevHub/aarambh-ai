@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org)
 
-A decoder-only transformer with four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA/DoRA fine-tuning, GRPO and DPO alignment, exact speculative decoding, grammar-constrained function calling, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, evaluation harness, and a frozen-encoder vision projector path — all in one clean 16-crate Rust workspace.
+A decoder-only transformer with four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA/DoRA fine-tuning, GRPO and DPO alignment, exact speculative decoding, grammar-constrained function calling, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, evaluation harness, a frozen-encoder vision projector path, and an OpenAI-compatible inference server — all in one clean 17-crate Rust workspace.
 
 v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, and pretrained checkpoints are not attached to the release.
 
@@ -48,6 +48,7 @@ v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, an
 | DPO/QDPO preference tuning: cached references, pairwise loss, preference win-rate eval | Phase 24 ✅ |
 | Exact speculative decoding: Tiny draft, block verification, rejection sampling, telemetry | Phase 25 ✅ |
 | Tool use: schema-constrained JSON calls, Tool SFT/QLoRA, selection evaluation | Phase 26 ✅ |
+| OpenAI-compatible Axum HTTP/SSE server with continuous batching | Phase 27 ✅ |
 
 ---
 
@@ -539,6 +540,29 @@ cargo run --release -p aarambh-ai -- eval \
 subset for larger held-out runs. Downloaded datasets, adapters, and checkpoints
 remain untracked.
 
+### Inference Server
+
+Phase 27 serves one local checkpoint through OpenAI-compatible chat,
+completion, model-list, and SSE endpoints. Active requests share batched model
+decode passes while retaining independent KV caches, samplers, thinking state,
+stop matching, tool grammar, and safety state.
+
+```sh
+cargo run --release -p aarambh-ai -- serve \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --model-id aarambh-tiny \
+  --port 8080
+```
+
+The default bind is local-only at `127.0.0.1`. A non-loopback bind requires
+`AARAMBH_AI_API_KEY`; request bodies then use `Authorization: Bearer ...`.
+Safety is strict by default and streaming output passes through a rolling
+cross-token scanner before release. See
+[the inference server guide](docs/inference-server.md) for curl, OpenAI SDK,
+tool-calling, authentication, metrics, and smoke-test examples.
+
 Phase 11 enables the safety layer by default for `infer`. Use
 `--safety strict|permissive|research|none` to choose policy behavior and
 `--safety-audit-log` to choose the JSONL audit path. Audit records store a
@@ -926,7 +950,8 @@ aarambh-ai/
 ├── aarambh-ai-selflearn/     ← Self-learning loop, replay buffer, critique
 ├── aarambh-ai-eval/          ← Evaluation harness, scorecards, benchmark tasks
 ├── aarambh-ai-vision/        ← Frozen CLIP encoder, projector, image fusion
-└── aarambh-ai/               ← CLI binary (train, infer, quantise, convert, eval)
+├── aarambh-ai-serve/         ← Axum HTTP/SSE server, continuous batching
+└── aarambh-ai/               ← CLI binary (train, infer, serve, quantise, convert, eval)
 ```
 
 ### Dependency Layers
@@ -938,7 +963,7 @@ Layer 2  aarambh-ai-nn          aarambh-ai-kernel
 Layer 3  aarambh-ai-model       aarambh-ai-weights    aarambh-ai-quant     aarambh-ai-vision
 Layer 4  aarambh-ai-train       aarambh-ai-finetune
 Layer 5  aarambh-ai-inference   aarambh-ai-safety     aarambh-ai-selflearn  aarambh-ai-eval
-Layer 6  aarambh-ai (binary)
+Layer 6  aarambh-ai-serve      aarambh-ai (binary)
 ```
 
 Every crate depends only on crates in the same or lower layer. This is enforced by `Cargo.toml`.
@@ -1096,6 +1121,9 @@ aarambh-ai/
 | 22 | Mixture of Experts | GPU | ✅ |
 | 23 | Multi-GPU training | 2×T4 | ✅ |
 | 24 | DPO/QDPO preference tuning | GPU | ✅ |
+| 25 | Speculative decoding | GPU | ✅ |
+| 26 | Tool use / function calling | i3 + GPU | ✅ |
+| 27 | OpenAI-compatible inference server | i3 | ✅ |
 
 See [ROADMAP.md](ROADMAP.md) for the full phased delivery plan with tests and milestones.
 
@@ -1133,6 +1161,7 @@ CPU/Candle fallback path.
 | [ROADMAP.md](ROADMAP.md) | Step-by-step build plan with tasks, tests, and milestones for all 15 phases |
 | [SELF_LEARNING.md](SELF_LEARNING.md) | Deep dive into the self-learning loop: online GRPO, replay buffer, self-critique, CPU vs GPU modes |
 | [RELEASE.md](RELEASE.md) | v1.0.0 source-release checklist, validation commands, and release policy |
+| [docs/inference-server.md](docs/inference-server.md) | Phase 27 server startup, endpoints, SDK setup, safety, auth, and smoke tests |
 | [.github/release-notes/v1.0.0.md](.github/release-notes/v1.0.0.md) | GitHub Release body for v1.0.0 |
 
 ---

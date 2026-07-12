@@ -9,6 +9,8 @@ pub mod input;
 pub mod output;
 /// Safety policy presets and actions.
 pub mod policy;
+/// Incremental token-safe output filtering.
+pub mod streaming;
 /// Safety verdict types.
 pub mod verdict;
 
@@ -22,4 +24,5 @@ pub use output::{
     score_toxicity,
 };
 pub use policy::{PiiPolicy, SafetyMode, SafetyPolicy, ViolationAction};
+pub use streaming::{SafeStreamEvent, StreamingSafetyFilter};
 pub use verdict::SafetyVerdict;

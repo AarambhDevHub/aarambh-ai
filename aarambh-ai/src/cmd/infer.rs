@@ -11,7 +11,8 @@ use aarambh_ai_inference::{
     ToolDefinition,
 };
 use aarambh_ai_safety::{
-    SafeResponse, SafetyGenerator, SafetyGuard, SafetyMode, SafetyPolicy, SafetyVerdict,
+    SafeResponse, SafeStreamEvent, SafetyGenerator, SafetyGuard, SafetyMode, SafetyPolicy,
+    SafetyVerdict,
 };
 use aarambh_ai_selflearn::{
     SelfLearnBuildConfig, SelfLearnConfig, SelfLearnLoop, SelfLearnMode, VisionCache,
@@ -136,6 +137,8 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
         thinking_mode,
         top_candidates: 5,
         tool_calling,
+        stop_sequences: Vec::new(),
+        capture_steps: true,
     };
 
     let prompt = if config.tool_calling.is_some() {
@@ -218,21 +221,25 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
         let mut guard = SafetyGuard::new(engine, policy);
         let mut stream_state = StreamState::default();
         let started = Instant::now();
-        let response = guard.generate_with_callback(&prompt, config, |step| {
-            if args.predict_view {
-                print!(
-                    "{}",
-                    predict_view::render(step, &tokenizer_for_view, args.temperature, args.top_p)
-                );
-            }
-            if args.stream {
-                stream_step(step, thinking_mode, &mut stream_state)?;
-            }
-            if args.predict_view || args.stream {
-                io::stdout().flush()?;
-            }
-            Ok(())
-        })?;
+        let response = if args.stream {
+            guard.generate_streaming_with_callback(&prompt, config, print_safe_stream_event)?
+        } else {
+            guard.generate_with_callback(&prompt, config, |step| {
+                if args.predict_view {
+                    print!(
+                        "{}",
+                        predict_view::render(
+                            step,
+                            &tokenizer_for_view,
+                            args.temperature,
+                            args.top_p,
+                        )
+                    );
+                    io::stdout().flush()?;
+                }
+                Ok(())
+            })?
+        };
         let elapsed = started.elapsed();
         print_safe_response(&response, thinking_mode, args.stream, &mut stream_state)?;
         io::stdout().flush()?;
@@ -323,15 +330,23 @@ fn run_speculative_infer(
         let mut guard = SafetyGuard::new(engine, policy);
         let mut stream_state = StreamState::default();
         let started = Instant::now();
-        let response = guard.generate_with_callback(&prompt, generation_config, |step| {
-            render_text_step(
-                args,
-                step,
-                thinking_mode,
-                &tokenizer_for_view,
-                &mut stream_state,
-            )
-        })?;
+        let response = if args.stream {
+            guard.generate_streaming_with_callback(
+                &prompt,
+                generation_config,
+                print_safe_stream_event,
+            )?
+        } else {
+            guard.generate_with_callback(&prompt, generation_config, |step| {
+                render_text_step(
+                    args,
+                    step,
+                    thinking_mode,
+                    &tokenizer_for_view,
+                    &mut stream_state,
+                )
+            })?
+        };
         let elapsed = started.elapsed();
         print_safe_response(&response, thinking_mode, args.stream, &mut stream_state)?;
         io::stdout().flush()?;
@@ -560,21 +575,25 @@ fn run_vision_infer(
         };
         let mut guard = SafetyGuard::new(adapter, policy);
         let mut stream_state = StreamState::default();
-        let response = guard.generate_with_callback(&prompt, config, |step| {
-            if args.predict_view {
-                print!(
-                    "{}",
-                    predict_view::render(step, &tokenizer_for_view, args.temperature, args.top_p)
-                );
-            }
-            if args.stream {
-                stream_step(step, thinking_mode, &mut stream_state)?;
-            }
-            if args.predict_view || args.stream {
-                io::stdout().flush()?;
-            }
-            Ok(())
-        })?;
+        let response = if args.stream {
+            guard.generate_streaming_with_callback(&prompt, config, print_safe_stream_event)?
+        } else {
+            guard.generate_with_callback(&prompt, config, |step| {
+                if args.predict_view {
+                    print!(
+                        "{}",
+                        predict_view::render(
+                            step,
+                            &tokenizer_for_view,
+                            args.temperature,
+                            args.top_p,
+                        )
+                    );
+                    io::stdout().flush()?;
+                }
+                Ok(())
+            })?
+        };
         print_safe_response(&response, thinking_mode, args.stream, &mut stream_state)?;
         io::stdout().flush()?;
         if let Some(output) = &response.output {
@@ -868,21 +887,25 @@ fn run_self_learn_infer(
     {
         let mut guard = SafetyGuard::new(adapter, policy);
         let mut stream_state = StreamState::default();
-        let response = guard.generate_with_callback(&prompt, config, |step| {
-            if args.predict_view {
-                print!(
-                    "{}",
-                    predict_view::render(step, &tokenizer_for_view, args.temperature, args.top_p)
-                );
-            }
-            if args.stream {
-                stream_step(step, thinking_mode, &mut stream_state)?;
-            }
-            if args.predict_view || args.stream {
-                io::stdout().flush()?;
-            }
-            Ok(())
-        })?;
+        let response = if args.stream {
+            guard.generate_streaming_with_callback(&prompt, config, print_safe_stream_event)?
+        } else {
+            guard.generate_with_callback(&prompt, config, |step| {
+                if args.predict_view {
+                    print!(
+                        "{}",
+                        predict_view::render(
+                            step,
+                            &tokenizer_for_view,
+                            args.temperature,
+                            args.top_p,
+                        )
+                    );
+                    io::stdout().flush()?;
+                }
+                Ok(())
+            })?
+        };
         print_safe_response(&response, thinking_mode, args.stream, &mut stream_state)?;
         let mut adapter = guard.into_inner();
         if response.is_blocked() {
@@ -1025,21 +1048,25 @@ fn run_vision_self_learn_infer(
     {
         let mut guard = SafetyGuard::new(adapter, policy);
         let mut stream_state = StreamState::default();
-        let response = guard.generate_with_callback(&prompt, config, |step| {
-            if args.predict_view {
-                print!(
-                    "{}",
-                    predict_view::render(step, &tokenizer_for_view, args.temperature, args.top_p)
-                );
-            }
-            if args.stream {
-                stream_step(step, thinking_mode, &mut stream_state)?;
-            }
-            if args.predict_view || args.stream {
-                io::stdout().flush()?;
-            }
-            Ok(())
-        })?;
+        let response = if args.stream {
+            guard.generate_streaming_with_callback(&prompt, config, print_safe_stream_event)?
+        } else {
+            guard.generate_with_callback(&prompt, config, |step| {
+                if args.predict_view {
+                    print!(
+                        "{}",
+                        predict_view::render(
+                            step,
+                            &tokenizer_for_view,
+                            args.temperature,
+                            args.top_p,
+                        )
+                    );
+                    io::stdout().flush()?;
+                }
+                Ok(())
+            })?
+        };
         print_safe_response(&response, thinking_mode, args.stream, &mut stream_state)?;
         let mut adapter = guard.into_inner();
         if response.is_blocked() {
@@ -1227,12 +1254,27 @@ fn finish_stream(state: &mut StreamState) {
     println!();
 }
 
+fn print_safe_stream_event(event: SafeStreamEvent) -> aarambh_ai_core::Result<()> {
+    if let SafeStreamEvent::Text(text) = event {
+        print!("{text}");
+        io::stdout().flush()?;
+    }
+    Ok(())
+}
+
 fn print_safe_response(
     response: &SafeResponse,
     thinking_mode: ThinkingMode,
     stream: bool,
     stream_state: &mut StreamState,
 ) -> io::Result<()> {
+    if stream {
+        finish_stream(stream_state);
+        if let SafetyVerdict::Block(reason) = &response.verdict {
+            println!("blocked by safety: {reason}");
+        }
+        return Ok(());
+    }
     if let SafetyVerdict::Block(reason) = &response.verdict {
         println!("blocked by safety: {reason}");
         return Ok(());
@@ -1243,11 +1285,7 @@ fn print_safe_response(
         return Ok(());
     };
 
-    if stream && !response.output_redacted {
-        finish_stream(stream_state);
-    } else {
-        print_generation_output(output, thinking_mode)?;
-    }
+    print_generation_output(output, thinking_mode)?;
     Ok(())
 }
 
