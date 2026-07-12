@@ -46,7 +46,7 @@ You do not need to write code to contribute:
 
 ### Prerequisites
 
-- Rust stable, 1.80 or later (`rustup update stable`)
+- Rust 1.89 or later (`rustup update stable`)
 - No GPU required for development (Tiny model trains on any i3)
 
 ### Clone and build
@@ -56,16 +56,16 @@ git clone https://github.com/AarambhDevHub/aarambh-ai.git
 cd aarambh-ai
 
 # Build all crates:
-cargo build --workspace
+cargo build --workspace --locked
 
 # Run all tests:
-cargo test --workspace
+cargo test --workspace --locked
 
 # Check linting:
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --locked -- -D warnings -D clippy::undocumented_unsafe_blocks
 
 # Check formatting:
-cargo fmt --check
+cargo fmt --all --check
 ```
 
 ### IDE Setup
@@ -92,7 +92,10 @@ aarambh-ai/
 │   ├── aarambh-ai-finetune/    ← LoRA, QLoRA, SFT, GRPO, verifiers
 │   ├── aarambh-ai-inference/   ← Inference engine, KV cache, sampler
 │   ├── aarambh-ai-safety/      ← Input/output guardrails, PII, audit
-│   └── aarambh-ai-selflearn/   ← Self-learning loop, replay buffer, critique
+│   ├── aarambh-ai-selflearn/   ← Self-learning loop, replay buffer, critique
+│   ├── aarambh-ai-eval/        ← Evaluation harness and scorecards
+│   ├── aarambh-ai-vision/      ← Frozen vision encoder and projector
+│   └── aarambh-ai-serve/       ← OpenAI-compatible local inference server
 └── aarambh-ai/             ← CLI binary
 ```
 
@@ -299,7 +302,10 @@ Feature requests that describe only the desired API without explaining the use c
 
 ## Working on Custom Kernels
 
-The `aarambh-ai-kernel` crate is the only crate in the workspace that contains CUDA C code, unsafe Rust, and raw pointer arithmetic. All other crates stay 100% safe Rust.
+The `aarambh-ai-kernel` crate owns CUDA C and raw SIMD pointer arithmetic.
+`aarambh-ai-weights` and `aarambh-ai-vision` each contain one audited
+memory-mapped SafeTensors boundary. Every unsafe block requires a `SAFETY:`
+explanation and must pass `clippy::undocumented_unsafe_blocks`.
 
 ### CPU SIMD
 
@@ -330,11 +336,12 @@ All tests should pass even without NVCC — they test the candle fallback path.
 
 aarambh-ai follows [Semantic Versioning](https://semver.org/).
 
-- **Patch** (`1.0.x`) — bug fixes only, no API changes.
-- **Minor** (`1.x.0`) — new features and backward-compatible API additions.
+- **Patch** (`2.0.x`) — bug fixes only, no API changes.
+- **Minor** (`2.x.0`) — new features and backward-compatible API additions.
 - **Major** (`x.0.0`) — breaking API changes with migration notes.
 
-All sub-crates share the same version as the workspace (tracked via the root `Cargo.toml`).
+All sub-crates share the workspace version and remain internal, non-publishable
+implementation units. Aarambh AI is distributed from GitHub as an application.
 
 ---
 

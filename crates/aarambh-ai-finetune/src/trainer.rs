@@ -659,8 +659,3 @@ fn adapter_method_label(method: AdapterMethod) -> &'static str {
         AdapterMethod::Dora => "dora",
     }
 }
-
-#[allow(dead_code)]
-fn tensor_to_scalar_f32(tensor: &Tensor) -> Result<f32> {
-    Ok(tensor.to_scalar::<f32>()?)
-}

@@ -2,7 +2,7 @@
 
 This folder holds the learning material behind Aarambh-AI — a from-scratch decoder-only LLM built in Rust using Candle. If you've ever looked at this repo and wondered *"okay but how does any of this actually work?"*, start here.
 
-These docs aren't API references or code comments. They're written for someone coming in with **zero background in AI/ML** — a beginner who codes but has never touched a neural network before. The goal is that by the end of these three files, you understand not just *what* Aarambh-AI does, but *why* every piece exists and *how* the math underneath it actually works.
+These docs aren't API references or code comments. They're written for someone coming in with **zero background in AI/ML** — a beginner who codes but has never touched a neural network before. The goal is that by the end of these guides, you understand not just *what* Aarambh-AI does, but *why* every piece exists and *how* the math underneath it actually works.
 
 ---
 
@@ -11,10 +11,11 @@ These docs aren't API references or code comments. They're written for someone c
 ### 1. `aarambh-ai-complete-guide.md`
 **The full project walkthrough — every phase, explained.**
 
-This covers all 27 phases of Aarambh-AI, from v1.0.0 (shipped) through the v2 roadmap (in progress):
+This covers all 28 completed phases of Aarambh-AI, from v1.0.0 through the
+production v2.0.0 source release:
 
 - **v1 (Phases 1–13):** Tokenizer, Data Pipeline, Neural Network Primitives, Full Model Forward Pass, Custom Kernels (CPU SIMD + GPU prep), Training Loop, Inference Engine + CLI, Thinking Engine, Quantization Stack, Fine-Tuning (LoRA/QLoRA/SFT), GRPO Reinforcement Learning, Safety Layer, Self-Learning.
-- **v2 (Phases 14–27):** GPU Scale-Up, Flash Attention CUDA Kernels, Long Context (RoPE scaling), Evaluation Harness, DoRA Fine-Tuning, Vision Encoder + Projector, Vision-Language Training, Vision-Aware Self-Learning, Mixture of Experts, Multi-GPU Training, DPO Preference Tuning, Speculative Decoding, Tool Use / Function Calling, Inference Server (OpenAI-compatible).
+- **v2 (Phases 14–28):** GPU Scale-Up, Flash Attention CUDA Kernels, Long Context (RoPE scaling), Evaluation Harness, DoRA Fine-Tuning, Vision Encoder + Projector, Vision-Language Training, Vision-Aware Self-Learning, Mixture of Experts, Multi-GPU Training, DPO Preference Tuning, Speculative Decoding, Tool Use / Function Calling, Inference Server, and the v2.0.0 production source release.
 
 Each phase includes a plain-English definition, a beginner explanation, why it's needed, a worked example, and a diagram. Read this first — it's the map of the whole project.
 
@@ -37,7 +38,9 @@ Read this first if you're completely new to AI in general, or read it alongside 
 ### 4. `aarambh-ai-config-toml-guide.md`
 **Every field in every `.toml` config file, explained — the practical "turn the dial" layer.**
 
-This walks through the actual 14 config files in `configs/` — `tiny_shakespeare_smoke.toml`, `tiny_shakespeare.toml`, `wikitext103_tiny/small/medium/large.toml`, `wikitext103_cuda_smoke.toml`, `wikitext103_long_smoke.toml`, `medium_16k.toml`, `large_16k.toml`, and the four `vision_*.toml` files — field by field:
+This walks through the checked-in training and inference configurations in
+`configs/` — Tiny/Small/Medium/Large, CUDA, long-context, MoE, distributed,
+vision, and smoke configurations — field by field:
 
 - **Top-level settings:** `dataset_path`, `tokenizer_path`, `vocab_size`, `validation_split`, `shuffle`, `resume`, `device`, `dtype`.
 - **`[model]` architecture:** `hidden_dim`, `ffn_dim`, `n_layers`, `n_heads`/`n_kv_heads` (Grouped-Query Attention), `max_seq_len`, `rope_theta`, `norm_eps`, `tie_embeddings`.
@@ -74,7 +77,6 @@ If you already know the basics and just want the project-specific details, jump 
 ## Who this is for
 
 - Anyone reading the Aarambh-AI codebase for the first time and wondering what a given module actually does.
-- Viewers of the Aarambh Dev Hub YouTube channel who want the written version of what's explained on-screen.
 - Contributors who want to understand a phase deeply enough to help extend it.
 - Future-me, six months from now, who forgot why a formula was written a certain way.
 
@@ -84,7 +86,8 @@ No prior ML background is assumed anywhere in these three files. If something is
 
 ## Keeping these docs updated
 
-As new phases ship (especially the rest of the v2 roadmap — speculative decoding, tool use, and the inference server), these files get updated to match. If a phase's implementation changes significantly, the corresponding section in `aarambh-ai-complete-guide.md` should be revisited.
+The v2 roadmap is complete. Future changes must update the matching guide,
+configuration reference, architecture section, and changelog in the same pull request.
 
 ---
 

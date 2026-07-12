@@ -4,11 +4,13 @@
 
 [![CI](https://github.com/AarambhDevHub/aarambh-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/AarambhDevHub/aarambh-ai/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/Rust-1.89%2B-orange.svg)](https://www.rust-lang.org)
 
 A decoder-only transformer with four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA/DoRA fine-tuning, GRPO and DPO alignment, exact speculative decoding, grammar-constrained function calling, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, evaluation harness, a frozen-encoder vision projector path, and an OpenAI-compatible inference server — all in one clean 17-crate Rust workspace.
 
-v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, and pretrained checkpoints are not attached to the release.
+v2.0.0 is a production GitHub source release. The workspace crates are internal
+implementation units and remain non-publishable; no pretrained checkpoints or
+compiled binaries are attached to the release.
 
 **Inspired by:** LLaMA · Mistral · DeepSeek · GPT · Claude · Qwen · Gemma
 
@@ -49,6 +51,7 @@ v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, an
 | Exact speculative decoding: Tiny draft, block verification, rejection sampling, telemetry | Phase 25 ✅ |
 | Tool use: schema-constrained JSON calls, Tool SFT/QLoRA, selection evaluation | Phase 26 ✅ |
 | OpenAI-compatible Axum HTTP/SSE server with continuous batching | Phase 27 ✅ |
+| Production v2.0 source release: locked dependencies, strict docs, CI and release audit | Phase 28 ✅ |
 
 ---
 
@@ -56,7 +59,7 @@ v1.0.0 is a GitHub source release. Crates are not published to crates.io yet, an
 
 ### Prerequisites
 
-- Rust 1.80+ ([install via rustup](https://rustup.rs/))
+- Rust 1.89+ ([install via rustup](https://rustup.rs/))
 - No GPU required for development (Tiny trains on any i3 laptop)
 
 ### Build & Test
@@ -66,39 +69,40 @@ git clone https://github.com/AarambhDevHub/aarambh-ai.git
 cd aarambh-ai
 
 # Check the entire workspace compiles
-cargo check --workspace
+cargo check --workspace --all-targets --locked
 
 # Run all tests
-cargo test --workspace
+cargo test --workspace --locked
 
 # Build a release binary
-cargo build --release -p aarambh-ai
+cargo build --release -p aarambh-ai --locked
 
 # Run the CLI
-cargo run --release -p aarambh-ai -- --help
+cargo run --release --locked -p aarambh-ai -- --help
 
 # Optional local install from this source checkout
-cargo install --path aarambh-ai
+cargo install --path aarambh-ai --locked
 aarambh-ai --version
 ```
 
 ---
 
-## Production v1.0 Source Release
+## Production v2.0 Source Release
 
-aarambh-ai v1.0.0 is released as source through GitHub tags and release notes:
+aarambh-ai v2.0.0 is released as source through GitHub tags and release notes:
 
 - Build/install from the repository source tree.
-- Crates use `publish = false`; there is no crates.io release yet.
-- No pretrained checkpoints, model weights, adapters, tokenizer artifacts, or GGUF files are released.
+- All 17 packages use `publish = false`; Aarambh AI is distributed as an application, not as crates.io libraries.
+- No pretrained checkpoints, model weights, adapters, tokenizer artifacts, GGUF files, or compiled binaries are released.
+- `Cargo.lock` is committed and all release commands use `--locked`.
 - Example Tiny configs and data paths are for local smoke tests and user-created checkpoints.
 - CUDA is optional; default CPU builds work without NVCC.
 
 ```sh
 git clone https://github.com/AarambhDevHub/aarambh-ai.git
 cd aarambh-ai
-git checkout v1.0.0
-cargo build --release -p aarambh-ai
+git checkout v2.0.0
+cargo build --release -p aarambh-ai --locked
 target/release/aarambh-ai --version
 ```
 
@@ -1124,19 +1128,21 @@ aarambh-ai/
 | 25 | Speculative decoding | GPU | ✅ |
 | 26 | Tool use / function calling | i3 + GPU | ✅ |
 | 27 | OpenAI-compatible inference server | i3 | ✅ |
+| 28 | Production release v2.0.0 | all | ✅ |
 
-See [ROADMAP.md](ROADMAP.md) for the full phased delivery plan with tests and milestones.
+See [ROADMAP.md](ROADMAP.md) and [ROADMAP_V2.md](ROADMAP_V2.md) for the full phased delivery plans with tests and milestones.
 
 ---
 
 ## Development Checks
 
 ```sh
-cargo check --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --check
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+cargo check --workspace --all-targets --locked
+cargo test --workspace --no-fail-fast --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings -D clippy::undocumented_unsafe_blocks
+cargo fmt --all --check
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --locked
+scripts/phase28_release_audit.sh
 ```
 
 ### Kernel Benchmarks
@@ -1158,11 +1164,14 @@ CPU/Candle fallback path.
 | Document | What it covers |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Complete design document, layer-by-layer explanation, data flow, thinking engine, quantisation, fine-tuning, safety, self-learning |
-| [ROADMAP.md](ROADMAP.md) | Step-by-step build plan with tasks, tests, and milestones for all 15 phases |
+| [ARCHITECTURE_V2.md](ARCHITECTURE_V2.md) | v2 architecture additions: long context, evaluation, vision, MoE, distributed training, tools, and serving |
+| [ROADMAP.md](ROADMAP.md) | Completed v1 phased delivery plan |
+| [ROADMAP_V2.md](ROADMAP_V2.md) | Completed v2 phased delivery plan through Phase 28 |
 | [SELF_LEARNING.md](SELF_LEARNING.md) | Deep dive into the self-learning loop: online GRPO, replay buffer, self-critique, CPU vs GPU modes |
-| [RELEASE.md](RELEASE.md) | v1.0.0 source-release checklist, validation commands, and release policy |
+| [SELF_LEARNING_V2.md](SELF_LEARNING_V2.md) | Vision-aware self-learning design and hardware boundaries |
+| [RELEASE.md](RELEASE.md) | v2.0.0 source-release runbook, validation commands, and artifact policy |
 | [docs/inference-server.md](docs/inference-server.md) | Phase 27 server startup, endpoints, SDK setup, safety, auth, and smoke tests |
-| [.github/release-notes/v1.0.0.md](.github/release-notes/v1.0.0.md) | GitHub Release body for v1.0.0 |
+| [.github/release-notes/v2.0.0.md](.github/release-notes/v2.0.0.md) | GitHub Release body for v2.0.0 |
 
 ---
 
@@ -1176,7 +1185,7 @@ If you use aarambh-ai in your research, please cite it as follows:
   author       = {Aarambh Dev Hub},
   year         = {2026},
   url          = {https://github.com/AarambhDevHub/aarambh-ai},
-  version      = {1.0.0},
+  version      = {2.0.0},
   license      = {Apache-2.0},
 }
 ```

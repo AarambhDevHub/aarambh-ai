@@ -1,0 +1,2 @@
+{"prompt":"Greet a new user politely.","chosen":"Hello! How can I help you today?","rejected":"Do not bother me."}
+{"prompt":"Explain recursion in one simple sentence.","chosen":"Recursion is a method where a function calls itself with a smaller input until it reaches a stopping case.","rejected":"Recursion means computers repeat random things."}

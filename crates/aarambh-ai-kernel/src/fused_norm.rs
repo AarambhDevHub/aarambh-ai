@@ -196,6 +196,8 @@ mod cuda {
             .arg(&rows)
             .arg(&hidden)
             .arg(&eps);
+        // SAFETY: The validated contiguous slices and launch dimensions keep all
+        // kernel reads and writes within the device allocations.
         unsafe { builder.launch(cfg).w()? };
         Ok((CudaStorage::wrap_cuda_slice(out, dev), shape))
     }

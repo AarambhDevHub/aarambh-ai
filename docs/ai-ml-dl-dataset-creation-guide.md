@@ -257,7 +257,7 @@ NLP Tasks:
 This is where Aarambh-AI itself sits in our nested-doll diagram — it's a DL model, applied to NLP tasks, at a large scale (many parameters, trained on huge datasets), giving it broad, flexible language abilities rather than being narrowly built for just one task like translation.
 
 **Why it matters:**
-Everything covered in your two previous guides (the 27 phases, and the 14 math formulas) is literally the recipe for building one of these.
+Everything covered in your two previous guides (the 28 phases, and the 14 math formulas) is literally the recipe for building one of these.
 
 **Example:**
 ```

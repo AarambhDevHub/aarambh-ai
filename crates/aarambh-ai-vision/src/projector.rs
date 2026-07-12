@@ -66,6 +66,8 @@ impl VisionProjector {
         device: &candle_core::Device,
         dtype: candle_core::DType,
     ) -> Result<Self> {
+        // SAFETY: The checkpoint mapping is read-only and is consumed while the
+        // projector creates its owned parameter tensors.
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[path.as_ref()], dtype, device)? };
         Self::new(config, vb)
     }

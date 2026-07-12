@@ -25,9 +25,9 @@ the free weekly GPU quota; none require paid API access.
 ## Phase Map (Quick Reference)
 
 ```
-Phase 16 →  Long context (RoPE scaling)        (7–10 days)   [Kaggle, free]
-Phase 17 →  Evaluation harness                 (7–10 days)   [i3 + Kaggle]
-Phase 18 →  DoRA fine-tuning                    (7–10 days)   [i3 + Kaggle]
+Phase 16 →  Long context (RoPE scaling)        (7–10 days)   [Kaggle, free] ✅
+Phase 17 →  Evaluation harness                 (7–10 days)   [i3 + Kaggle] ✅
+Phase 18 →  DoRA fine-tuning                    (7–10 days)   [i3 + Kaggle] ✅
 Phase 19 →  Vision encoder + projector          (10–14 days)  [Kaggle] ✅
 Phase 20 →  Vision-language training            (10–14 days)  [Kaggle] ✅
 Phase 21 →  Vision-aware self-learning          (7–10 days)   [Kaggle only] ✅
@@ -37,7 +37,7 @@ Phase 24 →  DPO preference tuning               (7–10 days)   [Kaggle] ✅
 Phase 25 →  Speculative decoding                (5–7 days)    [Kaggle] ✅
 Phase 26 →  Tool use / function calling         (7–10 days)   [i3 + Kaggle] ✅
 Phase 27 →  Inference server                    (10–14 days)  [i3] ✅
-Phase 28 →  crates.io publish (v2.0.0)          (5–7 days)    [all]
+Phase 28 →  Production release v2.0.0           (5–7 days)    [all] ✅
 ```
 
 **Total realistic estimate: 99–140 days (~3.3–4.7 months)**
@@ -64,9 +64,9 @@ Phase 28 →  crates.io publish (v2.0.0)          (5–7 days)    [all]
 5. **27 (server)** is deliberately near the end — it should serve a model
    with the full v2 feature set, not an early prototype. It serves your own
    local checkpoints only; no weights are published by this phase.
-6. **28 (crates.io)** is last, exactly like v1.0.0's Phase 15 discipline:
-   ship the *code* as source once it is proven, never ship unproven code
-   or unreleased weights.
+6. **28 (production release)** is last, exactly like v1.0.0's Phase 15
+   discipline: ship the proven application source with reproducible locked
+   dependencies. The workspace crates remain internal and non-publishable.
 
 ---
 
@@ -106,7 +106,7 @@ Policy note.
 
 ---
 
-## Phase 16 — Long Context (RoPE Scaling)
+## Phase 16 — Long Context (RoPE Scaling) ✅
 
 **Duration:** 7–10 days | **Hardware:** Kaggle (free quota)
 
@@ -193,7 +193,7 @@ git tag v2.0.0-alpha.1
 
 ---
 
-## Phase 17 — Evaluation Harness
+## Phase 17 — Evaluation Harness ✅
 
 **Duration:** 7–10 days | **Hardware:** i3 (small sets) + Kaggle (full sets)
 
@@ -281,7 +281,7 @@ git tag v2.0.0-alpha.2
 
 ---
 
-## Phase 18 — DoRA (Weight-Decomposed Low-Rank Adaptation)
+## Phase 18 — DoRA (Weight-Decomposed Low-Rank Adaptation) ✅
 
 **Duration:** 7–10 days | **Hardware:** i3 (small scale) + Kaggle (Small+)
 
@@ -362,7 +362,7 @@ git tag v2.0.0-alpha.3
 
 ---
 
-## Phase 19 — Vision Encoder + Projector
+## Phase 19 — Vision Encoder + Projector ✅
 
 **Duration:** 10–14 days | **Hardware:** Kaggle (T4/P100)
 
@@ -468,7 +468,7 @@ git tag v2.0.0-alpha.4
 
 ---
 
-## Phase 20 — Vision-Language Training (Instruction Tuning)
+## Phase 20 — Vision-Language Training (Instruction Tuning) ✅
 
 **Duration:** 10–14 days | **Hardware:** Kaggle (T4/P100)
 
@@ -553,7 +553,7 @@ git tag v2.0.0-alpha.5
 
 ---
 
-## Phase 21 — Vision-Aware Self-Learning
+## Phase 21 — Vision-Aware Self-Learning ✅
 
 **Duration:** 7–10 days | **Hardware:** Kaggle only (explicitly not i3-capable)
 
@@ -1055,48 +1055,46 @@ git tag v2.0.0-alpha.12
 
 ---
 
-## Phase 28 — crates.io Publish (v2.0.0 Release)
+## Phase 28 — Production Release v2.0.0 ✅
 
 **Duration:** 5–7 days | **Hardware:** all
 
 ### Goal
-Publish all library crates to crates.io under 2.0.0, exactly mirroring
-RELEASE.md's v1.0.0 discipline: **source code only, zero model artifacts.**
-No pretrained checkpoints, adapters, or GGUF files are attached to this
-release either — same policy, one major version later.
+Ship a production-quality v2.0.0 GitHub source release of the Aarambh AI
+application. All 16 library crates are internal workspace components and stay
+`publish = false`. The release contains no pretrained checkpoints, adapters,
+tokenizers, GGUF files, or compiled binaries.
 
 ### Tasks
 
 ```
-[ ] Package manifests: all 16 library crates + CLI set to version 2.0.0
-[ ] Flip `publish = false` → real crates.io metadata (description, license,
-    repository, keywords) for crates that are ready; keep publish = false
-    for any crate you judge still too unstable for semver commitments
-[ ] cargo publish --dry-run for every publishable crate, in dependency-layer
-    order (core → tokenizer/data/nn → kernel/model/weights/quant/vision →
-    train/finetune → inference/safety/selflearn → serve → binary)
-[ ] CHANGELOG.md: v2.0.0 entry summarizing Phases 16–27
-[ ] README.md, ARCHITECTURE.md, ROADMAP.md: merge in the v2 additions (or
-    keep _V2 docs as addenda, your call)
-[ ] RELEASE.md: v2.0.0 checklist, explicitly restating "no pretrained
-    checkpoints, no model artifacts" for this release line too
-[ ] .github/release-notes/v2.0.0.md
-[ ] CI: extend existing workflow to cover the 3 new crates + eval harness
+[x] All 16 library crates + CLI inherit version 2.0.0 and remain publish=false
+[x] Rust 1.89 MSRV, Edition 2024, optimized portable release profile
+[x] Cargo.lock committed; CI, release, install, and audit commands use --locked
+[x] Direct tokenizer dependency aligned with Candle's 0.22 line
+[x] Every public API documented and missing docs denied by rustdoc
+[x] Unsafe blocks carry safety rationale and Clippy enforces the rule
+[x] No TODO/FIXME/HACK markers, dead-code suppressions, or empty kernel bodies
+[x] Automated release audit rejects unfinished tasks and tracked model artifacts
+[x] CHANGELOG.md and release notes summarize Phases 16–27
+[x] README, architecture, roadmaps, guides, security policy, and runbook updated
+[x] CI covers stable Rust, MSRV, Clippy, tests, rustdoc, CLI, and RustSec audit
+[x] Tag workflow creates a source-only GitHub Release from v2.0.0.md
     smoke run
 ```
 
 ### Milestone
 ```
-cargo install --path aarambh-ai
+cargo install --path aarambh-ai --locked
 aarambh-ai --version  → aarambh-ai 2.0.0
 git tag v2.0.0
 git push origin v2.0.0
 
-Crates resolve from crates.io for any published subset; unpublished crates
-remain source-only exactly as documented. No model weights attached to the
-GitHub Release.
+The GitHub Release contains the repository source archives and release notes
+only. No workspace package is published to crates.io and no model or binary
+artifact is attached.
 
-git commit -m "chore: v2.0.0 — crates.io publish, source release"
+git commit -m "chore: prepare v2.0.0 production source release"
 ```
 
 ---
@@ -1117,7 +1115,7 @@ git commit -m "chore: v2.0.0 — crates.io publish, source release"
 | 25 | Speculative Decoding | Tiny-draft / Large-target speedup | Kaggle | 5–7 days |
 | 26 | Tool Use / Function Calling | Grammar-constrained JSON tool calls | i3 + Kaggle | 7–10 days |
 | 27 | Inference Server | ✅ OpenAI-compatible Axum server, continuous batching, local-only | i3 | 10–14 days |
-| 28 | crates.io Publish | Source-only 2.0.0 release, zero model artifacts | all | 5–7 days |
+| 28 | Production Release | Locked, source-only v2.0.0 GitHub release | all | 5–7 days |
 
 **Total realistic estimate: 99–140 days (~3.3–4.7 months)**
 

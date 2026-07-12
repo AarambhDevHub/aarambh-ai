@@ -303,6 +303,8 @@ mod cuda {
             .arg(&head_dim)
             .arg(&scale)
             .arg(&causal);
+        // SAFETY: Tensor layouts, launch dimensions, dtypes, and device-local
+        // buffers are validated above before their pointers reach the kernel.
         unsafe { builder.launch(cfg).w()? };
         Ok((CudaStorage::wrap_cuda_slice(out, dev), shape))
     }

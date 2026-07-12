@@ -6,11 +6,25 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
+  msrv:
+    name: Rust 1.89 MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.89.0
+      - run: cargo check --workspace --all-targets --locked
+
+  quality:
+    name: Stable quality gates
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,34 +34,68 @@ jobs:
           components: clippy, rustfmt
 
       - name: Format
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
       - name: Check
-        run: cargo check --workspace
+        run: cargo check --workspace --all-targets --locked
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast --locked
 
       - name: Documentation
-        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+        run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --locked
+
+      - name: Release audit
+        run: scripts/phase28_release_audit.sh
+
+      - name: Shell syntax
+        run: find scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
 
       - name: Build release
-        run: cargo build --release -p aarambh-ai
+        run: cargo build --release -p aarambh-ai --locked
 
       - name: CLI smoke
         run: |
-          cargo run -p aarambh-ai -- --version
-          cargo run -p aarambh-ai -- --help
-          cargo run -p aarambh-ai -- train --help
-          cargo run -p aarambh-ai -- infer --help
-          cargo run -p aarambh-ai -- eval --help
-          cargo run -p aarambh-ai -- quantise --help
-          cargo run -p aarambh-ai -- convert --help
-          cargo run -p aarambh-ai -- finetune --help
-          cargo run -p aarambh-ai -- finetune dora --help
-          cargo run -p aarambh-ai -- finetune qdora --help
-          cargo run -p aarambh-ai -- finetune merge --help
-          cargo run -p aarambh-ai -- selflearn --help
+          target/release/aarambh-ai --version
+          target/release/aarambh-ai --help
+          target/release/aarambh-ai train --help
+          target/release/aarambh-ai infer --help
+          target/release/aarambh-ai eval --help
+          target/release/aarambh-ai quantise --help
+          target/release/aarambh-ai convert --help
+          target/release/aarambh-ai serve --help
+          target/release/aarambh-ai finetune --help
+          target/release/aarambh-ai finetune sft --help
+          target/release/aarambh-ai finetune qlora --help
+          target/release/aarambh-ai finetune tool-sft --help
+          target/release/aarambh-ai finetune tool-qlora --help
+          target/release/aarambh-ai finetune dora --help
+          target/release/aarambh-ai finetune qdora --help
+          target/release/aarambh-ai finetune vlm-dora --help
+          target/release/aarambh-ai finetune vlm-qdora --help
+          target/release/aarambh-ai finetune grpo --help
+          target/release/aarambh-ai finetune dpo --help
+          target/release/aarambh-ai finetune qdpo --help
+          target/release/aarambh-ai finetune merge --help
+          target/release/aarambh-ai selflearn --help
+          target/release/aarambh-ai selflearn start --help
+          target/release/aarambh-ai selflearn flush-gradients --help
+          target/release/aarambh-ai selflearn replay --help
+          target/release/aarambh-ai selflearn stats --help
+          target/release/aarambh-ai selflearn reset --help
+
+  security-audit:
+    name: RustSec audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

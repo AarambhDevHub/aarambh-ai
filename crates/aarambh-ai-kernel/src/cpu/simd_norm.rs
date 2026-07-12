@@ -225,8 +225,10 @@ unsafe fn rms_norm_row_avx512(input: &[f32], weight: &[f32], eps: f32, output: &
     while idx + 16 <= input.len() {
         // SAFETY: idx advances in blocks of 16 and all three slices have equal length.
         let values = unsafe { _mm512_loadu_ps(input.as_ptr().add(idx)) };
+        // SAFETY: weight has the same length as input, so this 16-lane load is in bounds.
         let weights = unsafe { _mm512_loadu_ps(weight.as_ptr().add(idx)) };
         let out = _mm512_mul_ps(_mm512_mul_ps(values, scale), weights);
+        // SAFETY: output has the same length as input, so this 16-lane store is in bounds.
         unsafe { _mm512_storeu_ps(output.as_mut_ptr().add(idx), out) };
         idx += 16;
     }
@@ -265,8 +267,10 @@ unsafe fn rms_norm_row_avx2_fma(input: &[f32], weight: &[f32], eps: f32, output:
     while idx + 8 <= input.len() {
         // SAFETY: idx advances in blocks of 8 and all three slices have equal length.
         let values = unsafe { _mm256_loadu_ps(input.as_ptr().add(idx)) };
+        // SAFETY: weight has the same length as input, so this 8-lane load is in bounds.
         let weights = unsafe { _mm256_loadu_ps(weight.as_ptr().add(idx)) };
         let out = _mm256_mul_ps(_mm256_mul_ps(values, scale), weights);
+        // SAFETY: output has the same length as input, so this 8-lane store is in bounds.
         unsafe { _mm256_storeu_ps(output.as_mut_ptr().add(idx), out) };
         idx += 8;
     }
@@ -305,8 +309,10 @@ unsafe fn rms_norm_row_avx2(input: &[f32], weight: &[f32], eps: f32, output: &mu
     while idx + 8 <= input.len() {
         // SAFETY: idx advances in blocks of 8 and all three slices have equal length.
         let values = unsafe { _mm256_loadu_ps(input.as_ptr().add(idx)) };
+        // SAFETY: weight has the same length as input, so this 8-lane load is in bounds.
         let weights = unsafe { _mm256_loadu_ps(weight.as_ptr().add(idx)) };
         let out = _mm256_mul_ps(_mm256_mul_ps(values, scale), weights);
+        // SAFETY: output has the same length as input, so this 8-lane store is in bounds.
         unsafe { _mm256_storeu_ps(output.as_mut_ptr().add(idx), out) };
         idx += 8;
     }

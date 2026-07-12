@@ -2,7 +2,10 @@
 
 ### Every field in every config file, explained like you've never opened a `.toml` file before
 
-This guide walks through the actual config files used to train Aarambh-AI — the same 14 files sitting in the `configs/` folder of the repo: `tiny_shakespeare_smoke.toml`, `tiny_shakespeare.toml`, `wikitext103_tiny.toml`, `wikitext103_small.toml`, `wikitext103_medium.toml`, `wikitext103_large.toml`, `wikitext103_cuda_smoke.toml`, `wikitext103_long_smoke.toml`, `medium_16k.toml`, `large_16k.toml`, `vision_projector_smoke.toml`, `vision_projector_pretrain.toml`, `vision_vqa_smoke.toml`, and `vision_vqa_instruct.toml`.
+This guide walks through the 19 checked-in config files used to train, tune,
+and test Aarambh-AI. They cover Tiny through Large, CUDA and long-context
+smoke runs, MoE, two-GPU training, vision projection/VQA, and vision-aware
+self-learning.
 
 Same format as the other 3 guides — for every field:
 - **Definition**
@@ -50,7 +53,7 @@ Reading this: `dataset_path` and `vocab_size` are top-level settings (not inside
 
 **Common beginner questions:**
 - *Q: Why TOML instead of JSON or YAML?* → TOML is designed specifically to be human-readable and hard to mess up (unlike YAML's tricky whitespace rules), while still being simple to parse in Rust — a very common choice for Rust config files.
-- *Q: Do I need to write these by hand every time?* → No — usually you copy an existing config close to what you want and adjust just the fields you need to change, which is exactly why these 14 files exist as ready-made starting points.
+- *Q: Do I need to write these by hand every time?* → No — usually you copy an existing config close to what you want and adjust just the fields you need to change, which is exactly why the checked-in configs exist as ready-made starting points.
 
 ---
 
@@ -502,7 +505,8 @@ This value (1e-5) is a very standard, widely-used default across transformer imp
 ```toml
 tie_embeddings = true
 ```
-Every single one of these 14 configs ties embeddings — a deliberate, consistent design choice across this whole model family to save parameters.
+The language-model configs tie embeddings by default — a deliberate,
+consistent design choice across this model family to save parameters.
 
 **Diagram:**
 ```
@@ -1169,7 +1173,8 @@ Validation performance gets checked every 1,000 steps — frequent enough to cat
 ```toml
 seed = 42
 ```
-Every single one of these 14 configs uses the same seed — a deliberate choice so that any differences observed between different configs are due to the actual hyperparameter changes, not just different random luck.
+Training configs use deterministic seeds so differences between comparable
+runs come from configuration changes rather than uncontrolled random luck.
 
 **Common beginner questions:**
 - *Q: Why specifically 42?* → No deep technical reason — it's a widely-used, almost joking convention in programming/ML culture (a reference to "The Hitchhiker's Guide to the Galaxy," where 42 is "the answer to life, the universe, and everything"), that stuck around simply because it needs to be *some* fixed number, and 42 is a common default choice.

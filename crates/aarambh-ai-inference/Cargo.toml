@@ -1,8 +1,9 @@
 [package]
 name = "aarambh-ai-inference"
-version = "1.0.0"
+version.workspace = true
 publish = false
-edition = "2024"
+edition.workspace = true
+rust-version.workspace = true
 
 [features]
 default = []

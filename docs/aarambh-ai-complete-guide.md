@@ -2,7 +2,7 @@
 
 ### Everything we built, in plain human language
 
-This document explains, step by step, everything inside **Aarambh-AI** — the from-scratch decoder-only large language model built in Rust using Candle. It covers both **v1.0.0** (complete, 15 phases) and **v2** (in progress, 13 more phases). Think of this as a story: each phase builds on top of the one before it, like constructing a building floor by floor.
+This document explains, step by step, everything inside **Aarambh-AI** — the from-scratch decoder-only large language model built in Rust using Candle. It covers the completed **v1.0.0** and **v2.0.0** roadmaps through Phase 28. Think of this as a story: each phase builds on top of the one before it, like constructing a building floor by floor.
 
 No prior AI knowledge assumed. Every section has:
 - A **plain-English definition**
@@ -16,7 +16,7 @@ No prior AI knowledge assumed. Every section has:
 
 ## The Big Picture First
 
-Before diving into 27 phases, here's the one-sentence version of what an LLM (Large Language Model) actually is:
+Before diving into 28 phases, here's the one-sentence version of what an LLM (Large Language Model) actually is:
 
 > An LLM is a giant mathematical function that has been shown so much text that it learned the statistical patterns of language well enough to predict "what word comes next" — and if you do that prediction over and over, you get sentences, paragraphs, and conversations.
 
@@ -663,7 +663,7 @@ without a full retraining run ever happening.
 
 ---
 
-# PART 2 — V2 (In Progress)
+# PART 2 — V2 (Complete)
 
 ## Phase 14: GPU Scale-Up (Small → Large)
 
@@ -1265,7 +1265,37 @@ exact same response format the tool expects.
 - *Q: Does this mean Aarambh-AI IS OpenAI's model?* → No — it just mimics the *API shape/format* so existing tools work seamlessly; the underlying model is entirely Aarambh-AI's own.
 - *Q: Is streaming still checked by safety?* → Yes. A rolling cross-token scanner delays only the unstable suffix, redacts PII before release, and stops toxic output with `content_filter`.
 - *Q: Can I expose it on my network without a key?* → No. Loopback works without authentication, but non-loopback binds require `AARAMBH_AI_API_KEY`.
-- *Q: Why is this the last phase?* → Because it's the "delivery" layer — it only makes sense to build this once the model itself (and all its capabilities from earlier phases) is ready to be served to the world.
+- *Q: Why is this near the end?* → Because it is the runtime delivery layer; the final Phase 28 then hardens and releases the complete source tree.
+
+---
+
+## Phase 28: Production Release v2.0.0
+
+**Definition:** The final hardening and source-release phase that freezes one
+reproducible application version, verifies its code and documentation, and
+creates the GitHub v2.0.0 release.
+
+**Beginner explanation:**
+Building features is not the same as releasing dependable software. The release
+phase checks that every package reports the same version, every public API is
+documented, dependencies are locked, tests and safety checks pass, and no model
+weights or unfinished code accidentally enter the source release.
+
+**Why we need it:**
+A reproducible release gives users one reviewed tag they can build locally.
+Aarambh AI is an application, so its internal crates stay non-publishable and
+the release is distributed through GitHub source rather than crates.io.
+
+**Example:**
+```sh
+git checkout v2.0.0
+cargo build --release -p aarambh-ai --locked
+target/release/aarambh-ai --version
+# aarambh-ai 2.0.0
+```
+
+**Release boundary:** GitHub source archives only. No pretrained checkpoints,
+adapters, tokenizers, GGUF files, optimizer state, or compiled binaries are attached.
 
 ---
 
@@ -1300,13 +1330,14 @@ exact same response format the tool expects.
 | 25 | Speculative Decoding | Speeding up generation using a draft model |
 | 26 | Tool Use / Function Calling | Letting the model use calculators, search, etc. |
 | 27 | Inference Server (OpenAI-compatible) | Making the model pluggable into existing tools |
+| 28 | Production Release v2.0.0 | Shipping one reproducible, audited source version |
 
 ---
 
 # Frequently Asked "Big Picture" Questions
 
-**Q: Do I need ALL 27 phases to have a working LLM?**
-No. Phases 1–13 alone (v1.0.0) already form a complete, working, chat-capable LLM. Everything in v2 (Phases 14–27) is about making it bigger, faster, smarter, safer at scale, and multimodal — upgrades, not requirements.
+**Q: Do I need ALL 28 phases to have a working LLM?**
+No. Phases 1–13 alone (v1.0.0) already form a complete, working, chat-capable LLM. Everything in v2 (Phases 14–28) makes it bigger, faster, measurable, multimodal, locally serviceable, and reproducibly releasable.
 
 **Q: What's the real difference between "training" phases and "fine-tuning" phases?**
 Training (Phase 6) teaches the model general language understanding from scratch on huge amounts of generic data. Fine-tuning (Phases 10, 18, 24) takes that already-capable model and nudges its behavior toward something more specific — following instructions, being safer, matching preferences — using much smaller, targeted datasets.
@@ -1325,4 +1356,4 @@ Because Aarambh-AI is built and run largely on modest, non-datacenter hardware (
 
 ---
 
-*This guide covers Aarambh-AI's complete v1.0.0 (Phases 1–13, shipped) and v2 roadmap (Phases 14–27, in progress) — built from scratch in Rust using Candle.*
+*This guide covers Aarambh-AI's completed v1.0.0 and v2.0.0 roadmaps through Phase 28 — built from scratch in Rust using Candle.*
