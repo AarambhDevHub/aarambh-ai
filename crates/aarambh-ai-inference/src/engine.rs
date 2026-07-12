@@ -24,6 +24,8 @@ pub enum FinishReason {
     ContextLimit,
     /// A complete schema-valid tool call was produced.
     ToolCall,
+    /// A configured stop sequence was generated.
+    StopSequence,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +54,10 @@ pub struct GenerationConfig {
     pub top_candidates: usize,
     /// Optional validated tool-calling configuration.
     pub tool_calling: Option<ToolCallingConfig>,
+    /// Text sequences that terminate visible answer generation.
+    pub stop_sequences: Vec<String>,
+    /// Whether completed output retains per-token step metadata.
+    pub capture_steps: bool,
 }
 
 impl GenerationConfig {
@@ -63,7 +69,26 @@ impl GenerationConfig {
             thinking_mode: ThinkingMode::None,
             top_candidates: 5,
             tool_calling: None,
+            stop_sequences: Vec::new(),
+            capture_steps: true,
         }
+    }
+
+    /// Validate request-level generation limits.
+    pub fn validate(&self) -> Result<()> {
+        if self.stop_sequences.len() > 4 {
+            return Err(AarambhError::Config(
+                "at most four stop sequences are supported".into(),
+            ));
+        }
+        for stop in &self.stop_sequences {
+            if stop.is_empty() || stop.len() > 256 {
+                return Err(AarambhError::Config(
+                    "stop sequences must contain 1..=256 UTF-8 bytes".into(),
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -111,6 +136,29 @@ pub struct GenerationOutput {
     pub speculative_stats: Option<SpeculativeStats>,
     /// Parsed function call when generation selected a tool.
     pub tool_call: Option<ToolCall>,
+    /// Token usage for this generation.
+    pub usage: GenerationUsage,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// Prompt and completion token accounting.
+pub struct GenerationUsage {
+    /// Number of prompt tokens consumed by the model.
+    pub prompt_tokens: usize,
+    /// Number of sampled completion tokens, including a matched stop sequence.
+    pub completion_tokens: usize,
+    /// Prompt plus completion tokens.
+    pub total_tokens: usize,
+}
+
+impl GenerationUsage {
+    fn new(prompt_tokens: usize, completion_tokens: usize) -> Self {
+        Self {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens: prompt_tokens + completion_tokens,
+        }
+    }
 }
 
 /// Stateful autoregressive inference engine.
@@ -118,6 +166,28 @@ pub struct InferenceEngine {
     model: AarambhModel,
     tokenizer: BpeTokenizer,
     device: candle_core::Device,
+}
+
+/// Resumable state for one autoregressive generation request.
+pub struct GenerationSession {
+    cache: KvCache,
+    next_logits: Tensor,
+    prompt_len: usize,
+    max_new_tokens: usize,
+    available: usize,
+    config: GenerationConfig,
+    thinking: ThinkingController,
+    tools: Option<ToolCallController>,
+    generated_ids: Vec<u32>,
+    raw_text: String,
+    thinking_text: String,
+    answer_text: String,
+    thinking_token_ids: Vec<u32>,
+    answer_token_ids: Vec<u32>,
+    tool_text: String,
+    steps: Vec<GenerationStep>,
+    finish_reason: Option<FinishReason>,
+    pending_token: Option<u32>,
 }
 
 impl InferenceEngine {
@@ -188,6 +258,102 @@ impl InferenceEngine {
         &self.device
     }
 
+    /// Prepare a resumable text-generation session and prefill its KV cache.
+    pub fn prepare_session(
+        &self,
+        prompt: &str,
+        config: GenerationConfig,
+    ) -> Result<GenerationSession> {
+        self.prepare_session_with_chunk_size(prompt, config, usize::MAX)
+    }
+
+    /// Prepare a session while limiting each prompt-prefill forward pass.
+    pub fn prepare_session_with_chunk_size(
+        &self,
+        prompt: &str,
+        config: GenerationConfig,
+        chunk_size: usize,
+    ) -> Result<GenerationSession> {
+        if chunk_size == 0 {
+            return Err(AarambhError::Config(
+                "prefill chunk size must be greater than zero".into(),
+            ));
+        }
+        config.validate()?;
+        let effective_prompt = match &config.tool_calling {
+            Some(tools) => tools.render_prompt(prompt)?,
+            None => prompt.to_string(),
+        };
+        let prompt_ids = self.prompt_token_ids(&effective_prompt)?;
+        let max_seq_len = self.model.config().max_seq_len;
+        if prompt_ids.len() >= max_seq_len {
+            return Err(AarambhError::Shape(format!(
+                "prompt has {} tokens but model max_seq_len is {max_seq_len}",
+                prompt_ids.len()
+            )));
+        }
+        let available = max_seq_len - prompt_ids.len();
+        let max_new_tokens = config.max_new_tokens.min(available);
+        let capacity = prompt_ids.len() + max_new_tokens;
+        let mut cache = KvCache::for_model_with_capacity(&self.model, capacity);
+        let mut next_logits = None;
+        for (chunk_index, chunk) in prompt_ids.chunks(chunk_size).enumerate() {
+            let offset = chunk_index * chunk_size;
+            let input = Tensor::from_vec(chunk.to_vec(), (1, chunk.len()), &self.device)?;
+            let logits = self
+                .model
+                .forward_with_cache(&input, offset, cache.layers_mut())?;
+            next_logits = Some(last_logits(&logits)?);
+        }
+        GenerationSession::new(
+            cache,
+            next_logits.expect("prompt ids are guaranteed non-empty"),
+            prompt_ids.len(),
+            max_new_tokens,
+            available,
+            config,
+            &self.tokenizer,
+        )
+    }
+
+    /// Advance all supplied sessions through one shared model decode pass.
+    ///
+    /// Each session must have produced one pending token through
+    /// [`GenerationSession::advance`] before this method is called.
+    pub fn decode_sessions(&self, sessions: &mut [&mut GenerationSession]) -> Result<()> {
+        if sessions.is_empty() {
+            return Ok(());
+        }
+        let mut token_ids = Vec::with_capacity(sessions.len());
+        let mut offsets = Vec::with_capacity(sessions.len());
+        for session in sessions.iter() {
+            if session.is_finished() {
+                return Err(AarambhError::Config(
+                    "finished session cannot enter a decode batch".into(),
+                ));
+            }
+            token_ids.push(session.pending_token.ok_or_else(|| {
+                AarambhError::Config("session has no pending token for batched decode".into())
+            })?);
+            offsets.push(session.prompt_len + session.generated_ids.len() - 1);
+        }
+        let input = Tensor::from_vec(token_ids, (sessions.len(), 1), &self.device)?;
+        let logits = {
+            let mut caches = sessions
+                .iter_mut()
+                .map(|session| session.cache.layers_mut())
+                .collect::<Vec<_>>();
+            self.model
+                .forward_decode_batch(&input, &offsets, &mut caches)?
+        };
+        let vocab = logits.dim(2)?;
+        for (row, session) in sessions.iter_mut().enumerate() {
+            session.next_logits = logits.narrow(0, row, 1)?.reshape((vocab,))?;
+            session.pending_token = None;
+        }
+        Ok(())
+    }
+
     /// Generate text without per-step callbacks.
     pub fn generate(&mut self, prompt: &str, config: GenerationConfig) -> Result<GenerationOutput> {
         self.generate_with_callback(prompt, config, |_| Ok(()))
@@ -203,6 +369,7 @@ impl InferenceEngine {
     where
         F: FnMut(&GenerationStep) -> Result<()>,
     {
+        config.validate()?;
         let effective_prompt = match &config.tool_calling {
             Some(tools) => tools.render_prompt(prompt)?,
             None => prompt.to_string(),
@@ -221,6 +388,7 @@ impl InferenceEngine {
     where
         F: FnMut(&GenerationStep) -> Result<()>,
     {
+        config.validate()?;
         if config.tool_calling.is_some() {
             return Err(AarambhError::Unsupported(
                 "tool calling with precomputed or vision embeddings is not supported in Phase 26"
@@ -255,11 +423,12 @@ impl InferenceEngine {
         &mut self,
         prompt_ids: Vec<u32>,
         config: GenerationConfig,
-        on_step: F,
+        mut on_step: F,
     ) -> Result<GenerationOutput>
     where
         F: FnMut(&GenerationStep) -> Result<()>,
     {
+        config.validate()?;
         let max_seq_len = self.model.config().max_seq_len;
         if prompt_ids.len() >= max_seq_len {
             return Err(AarambhError::Shape(format!(
@@ -269,27 +438,31 @@ impl InferenceEngine {
         }
         let available = max_seq_len - prompt_ids.len();
         let max_new_tokens = config.max_new_tokens.min(available);
-        if max_new_tokens == 0 {
-            return Ok(empty_output(FinishReason::ContextLimit));
-        }
-
-        let mut cache = KvCache::for_model(&self.model);
+        let mut cache =
+            KvCache::for_model_with_capacity(&self.model, prompt_ids.len() + max_new_tokens);
         let input = Tensor::from_vec(prompt_ids.clone(), (1, prompt_ids.len()), &self.device)?;
         let logits = self
             .model
             .forward_with_cache(&input, 0, cache.layers_mut())?;
         let next_logits = last_logits(&logits)?;
-        self.decode_from_next_logits(
-            DecodeSeed {
-                prompt_len: prompt_ids.len(),
-                max_new_tokens,
-                available,
-                next_logits,
-            },
-            &mut cache,
+        let mut session = GenerationSession::new(
+            cache,
+            next_logits,
+            prompt_ids.len(),
+            max_new_tokens,
+            available,
             config,
-            on_step,
-        )
+            &self.tokenizer,
+        )?;
+        while !session.is_finished() {
+            if let Some(step) = session.advance(&self.tokenizer)? {
+                on_step(&step)?;
+            }
+            if !session.is_finished() {
+                self.decode_sessions(&mut [&mut session])?;
+            }
+        }
+        session.into_output()
     }
 
     fn generate_from_embeddings_with_callback<F>(
@@ -525,6 +698,7 @@ impl InferenceEngine {
             .as_ref()
             .map(|controller| controller.thinking().tokens_used())
             .unwrap_or_else(|| thinking.tokens_used());
+        let usage = GenerationUsage::new(seed.prompt_len, generated_ids.len());
         Ok(GenerationOutput {
             text,
             raw_text,
@@ -538,8 +712,291 @@ impl InferenceEngine {
             steps,
             speculative_stats: None,
             tool_call,
+            usage,
         })
     }
+}
+
+impl GenerationSession {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        cache: KvCache,
+        next_logits: Tensor,
+        prompt_len: usize,
+        max_new_tokens: usize,
+        available: usize,
+        config: GenerationConfig,
+        tokenizer: &BpeTokenizer,
+    ) -> Result<Self> {
+        let thinking = ThinkingController::for_generation(config.thinking_mode, max_new_tokens);
+        let tools = config
+            .tool_calling
+            .clone()
+            .map(|tool_config| {
+                ToolCallController::new(
+                    config.thinking_mode,
+                    max_new_tokens,
+                    tool_config,
+                    tokenizer,
+                )
+            })
+            .transpose()?;
+        Ok(Self {
+            cache,
+            next_logits,
+            prompt_len,
+            max_new_tokens,
+            available,
+            config,
+            thinking,
+            tools,
+            generated_ids: Vec::with_capacity(max_new_tokens),
+            raw_text: String::new(),
+            thinking_text: String::new(),
+            answer_text: String::new(),
+            thinking_token_ids: Vec::new(),
+            answer_token_ids: Vec::new(),
+            tool_text: String::new(),
+            steps: Vec::new(),
+            finish_reason: (max_new_tokens == 0).then_some(FinishReason::ContextLimit),
+            pending_token: None,
+        })
+    }
+
+    /// Sample and commit the next token from this session's current logits.
+    ///
+    /// When the session remains active, call [`InferenceEngine::decode_sessions`]
+    /// before advancing it again.
+    pub fn advance(&mut self, tokenizer: &BpeTokenizer) -> Result<Option<GenerationStep>> {
+        if self.is_finished() {
+            return Ok(None);
+        }
+        if self.pending_token.is_some() {
+            return Err(AarambhError::Config(
+                "session must be decoded before sampling another token".into(),
+            ));
+        }
+
+        let logits_vec = self.next_logits.to_vec1::<f32>()?;
+        let (mut token_id, candidates, mut forced, phase) =
+            if let Some(controller) = &mut self.tools {
+                let phase = tool_phase(controller.phase_for_next());
+                match controller.constraint(tokenizer)? {
+                    TokenConstraint::Any => (
+                        self.config.sampler.sample(&logits_vec)?,
+                        self.config
+                            .sampler
+                            .top_candidates(&logits_vec, self.config.top_candidates)?,
+                        false,
+                        phase,
+                    ),
+                    TokenConstraint::Forced(token_id) => {
+                        let mut probabilities = vec![0.0; logits_vec.len()];
+                        let index = token_id as usize;
+                        if index >= probabilities.len() {
+                            return Err(AarambhError::Shape(format!(
+                                "forced token {token_id} exceeds vocabulary size {}",
+                                probabilities.len()
+                            )));
+                        }
+                        probabilities[index] = 1.0;
+                        (
+                            token_id,
+                            Sampler::top_candidates_from_probabilities(
+                                &probabilities,
+                                self.config.top_candidates,
+                            )?,
+                            true,
+                            phase,
+                        )
+                    }
+                    TokenConstraint::Allowed(allowed) => {
+                        let probabilities = self
+                            .config
+                            .sampler
+                            .probabilities_allowed(&logits_vec, &allowed)?;
+                        (
+                            self.config.sampler.sample_probabilities(&probabilities)?,
+                            Sampler::top_candidates_from_probabilities(
+                                &probabilities,
+                                self.config.top_candidates,
+                            )?,
+                            false,
+                            phase,
+                        )
+                    }
+                }
+            } else {
+                let candidates = self
+                    .config
+                    .sampler
+                    .top_candidates(&logits_vec, self.config.top_candidates)?;
+                let forced_token = self.thinking.take_forced_token();
+                (
+                    match forced_token {
+                        Some(force) => force.token_id(),
+                        None => self.config.sampler.sample(&logits_vec)?,
+                    },
+                    candidates,
+                    forced_token.is_some(),
+                    phase_for_token(&self.thinking, self.config.thinking_mode, THINK_START_ID),
+                )
+            };
+
+        if token_id == tokenizer.eos_token_id() && phase != GenerationPhase::ToolCall {
+            let in_thinking = self
+                .tools
+                .as_ref()
+                .map(|controller| controller.thinking().in_thinking_block())
+                .unwrap_or_else(|| self.thinking.in_thinking_block());
+            if in_thinking {
+                token_id = THINK_END_ID;
+                forced = true;
+            } else {
+                self.finish_reason = Some(FinishReason::EosToken);
+                return Ok(None);
+            }
+        }
+
+        let phase = if self.tools.is_none() {
+            phase_for_token(&self.thinking, self.config.thinking_mode, token_id)
+        } else {
+            phase
+        };
+        let token_text = match &self.tools {
+            Some(controller) => controller.token_text(token_id, tokenizer)?,
+            None => tokenizer.decode(&[token_id])?,
+        };
+        let generation_step = GenerationStep {
+            step: self.generated_ids.len() + 1,
+            token_id,
+            token_text: token_text.clone(),
+            candidates,
+            phase,
+            forced,
+        };
+
+        if let Some(controller) = &mut self.tools {
+            controller.on_token(token_id, &token_text, tokenizer)?;
+        } else {
+            let _ = self.thinking.on_token(token_id);
+        }
+        self.generated_ids.push(token_id);
+        self.raw_text.push_str(&token_text);
+        if phase == GenerationPhase::Thinking && !is_thinking_marker(token_id) {
+            self.thinking_text.push_str(&token_text);
+            self.thinking_token_ids.push(token_id);
+        } else if phase == GenerationPhase::Answer {
+            self.answer_text.push_str(&token_text);
+            self.answer_token_ids.push(token_id);
+        } else if phase == GenerationPhase::ToolCall {
+            self.tool_text.push_str(&token_text);
+        }
+        if self.config.capture_steps {
+            self.steps.push(generation_step.clone());
+        }
+
+        if self
+            .tools
+            .as_ref()
+            .is_some_and(ToolCallController::is_complete)
+        {
+            self.finish_reason = Some(FinishReason::ToolCall);
+        } else if phase == GenerationPhase::Answer
+            && let Some(stop_len) =
+                matching_stop_len(&self.answer_text, &self.config.stop_sequences)
+        {
+            self.answer_text.truncate(self.answer_text.len() - stop_len);
+            self.raw_text.truncate(self.raw_text.len() - stop_len);
+            self.finish_reason = Some(FinishReason::StopSequence);
+        } else if self.generated_ids.len() == self.max_new_tokens {
+            self.finish_reason = Some(if self.generated_ids.len() == self.available {
+                FinishReason::ContextLimit
+            } else {
+                FinishReason::MaxTokens
+            });
+        }
+
+        if !self.is_finished() {
+            self.pending_token = Some(token_id);
+        }
+        Ok(Some(generation_step))
+    }
+
+    /// Return true after the session reaches any terminal condition.
+    pub fn is_finished(&self) -> bool {
+        self.finish_reason.is_some()
+    }
+
+    /// Return the terminal reason, when generation has finished.
+    pub fn finish_reason(&self) -> Option<FinishReason> {
+        self.finish_reason
+    }
+
+    /// Return the number of prompt tokens consumed by this session.
+    pub fn prompt_tokens(&self) -> usize {
+        self.prompt_len
+    }
+
+    /// Return the number of completion tokens sampled so far.
+    pub fn completion_tokens(&self) -> usize {
+        self.generated_ids.len()
+    }
+
+    /// Consume a finished session and produce its complete output.
+    pub fn into_output(self) -> Result<GenerationOutput> {
+        let finish_reason = self.finish_reason.ok_or_else(|| {
+            AarambhError::Config("cannot finalize an unfinished generation session".into())
+        })?;
+        if finish_reason != FinishReason::ToolCall
+            && self
+                .tools
+                .as_ref()
+                .is_some_and(|controller| !controller.action_is_resolved())
+        {
+            return Err(AarambhError::Config(
+                "generation ended before the constrained tool action completed".into(),
+            ));
+        }
+        let tool_call = self
+            .tools
+            .as_ref()
+            .and_then(ToolCallController::tool_call)
+            .cloned();
+        let text = match &tool_call {
+            Some(call) => serde_json::to_string(call)?,
+            None => self.answer_text.clone(),
+        };
+        debug_assert!(tool_call.is_none() || text == self.tool_text);
+        let thinking_tokens = self
+            .tools
+            .as_ref()
+            .map(|controller| controller.thinking().tokens_used())
+            .unwrap_or_else(|| self.thinking.tokens_used());
+        Ok(GenerationOutput {
+            text,
+            raw_text: self.raw_text,
+            thinking_text: self.thinking_text,
+            answer_text: self.answer_text,
+            token_ids: self.generated_ids.clone(),
+            thinking_token_ids: self.thinking_token_ids,
+            answer_token_ids: self.answer_token_ids,
+            thinking_tokens,
+            finish_reason,
+            steps: self.steps,
+            speculative_stats: None,
+            tool_call,
+            usage: GenerationUsage::new(self.prompt_len, self.generated_ids.len()),
+        })
+    }
+}
+
+fn matching_stop_len(text: &str, stops: &[String]) -> Option<usize> {
+    stops
+        .iter()
+        .filter(|stop| text.ends_with(stop.as_str()))
+        .map(String::len)
+        .max()
 }
 
 struct DecodeSeed {
@@ -563,6 +1020,7 @@ fn empty_output(finish_reason: FinishReason) -> GenerationOutput {
         steps: Vec::new(),
         speculative_stats: None,
         tool_call: None,
+        usage: GenerationUsage::default(),
     }
 }
 
@@ -757,5 +1215,56 @@ mod tests {
             merge_rank: HashMap::new(),
         };
         assert!(InferenceEngine::new(model, tokenizer, device).is_err());
+    }
+
+    #[test]
+    fn batched_sessions_match_independent_greedy_generation() {
+        let engine = test_engine();
+        let mut first = engine
+            .prepare_session("Hello", GenerationConfig::greedy(4))
+            .unwrap();
+        let mut second = engine
+            .prepare_session("He", GenerationConfig::greedy(4))
+            .unwrap();
+
+        while !first.is_finished() || !second.is_finished() {
+            let mut decoding = Vec::new();
+            if !first.is_finished() {
+                first.advance(engine.tokenizer()).unwrap();
+                if !first.is_finished() {
+                    decoding.push(&mut first);
+                }
+            }
+            if !second.is_finished() {
+                second.advance(engine.tokenizer()).unwrap();
+                if !second.is_finished() {
+                    decoding.push(&mut second);
+                }
+            }
+            engine.decode_sessions(&mut decoding).unwrap();
+        }
+        let batched_first = first.into_output().unwrap();
+        let batched_second = second.into_output().unwrap();
+
+        let independent_first = test_engine()
+            .generate("Hello", GenerationConfig::greedy(4))
+            .unwrap();
+        let independent_second = test_engine()
+            .generate("He", GenerationConfig::greedy(4))
+            .unwrap();
+        assert_eq!(batched_first.token_ids, independent_first.token_ids);
+        assert_eq!(batched_second.token_ids, independent_second.token_ids);
+        assert_eq!(batched_first.text, independent_first.text);
+        assert_eq!(batched_second.text, independent_second.text);
+    }
+
+    #[test]
+    fn stop_sequence_is_removed_from_visible_output() {
+        let mut config = GenerationConfig::greedy(4);
+        config.stop_sequences = vec![" ".to_string()];
+        let output = test_engine().generate("Hello", config).unwrap();
+        assert_eq!(output.finish_reason, FinishReason::StopSequence);
+        assert!(!output.text.ends_with(' '));
+        assert!(output.usage.completion_tokens > 0);
     }
 }

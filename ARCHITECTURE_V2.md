@@ -635,7 +635,7 @@ modes; vision and self-learning combinations are explicitly deferred.
 
 ### Local-only, source-only
 
-`aarambh-ai-serve` exposes an OpenAI-compatible HTTP/SSE API
+`aarambh-ai-serve` uses Axum 0.8.9 to expose an OpenAI-compatible HTTP/SSE API
 (`/v1/chat/completions`, `/v1/completions`, `/v1/models`) over your own
 locally-loaded checkpoints. This is a **self-hosted, local server** — it
 does not publish weights, and `/v1/models` only ever lists checkpoints
@@ -645,19 +645,26 @@ artifacts" policy as the rest of v2.0 (see `RELEASE.md`).
 ### Continuous batching
 
 Rather than waiting for a fixed batch of requests before running a forward
-pass (static batching), `ContinuousBatcher` merges concurrent decode steps
-dynamically — a new request can join at the next available step instead of
-waiting for the current batch to fully finish. Each request keeps its own
-KV cache (`ARCHITECTURE.md` §8.1); the batcher only shares the forward-pass
-call, not the cache state, so concurrent requests cannot cross-contaminate
-each other's context.
+pass (static batching), the dedicated inference worker admits new requests at
+each decode iteration. `GenerationSession` owns each request's preallocated KV
+cache, sampler, thinking controller, tool grammar, stop matcher, and output
+state. Query/key/value projections, output projections, norms, and FFN/MoE work
+are batched across active rows; ragged attention remains cache-isolated per row.
+Prompt prefill is chunked to cap individual forward-pass size.
 
-### What's reused unmodified
+### Streaming safety and transport
 
-The safety layer (`ARCHITECTURE.md` §13) applies to every server request by
-default, same as CLI `infer`. Sampling, thinking, and (if configured) tool
-calling all pass through unchanged — the server is a new transport around
-the existing inference engine, not a new inference path.
+The safety layer (`ARCHITECTURE.md` §13) applies by default. Streaming uses a
+rolling cross-token filter: only text that can no longer become part of a PII
+or toxicity match is released. PII is replaced before SSE emission; toxicity
+ends the stream with `content_filter`; tool-call JSON remains atomic until
+schema and safety validation complete. The CLI uses the same safe stream path.
+
+Axum handlers perform no Candle work. They validate OpenAI-compatible request
+shapes, enqueue bounded jobs, and map worker events to JSON or SSE. Queue
+overflow returns 429, client disconnect drops the session, and SIGINT/SIGTERM
+stops admission before the worker drains active requests. The default bind is
+`127.0.0.1`; non-loopback binds require bearer authentication.
 
 ---
 
@@ -689,7 +696,7 @@ crates in the same or lower layer, enforced by `Cargo.toml`.
 |---|---|---|
 | `image` | `aarambh-ai-vision` | Local decode/resize/normalise only — no network calls |
 | NCCL bindings (via `candle-core` CUDA features) | `aarambh-ai-train` | Multi-GPU collective ops (§27) |
-| HTTP/SSE server framework | `aarambh-ai-serve` | Request routing, streaming |
+| `axum = 0.8.9`, `tower-http = 0.7` | `aarambh-ai-serve` | Request routing, SSE, limits, CORS, tracing |
 
 **Still forbidden everywhere, unchanged from v1:** PyTorch bindings
 (`tch-rs`), ONNX Runtime (`ort`), Python FFI, `llama.cpp` as a backend.

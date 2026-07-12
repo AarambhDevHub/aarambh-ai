@@ -93,6 +93,72 @@ impl GroupedQueryAttention {
         self.wo.forward(&out)
     }
 
+    /// Decode one token for multiple independent sequences in a shared projection pass.
+    ///
+    /// Query, key, value, and output projections are batched. Attention remains
+    /// isolated per sequence so ragged KV-cache lengths cannot interact.
+    pub fn forward_decode_batch(
+        &self,
+        x: &Tensor,
+        rope: &RopeCache,
+        kv_caches: &mut [&mut KVCache],
+        seqlen_offsets: &[usize],
+    ) -> Result<Tensor> {
+        let dims = x.dims();
+        if dims.len() != 3 || dims[1] != 1 {
+            return Err(candle_core::Error::msg(format!(
+                "batched decode expects [batch, 1, hidden], got {dims:?}"
+            )));
+        }
+        let batch = dims[0];
+        if kv_caches.len() != batch || seqlen_offsets.len() != batch {
+            return Err(candle_core::Error::msg(format!(
+                "batched decode received batch {batch}, {} caches, and {} offsets",
+                kv_caches.len(),
+                seqlen_offsets.len()
+            )));
+        }
+
+        let q = self
+            .wq
+            .forward(x)?
+            .reshape((batch, 1, self.n_heads, self.head_dim))?;
+        let k = self
+            .wk
+            .forward(x)?
+            .reshape((batch, 1, self.n_kv_heads, self.head_dim))?;
+        let v = self
+            .wv
+            .forward(x)?
+            .reshape((batch, 1, self.n_kv_heads, self.head_dim))?;
+
+        let n_repeats = self.n_heads / self.n_kv_heads;
+        let mut rows = Vec::with_capacity(batch);
+        for row in 0..batch {
+            let q_row = q.narrow(0, row, 1)?;
+            let k_row = k.narrow(0, row, 1)?;
+            let v_row = v.narrow(0, row, 1)?;
+            let (q_row, k_row) = rope.apply_inference(&q_row, &k_row, seqlen_offsets[row])?;
+            let (k_row, v_row) = kv_caches[row].update(&k_row, &v_row)?;
+            let k_row = repeat_heads(&k_row, n_repeats)?;
+            let v_row = repeat_heads(&v_row, n_repeats)?;
+            let q_row = q_row.transpose(1, 2)?.contiguous()?;
+            let k_row = k_row.transpose(1, 2)?.contiguous()?;
+            let v_row = v_row.transpose(1, 2)?.contiguous()?;
+            let out = aarambh_ai_kernel::dispatch::attention_forward_causal(
+                &q_row, &k_row, &v_row, self.scale,
+            )?;
+            rows.push(
+                out.transpose(1, 2)?
+                    .reshape((1, 1, self.n_heads * self.head_dim))?,
+            );
+        }
+
+        let row_refs = rows.iter().collect::<Vec<_>>();
+        let out = Tensor::cat(&row_refs, 0)?;
+        self.wo.forward(&out)
+    }
+
     /// Run the training attention path without mutating a KV cache.
     pub fn forward_train(
         &self,

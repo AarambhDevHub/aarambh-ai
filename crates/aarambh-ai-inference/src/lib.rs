@@ -19,8 +19,8 @@ pub mod thinking;
 pub mod tool_calling;
 
 pub use engine::{
-    FinishReason, GenerationConfig, GenerationOutput, GenerationPhase, GenerationStep,
-    InferenceEngine,
+    FinishReason, GenerationConfig, GenerationOutput, GenerationPhase, GenerationSession,
+    GenerationStep, GenerationUsage, InferenceEngine,
 };
 pub use grammar::{JsonSchema, JsonSchemaGrammar};
 pub use kvcache::KvCache;

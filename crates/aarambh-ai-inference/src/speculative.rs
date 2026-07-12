@@ -7,7 +7,8 @@ use candle_core::{DType, Tensor};
 use crate::tool_calling::{TokenConstraint, ToolCall, ToolCallController, ToolPhase};
 use crate::{
     FinishReason, GenerationConfig, GenerationOutput, GenerationPhase, GenerationStep,
-    InferenceEngine, KvCache, Sampler, ThinkingController, ThinkingMode, TokenCandidate,
+    GenerationUsage, InferenceEngine, KvCache, Sampler, ThinkingController, ThinkingMode,
+    TokenCandidate,
 };
 
 /// Runtime controls for exact speculative decoding.
@@ -166,6 +167,12 @@ impl SpeculativeEngine {
     where
         F: FnMut(&GenerationStep) -> Result<()>,
     {
+        config.validate()?;
+        if !config.stop_sequences.is_empty() {
+            return Err(AarambhError::Unsupported(
+                "stop sequences are not yet supported with speculative decoding".into(),
+            ));
+        }
         let effective_prompt = match &config.tool_calling {
             Some(tools) => tools.render_prompt(prompt)?,
             None => prompt.to_string(),
@@ -208,6 +215,7 @@ impl SpeculativeEngine {
                 FinishReason::ContextLimit,
                 Some(stats),
                 &controller,
+                prompt_ids.len(),
             );
         }
 
@@ -452,7 +460,7 @@ impl SpeculativeEngine {
                 "generation ended before the constrained tool action completed".into(),
             ));
         }
-        output.finish(finish_reason, Some(stats), &controller)
+        output.finish(finish_reason, Some(stats), &controller, prompt_ids.len())
     }
 }
 
@@ -534,8 +542,10 @@ impl OutputState {
         finish_reason: FinishReason,
         speculative_stats: Option<SpeculativeStats>,
         controller: &DecodeController,
+        prompt_tokens: usize,
     ) -> Result<GenerationOutput> {
         let thinking_tokens = self.thinking_token_ids.len();
+        let completion_tokens = self.token_ids.len();
         let tool_call = controller.tool_call().cloned();
         let text = match &tool_call {
             Some(call) => serde_json::to_string(call)?,
@@ -555,6 +565,11 @@ impl OutputState {
             steps: self.steps,
             speculative_stats,
             tool_call,
+            usage: GenerationUsage {
+                prompt_tokens,
+                completion_tokens,
+                total_tokens: prompt_tokens + completion_tokens,
+            },
         })
     }
 }

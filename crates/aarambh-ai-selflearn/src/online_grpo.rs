@@ -9,7 +9,7 @@ use aarambh_ai_finetune::{
 };
 use aarambh_ai_inference::{
     FinishReason, GenerationConfig, GenerationOutput, GenerationPhase, GenerationStep,
-    ThinkingController, ThinkingMode,
+    GenerationUsage, ThinkingController, ThinkingMode,
 };
 use aarambh_ai_model::AarambhModel;
 use aarambh_ai_tokenizer::{
@@ -753,6 +753,7 @@ where
         steps,
         speculative_stats: None,
         tool_call: None,
+        usage: GenerationUsage::default(),
     })
 }
 
@@ -856,6 +857,7 @@ where
         steps,
         speculative_stats: None,
         tool_call: None,
+        usage: GenerationUsage::default(),
     })
 }
 
@@ -899,6 +901,8 @@ fn sample_vision_group(
             thinking_mode: grpo_to_thinking(config.thinking),
             top_candidates: 0,
             tool_calling: None,
+            stop_sequences: Vec::new(),
+            capture_steps: false,
         };
         let output = generate_lora_with_image(
             model,
@@ -920,6 +924,7 @@ fn sample_vision_group(
             FinishReason::ContextLimit => aarambh_ai_finetune::grpo::RolloutFinish::ContextLimit,
             FinishReason::MaxTokens => aarambh_ai_finetune::grpo::RolloutFinish::MaxTokens,
             FinishReason::ToolCall => aarambh_ai_finetune::grpo::RolloutFinish::MaxTokens,
+            FinishReason::StopSequence => aarambh_ai_finetune::grpo::RolloutFinish::Eos,
         };
         rollouts.push(Rollout {
             prompt_len: fused_len(&prompt_ids, image_token_count),
@@ -1416,6 +1421,7 @@ fn rollout_to_generation_output(
         steps,
         speculative_stats: None,
         tool_call: None,
+        usage: GenerationUsage::default(),
     })
 }
 

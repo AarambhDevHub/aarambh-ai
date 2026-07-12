@@ -36,7 +36,7 @@ Phase 23 →  Multi-GPU training                  (7–10 days)   [Kaggle 2×T4]
 Phase 24 →  DPO preference tuning               (7–10 days)   [Kaggle] ✅
 Phase 25 →  Speculative decoding                (5–7 days)    [Kaggle] ✅
 Phase 26 →  Tool use / function calling         (7–10 days)   [i3 + Kaggle] ✅
-Phase 27 →  Inference server                    (10–14 days)  [i3]
+Phase 27 →  Inference server                    (10–14 days)  [i3] ✅
 Phase 28 →  crates.io publish (v2.0.0)          (5–7 days)    [all]
 ```
 
@@ -983,7 +983,7 @@ git tag v2.0.0-alpha.11
 
 ---
 
-## Phase 27 — Inference Server
+## Phase 27 — Inference Server ✅
 
 **Duration:** 10–14 days | **Hardware:** i3 (server runs fine on CPU for Tiny/Small)
 
@@ -997,29 +997,33 @@ by this phase**, same "source, not artifacts" policy as the rest of v2.0.
 
 **New crate `aarambh-ai-serve`:**
 ```
-[ ] src/server.rs
-      Axum-equivalent routing (or reuse your own Ignitia/Arvik framework —
-      natural fit here, keeps everything in the AarambhDevHub ecosystem)
+[x] src/server.rs
+      Axum 0.8.9 routing, bounded JSON requests, bearer auth, tracing,
+      health/readiness/metrics, and graceful shutdown
       POST /v1/chat/completions  — OpenAI-compatible request/response shape
       POST /v1/completions
       GET  /v1/models             — lists locally loaded checkpoints only
       SSE streaming for `stream: true` requests
 
-[ ] src/batching.rs
+[x] src/batching.rs
       ContinuousBatcher — dynamically merges concurrent decode steps into
       shared forward passes; new requests join at the next available step
       rather than waiting for a full batch to complete (standard continuous
       batching, not static batching)
 
-[ ] src/session.rs
-      Reuses aarambh-ai-inference's KV cache path per-request; safety layer
-      (Phase 11) applies to every request by default, same as CLI infer
+[x] Resumable GenerationSession in aarambh-ai-inference
+      Per-request preallocated KV cache, sampler, thinking/tool/stop state,
+      chunked prefill, and shared batched decode projections/FFN
+
+[x] Rolling stream safety
+      Cross-token toxicity and PII scanning, redaction before release,
+      content_filter termination, and atomic tool-call output
 ```
 
 **CLI:**
 ```
-[ ] aarambh-ai serve --config <cfg> --model <ckpt> --port 8080
-[ ] aarambh-ai serve --config <cfg> --model <ckpt> --tools tools.json --thinking medium
+[x] aarambh-ai serve --config <cfg> --model <ckpt> --port 8080
+[x] aarambh-ai serve --config <cfg> --model <ckpt> --tools tools.json --thinking medium
 ```
 
 ### Tests
@@ -1112,7 +1116,7 @@ git commit -m "chore: v2.0.0 — crates.io publish, source release"
 | 24 | DPO Preference Tuning | ✅ DoRA/QDoRA pairwise objective, cached refs, preference eval | Kaggle | 7–10 days |
 | 25 | Speculative Decoding | Tiny-draft / Large-target speedup | Kaggle | 5–7 days |
 | 26 | Tool Use / Function Calling | Grammar-constrained JSON tool calls | i3 + Kaggle | 7–10 days |
-| 27 | Inference Server | OpenAI-compatible server, continuous batching, local-only | i3 | 10–14 days |
+| 27 | Inference Server | ✅ OpenAI-compatible Axum server, continuous batching, local-only | i3 | 10–14 days |
 | 28 | crates.io Publish | Source-only 2.0.0 release, zero model artifacts | all | 5–7 days |
 
 **Total realistic estimate: 99–140 days (~3.3–4.7 months)**
@@ -1125,7 +1129,7 @@ git commit -m "chore: v2.0.0 — crates.io publish, source release"
 |---|---|---|
 | `image` | vision | Image decode/resize/normalize only, no external service calls |
 | NCCL bindings (via `candle-core` CUDA features) | train | Multi-GPU collective ops |
-| (server framework — Ignitia/Arvik or equivalent) | serve | HTTP/SSE routing |
+| `axum = 0.8.9`, `tower-http = 0.7` | serve | HTTP/SSE routing, limits, CORS, tracing |
 
 **Still forbidden everywhere:** PyTorch bindings (`tch-rs`), ONNX Runtime
 (`ort`), Python FFI, `llama.cpp` as a backend. All computation goes through

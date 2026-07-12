@@ -21,6 +21,7 @@ enum Command {
     Convert(cmd::convert::ConvertArgs),
     Finetune(Box<cmd::finetune::FinetuneArgs>),
     Selflearn(Box<cmd::selflearn::SelflearnArgs>),
+    Serve(cmd::serve::ServeArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -33,5 +34,6 @@ fn main() -> anyhow::Result<()> {
         Command::Convert(args) => cmd::convert::run(args),
         Command::Finetune(args) => cmd::finetune::run(*args),
         Command::Selflearn(args) => cmd::selflearn::run(*args),
+        Command::Serve(args) => cmd::serve::run(args),
     }
 }

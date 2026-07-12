@@ -9,6 +9,7 @@ use crate::input::{detect_injection, detect_jailbreak, detect_pii, redact_pii};
 use crate::output::audit::{SafetyEvent, SafetyStage, hash_prompt, log_event};
 use crate::output::toxicity::score_toxicity;
 use crate::policy::{PiiPolicy, SafetyPolicy, ViolationAction};
+use crate::streaming::{SafeStreamEvent, StreamingSafetyFilter};
 use crate::verdict::SafetyVerdict;
 
 /// Generation engine interface consumed by [`SafetyGuard`].
@@ -186,6 +187,79 @@ impl<G: SafetyGenerator> SafetyGuard<G> {
         last_response.ok_or_else(|| {
             AarambhError::Config("safety generation completed without a response".into())
         })
+    }
+
+    /// Generate while incrementally releasing only safety-approved text.
+    ///
+    /// Streaming output cannot be retracted, so output violations terminate
+    /// the stream instead of invoking the non-streaming regeneration policy.
+    pub fn generate_streaming_with_callback<F>(
+        &mut self,
+        prompt: &str,
+        config: GenerationConfig,
+        mut on_event: F,
+    ) -> Result<SafeResponse>
+    where
+        F: FnMut(SafeStreamEvent) -> Result<()>,
+    {
+        let prompt_hash = hash_prompt(prompt);
+        let mut events = Vec::new();
+        let input = self.check_input(prompt, &prompt_hash, &mut events)?;
+        if let SafetyVerdict::Block(reason) = input.verdict {
+            return Ok(SafeResponse::blocked(reason, events));
+        }
+
+        if config.tool_calling.is_some() {
+            let output = self.engine.generate(&input.prompt, config)?;
+            let checked = self.check_output(output, &prompt_hash, &mut events)?;
+            match &checked.verdict {
+                SafetyVerdict::Allow | SafetyVerdict::Redact(_) => {
+                    if !checked.text.is_empty() {
+                        on_event(SafeStreamEvent::Text(checked.text.clone()))?;
+                    }
+                    return Ok(SafeResponse {
+                        prompt_redacted: input.redacted,
+                        ..checked
+                    });
+                }
+                SafetyVerdict::Block(reason) | SafetyVerdict::Regenerate(reason) => {
+                    on_event(SafeStreamEvent::Blocked(reason.clone()))?;
+                    return Ok(SafeResponse::blocked(reason.clone(), events));
+                }
+            }
+        }
+
+        let mut filter = StreamingSafetyFilter::new(self.policy.clone());
+        let output = self
+            .engine
+            .generate_with_callback(&input.prompt, config, |step| {
+                for event in filter.push_step(step) {
+                    on_event(event)?;
+                }
+                Ok(())
+            })?;
+        for event in filter.finish() {
+            on_event(event)?;
+        }
+        let stream_blocked = filter.is_blocked();
+        let checked = self.check_output(output, &prompt_hash, &mut events)?;
+        if stream_blocked {
+            return Ok(SafeResponse::blocked(
+                "streaming output blocked by safety".to_string(),
+                events,
+            ));
+        }
+        match &checked.verdict {
+            SafetyVerdict::Block(reason) | SafetyVerdict::Regenerate(reason) => {
+                on_event(SafeStreamEvent::Blocked(reason.clone()))?;
+                Ok(SafeResponse::blocked(reason.clone(), events))
+            }
+            SafetyVerdict::Allow | SafetyVerdict::Redact(_) => Ok(SafeResponse {
+                prompt_redacted: input.redacted,
+                output_redacted: filter.output_redacted() || checked.output_redacted,
+                ..checked
+            }),
+        }
     }
 
     fn check_input(
@@ -444,6 +518,7 @@ mod tests {
             }],
             speculative_stats: None,
             tool_call: None,
+            usage: aarambh_ai_inference::GenerationUsage::default(),
         }
     }
 
@@ -454,6 +529,8 @@ mod tests {
             thinking_mode: aarambh_ai_inference::ThinkingMode::None,
             top_candidates: 1,
             tool_calling: None,
+            stop_sequences: Vec::new(),
+            capture_steps: true,
         }
     }
 

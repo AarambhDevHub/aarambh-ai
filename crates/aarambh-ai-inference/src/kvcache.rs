@@ -23,6 +23,16 @@ impl KvCache {
         }
     }
 
+    /// Create a model-sized cache with fixed sequence capacity per layer.
+    pub fn for_model_with_capacity(model: &AarambhModel, capacity: usize) -> Self {
+        let n_layers = model.empty_kv_cache().len();
+        Self {
+            layers: (0..n_layers)
+                .map(|_| KVCache::with_capacity(capacity))
+                .collect(),
+        }
+    }
+
     /// Return mutable layer caches.
     pub fn layers_mut(&mut self) -> &mut [KVCache] {
         &mut self.layers

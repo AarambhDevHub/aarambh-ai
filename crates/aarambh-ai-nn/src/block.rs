@@ -120,6 +120,27 @@ impl TransformerBlock {
         residual + x
     }
 
+    /// Decode one token for multiple independent KV-cache sequences.
+    pub fn forward_decode_batch(
+        &self,
+        x: &Tensor,
+        rope: &RopeCache,
+        kv_caches: &mut [&mut KVCache],
+        seqlen_offsets: &[usize],
+    ) -> Result<Tensor> {
+        let residual = x;
+        let x = self.norm1.forward(x)?;
+        let x = self
+            .attn
+            .forward_decode_batch(&x, rope, kv_caches, seqlen_offsets)?;
+        let x = (residual + x)?;
+
+        let residual = x.clone();
+        let x = self.norm2.forward(&x)?;
+        let x = self.ffn.forward(&x)?;
+        residual + x
+    }
+
     /// Run the training block path without cache mutation.
     pub fn forward_train(
         &self,

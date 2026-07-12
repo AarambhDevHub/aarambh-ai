@@ -166,6 +166,9 @@ impl Sampler {
         if logits.is_empty() {
             return Err(AarambhError::Shape("logits must be non-empty".into()));
         }
+        if n == 0 {
+            return Ok(Vec::new());
+        }
         let probs = match self {
             Self::Greedy => softmax(logits, 1.0)?,
             Self::TopKTopP {
@@ -187,6 +190,9 @@ impl Sampler {
         n: usize,
     ) -> Result<Vec<TokenCandidate>> {
         validate_probabilities(probabilities)?;
+        if n == 0 {
+            return Ok(Vec::new());
+        }
         let mut candidates = probabilities
             .iter()
             .copied()
