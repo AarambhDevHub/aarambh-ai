@@ -1189,8 +1189,10 @@ cargo test --workspace --no-fail-fast --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings -D clippy::undocumented_unsafe_blocks
 cargo fmt --all --check
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --locked
-# v2.0.0 release tag audit; current v3 alpha intentionally has a different version.
+# Audit the current workspace version, publish policy, artifacts, and source completeness.
 scripts/phase28_release_audit.sh
+# Tagged releases can pin the version expected by the audit.
+AARAMBH_EXPECTED_VERSION=2.0.0 scripts/phase28_release_audit.sh
 ```
 
 ### Kernel Benchmarks

@@ -45,7 +45,7 @@ jobs:
         run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --locked
 
       - name: Release audit
-        run: scripts/phase28_release_audit.sh
+        run: AARAMBH_EXPECTED_VERSION=2.0.0 scripts/phase28_release_audit.sh
 
       - name: Build release binary
         run: cargo build --release -p aarambh-ai --locked
