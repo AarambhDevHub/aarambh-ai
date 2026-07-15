@@ -1,4 +1,7 @@
-use aarambh_ai_core::{ModelConfig, MoeConfig, RopeScalingConfig, RopeScalingMethod};
+use aarambh_ai_core::{
+    GatedDeltaNetConfig, HybridAttentionSchedule, ModelConfig, MoeConfig, RopeScalingConfig,
+    RopeScalingMethod,
+};
 use aarambh_ai_model::AarambhModel;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{VarBuilder, VarMap};
@@ -15,6 +18,7 @@ fn mini_config() -> ModelConfig {
         rope_theta: 10000.0,
         rope_scaling: None,
         moe: None,
+        attention_schedule: None,
         norm_eps: 1e-5,
         tie_embeddings: true,
     }
@@ -50,6 +54,22 @@ fn moe_mini_config() -> ModelConfig {
             expert_ffn_dim: 64,
             aux_loss_weight: 0.01,
             every_n_layers: 2,
+        }),
+        ..mini_config()
+    }
+}
+
+fn hybrid_mini_config() -> ModelConfig {
+    ModelConfig {
+        attention_schedule: Some(HybridAttentionSchedule {
+            full_attention_every_n: 2,
+            gated_deltanet: GatedDeltaNetConfig {
+                n_heads: 1,
+                key_head_dim: 16,
+                value_head_dim: 32,
+                conv_kernel_size: 4,
+                chunk_size: 16,
+            },
         }),
         ..mini_config()
     }
@@ -123,6 +143,113 @@ fn cached_forward_matches_full_forward_for_next_token() {
         .to_scalar::<f32>()
         .unwrap();
     assert!(max_diff < 1e-4, "cached/full mismatch: {max_diff}");
+}
+
+#[test]
+fn hybrid_cached_forward_matches_full_forward_and_state_is_constant() {
+    let device = Device::Cpu;
+    let cfg = hybrid_mini_config();
+    let varmap = VarMap::new();
+    let model =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&varmap, DType::F32, &device)).unwrap();
+    let ids = Tensor::from_vec(vec![7u32, 8, 9, 10], (1, 4), &device).unwrap();
+    let full_last = model.forward(&ids).unwrap().narrow(1, 3, 1).unwrap();
+    let mut caches = model.empty_kv_cache();
+    assert!(caches[0].as_linear().is_none());
+    assert!(caches[1].as_linear().is_some());
+
+    let mut cached_last = None;
+    let mut state_elements = 0;
+    for pos in 0..4 {
+        cached_last = Some(
+            model
+                .forward_with_cache(&ids.narrow(1, pos, 1).unwrap(), pos, &mut caches)
+                .unwrap(),
+        );
+        let elements = caches[1].as_linear().unwrap().state_elements();
+        if pos == 0 {
+            state_elements = elements;
+        } else {
+            assert_eq!(elements, state_elements);
+        }
+    }
+
+    let max_diff = (full_last - cached_last.unwrap())
+        .unwrap()
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    assert!(max_diff < 1e-4, "hybrid cached/full mismatch: {max_diff}");
+    assert_eq!(caches[1].as_linear().unwrap().seq_len(), 4);
+    assert_eq!(
+        model.get_weight("blocks.1.deltanet.A_log").unwrap().dtype(),
+        DType::F32
+    );
+}
+
+#[test]
+fn hybrid_training_backward_reaches_deltanet_parameters() {
+    let device = Device::Cpu;
+    let cfg = hybrid_mini_config();
+    let varmap = VarMap::new();
+    let model =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&varmap, DType::F32, &device)).unwrap();
+    let ids = Tensor::from_vec(vec![7u32, 8, 9, 10], (1, 4), &device).unwrap();
+    let loss = model
+        .forward_train(&ids)
+        .unwrap()
+        .sqr()
+        .unwrap()
+        .sum_all()
+        .unwrap();
+    let gradients = loss.backward().unwrap();
+    let variables = varmap.data().lock().unwrap();
+    let layer_gradients = variables
+        .iter()
+        .filter(|(name, _)| name.starts_with("blocks.1"))
+        .map(|(name, variable)| (name.clone(), gradients.get(variable.as_tensor()).is_some()))
+        .collect::<Vec<_>>();
+    assert!(
+        variables.iter().any(|(name, variable)| {
+            name == "blocks.1.deltanet.out_proj.weight"
+                && gradients.get(variable.as_tensor()).is_some()
+        }),
+        "{layer_gradients:?}"
+    );
+}
+
+#[test]
+fn dense_training_backward_reaches_last_block_parameters() {
+    let device = Device::Cpu;
+    let cfg = mini_config();
+    let varmap = VarMap::new();
+    let model =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&varmap, DType::F32, &device)).unwrap();
+    let ids = Tensor::from_vec(vec![7u32, 8, 9, 10], (1, 4), &device).unwrap();
+    let loss = model
+        .forward_train(&ids)
+        .unwrap()
+        .sqr()
+        .unwrap()
+        .sum_all()
+        .unwrap();
+    let gradients = loss.backward().unwrap();
+    let variables = varmap.data().lock().unwrap();
+    assert!(variables.iter().any(|(name, variable)| {
+        name == "blocks.1.ffn.w_down.weight" && gradients.get(variable.as_tensor()).is_some()
+    }));
+}
+
+#[test]
+fn attention_schedule_none_keeps_dense_tensor_names() {
+    let device = Device::Cpu;
+    let model = mini_model(&device);
+    let names = model.named_tensors();
+    assert!(names.contains_key("blocks.1.attn.wq.weight"));
+    assert!(!names.keys().any(|name| name.contains("deltanet")));
 }
 
 #[test]

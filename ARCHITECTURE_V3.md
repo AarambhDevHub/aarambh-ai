@@ -151,17 +151,19 @@ rather than an ever-growing set of key/value pairs:
 
 ```
 At each token t, for each head:
-  k_t, v_t, q_t   ← linear projections of the input, as usual
-  β_t             ← per-token, per-channel gate in (0, 1), from a small
-                    learned projection + sigmoid
-  α_t             ← per-token forget scalar in (0, 1), from a small
-                    learned projection + sigmoid
+  q_t, k_t         ← L2-normalize(SiLU(depthwise_conv(proj(x_t))))
+  v_t              ← SiLU(depthwise_conv(v_proj(x_t)))
+  β_t              ← sigmoid(beta_proj(x_t)), one scalar per head
+  α_t              ← exp(-exp(A_log) · softplus(alpha_proj(x_t) + dt_bias)),
+                    one stable FP32 decay scalar per head
 
   # Delta rule: state moves toward better predicting v_t from k_t,
   # rather than a plain running-sum update
-  S_t = α_t · S_{t-1} + β_t · k_t ⊗ (v_t − S_{t-1}ᵀ k_t)ᵀ
+  S_decay = α_t · S_{t-1}
+  error_t = v_t − k_tᵀ S_decay
+  S_t     = S_decay + β_t · k_t ⊗ error_t
 
-  output_t = S_tᵀ q_t
+  output_t = out_proj(SiLU(gate_proj(x_t)) · RMSNorm(q_tᵀ S_t))
 ```
 
 `α_t` (gate) controls how much of the previous state survives —
@@ -181,17 +183,19 @@ pub enum DeltaNetForm {
     /// Processes one token at a time; no KV cache growth.
     Sequential,
 
-    /// Chunk-parallel form used during training. Splits the sequence
-    /// into fixed-size chunks (chunk_size, default 64), computes an
-    /// intra-chunk contribution via matmul and an inter-chunk state
-    /// carry via the same recurrence at chunk granularity. Produces
-    /// numerically-equivalent output to Sequential, verified by
-    /// regression test, but is matmul-friendly rather than a literal
-    /// per-token Rust loop, which is the only way it trains at
-    /// acceptable speed on Kaggle's T4/P100.
+    /// Chunk-bounded differentiable form used during training. Splits the
+    /// sequence into fixed execution chunks (chunk_size, default 64) while
+    /// preserving the exact token dependency of the delta rule. It uses
+    /// Candle operations so backward reaches every recurrent parameter.
     ChunkParallel { chunk_size: usize },
 }
 ```
+
+Autoregressive prefill/decode dispatches each recurrent update to the
+CPU-parallel or CUDA kernel when its layout and dtype are supported. Training
+uses the differentiable Candle recurrence because the custom decode operation
+is intentionally inference-only; unsupported devices and layouts retain the
+same numerical fallback rather than changing the model rule.
 
 `DeltaNetState` (the recurrent state struct) replaces `KvCache` for
 Gated DeltaNet layers specifically — it is a fixed-size tensor allocated
@@ -209,6 +213,8 @@ pub struct HybridAttentionSchedule {
     /// following the field's reported ratio for maintaining precise
     /// long-range recall while keeping most layers linear-cost.
     pub full_attention_every_n: usize,
+    /// Recurrent head dimensions, convolution width and execution chunk size.
+    pub gated_deltanet: GatedDeltaNetConfig,
 }
 
 impl HybridAttentionSchedule {
@@ -251,9 +257,10 @@ byte-identical-output regression test, not just documented as intent.
 ```
 
 Checkpoint tensor names make the split explicit and greppable:
-`blocks.N.attn.{q,k,v,o}_proj.weight` for Full-attention layers (unchanged
-naming from v1/v2), versus `blocks.N.deltanet.{q,k,v}_proj.weight` and
-`blocks.N.deltanet.gate_proj.weight` for Gated DeltaNet layers — a
+`blocks.N.attn.{wq,wk,wv,wo}.weight` for Full-attention layers (unchanged
+naming from v1/v2), versus `blocks.N.deltanet.{q,k,v}_proj.weight`,
+`blocks.N.deltanet.{alpha,beta,gate,out}_proj.weight`, causal convolution
+weights, `A_log`, `dt_bias`, and output norm for Gated DeltaNet layers — a
 config's attention schedule can be reconstructed just by reading which
 tensor names are present for each layer index, without needing to parse
 the TOML config alongside the checkpoint.

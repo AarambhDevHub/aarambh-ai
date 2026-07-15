@@ -19,3 +19,6 @@ data/eval/preference/*
 !data/eval/tool_calling/
 data/eval/tool_calling/*
 !data/eval/tool_calling/data.jsonl
+!data/eval/associative_recall/
+data/eval/associative_recall/*
+!data/eval/associative_recall/data.jsonl

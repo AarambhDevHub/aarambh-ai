@@ -1,8 +1,10 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use aarambh_ai_core::{ModelConfig, MoeConfig};
+use aarambh_ai_core::{GatedDeltaNetConfig, HybridAttentionSchedule, ModelConfig, MoeConfig};
 use aarambh_ai_model::AarambhModel;
-use aarambh_ai_weights::{GgufFormat, load_gguf, load_model, save_gguf, save_model};
+use aarambh_ai_weights::{
+    GgufFormat, load_gguf, load_model, load_retrofit_into_varmap, save_gguf, save_model,
+};
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{VarBuilder, VarMap};
 
@@ -18,6 +20,7 @@ fn mini_config() -> ModelConfig {
         rope_theta: 10000.0,
         rope_scaling: None,
         moe: None,
+        attention_schedule: None,
         norm_eps: 1e-5,
         tie_embeddings: true,
     }
@@ -31,6 +34,22 @@ fn moe_mini_config() -> ModelConfig {
             expert_ffn_dim: 64,
             aux_loss_weight: 0.01,
             every_n_layers: 2,
+        }),
+        ..mini_config()
+    }
+}
+
+fn hybrid_mini_config() -> ModelConfig {
+    ModelConfig {
+        attention_schedule: Some(HybridAttentionSchedule {
+            full_attention_every_n: 2,
+            gated_deltanet: GatedDeltaNetConfig {
+                n_heads: 1,
+                key_head_dim: 16,
+                value_head_dim: 32,
+                conv_kernel_size: 4,
+                chunk_size: 16,
+            },
         }),
         ..mini_config()
     }
@@ -176,4 +195,72 @@ fn moe_gguf_roundtrip_produces_logits() {
             .get_weight("blocks.1.ffn.experts.0.w_gate.weight")
             .is_some()
     );
+}
+
+#[test]
+fn retrofit_load_preserves_full_layers_and_initializes_deltanet() {
+    let device = Device::Cpu;
+    let dense_cfg = mini_config();
+    let dense_vars = VarMap::new();
+    let dense = AarambhModel::new(
+        &dense_cfg,
+        VarBuilder::from_varmap(&dense_vars, DType::F32, &device),
+    )
+    .unwrap();
+    let path = temp_safetensors_path();
+    save_model(&dense, &path).unwrap();
+
+    let hybrid_cfg = hybrid_mini_config();
+    let mut hybrid_vars = VarMap::new();
+    let hybrid = AarambhModel::new(
+        &hybrid_cfg,
+        VarBuilder::from_varmap(&hybrid_vars, DType::F32, &device),
+    )
+    .unwrap();
+    let report =
+        load_retrofit_into_varmap(&path, &hybrid_cfg, &mut hybrid_vars, &device, DType::F32)
+            .unwrap();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(report.loaded_tensors > 0);
+    assert_eq!(report.initialized_deltanet_tensors, 13);
+    let source = dense.get_weight("blocks.0.attn.wq.weight").unwrap();
+    let loaded = hybrid.get_weight("blocks.0.attn.wq.weight").unwrap();
+    let diff = (source - loaded)
+        .unwrap()
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    assert!(diff < 1e-6, "retrofit full-layer weight diff: {diff}");
+    assert!(
+        hybrid
+            .get_weight("blocks.1.deltanet.q_proj.weight")
+            .is_some()
+    );
+    assert!(hybrid.get_weight("blocks.1.attn.wq.weight").is_none());
+}
+
+#[test]
+fn hybrid_gguf_roundtrip_keeps_float_recurrent_parameters() {
+    let device = Device::Cpu;
+    let cfg = hybrid_mini_config();
+    let varmap = VarMap::new();
+    let model =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&varmap, DType::F32, &device)).unwrap();
+    let path = temp_gguf_path();
+    save_gguf(&model, GgufFormat::Q4KM, &path).unwrap();
+    let loaded = load_gguf(&path, &device).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(
+        loaded
+            .get_weight("blocks.1.deltanet.A_log")
+            .unwrap()
+            .dtype(),
+        DType::F32
+    );
+    let ids = Tensor::from_vec(vec![1u32, 2, 3], (1, 3), &device).unwrap();
+    assert_eq!(loaded.forward(&ids).unwrap().dims(), [1, 3, 128]);
 }

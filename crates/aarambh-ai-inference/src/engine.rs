@@ -1122,6 +1122,7 @@ mod tests {
             rope_theta: 10000.0,
             rope_scaling: None,
             moe: None,
+            attention_schedule: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -1201,6 +1202,7 @@ mod tests {
             rope_theta: 10000.0,
             rope_scaling: None,
             moe: None,
+            attention_schedule: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };

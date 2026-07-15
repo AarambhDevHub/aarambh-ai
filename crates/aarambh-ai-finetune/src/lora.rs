@@ -31,6 +31,13 @@ impl Default for LoraConfig {
                 "attn.wk".into(),
                 "attn.wv".into(),
                 "attn.wo".into(),
+                "deltanet.q_proj".into(),
+                "deltanet.k_proj".into(),
+                "deltanet.v_proj".into(),
+                "deltanet.beta_proj".into(),
+                "deltanet.alpha_proj".into(),
+                "deltanet.gate_proj".into(),
+                "deltanet.out_proj".into(),
             ],
             group_size: 64,
         }
@@ -221,25 +228,37 @@ impl LoraLinear {
             return Ok(base_out);
         };
 
+        let x = x.to_dtype(DType::F32)?;
         let x = if train && self.dropout > 0.0 {
-            candle_nn::ops::dropout(x, self.dropout)?
+            candle_nn::ops::dropout(&x, self.dropout)?
         } else {
-            x.clone()
+            x
         };
         let down = linear_forward(&x, lora_a)?;
         let up = linear_forward(&down, lora_b)?;
-        let up = up.affine(self.scale, 0.0)?;
+        let up = up.affine(self.scale, 0.0)?.to_dtype(base_out.dtype())?;
         Ok((base_out + up)?)
     }
 
     /// Return the base weight with adapter delta merged.
     pub fn merged_weight(&self) -> Result<Tensor> {
+        Ok(self.effective_weight(false)?.detach())
+    }
+
+    /// Return the differentiable effective weight used by hybrid adapter models.
+    pub(crate) fn effective_weight(&self, train: bool) -> Result<Tensor> {
         let base = self.base.weight(&self.device)?;
         let (Some(lora_a), Some(lora_b)) = (&self.lora_a, &self.lora_b) else {
             return Ok(base);
         };
         let delta = lora_b.matmul(lora_a)?.affine(self.scale, 0.0)?;
-        Ok((base + delta)?.detach())
+        let delta = if train && self.dropout > 0.0 {
+            candle_nn::ops::dropout(&delta, self.dropout)?
+        } else {
+            delta
+        };
+        let delta = delta.to_dtype(base.dtype())?;
+        Ok((base + delta)?)
     }
 
     /// Return the number of trainable adapter parameters.

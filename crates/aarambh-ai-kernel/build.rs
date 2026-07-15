@@ -31,13 +31,18 @@ fn main() {
             "swiglu_fused",
             "kernels/swiglu_fused.cu",
         ),
+        (
+            "AARAMBH_CUDA_GATED_DELTA_PTX",
+            "gated_delta_recurrent",
+            "kernels/gated_delta_recurrent.cu",
+        ),
     ];
     for (_, _, kernel) in kernels {
         println!("cargo:rerun-if-changed={kernel}");
     }
 
     let Ok(nvcc) = which::which("nvcc") else {
-        println!("cargo:warning=nvcc not found; CUDA Phase 14 PTX kernels are disabled");
+        println!("cargo:warning=nvcc not found; custom CUDA PTX kernels are disabled");
         return;
     };
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by Cargo"));
@@ -64,13 +69,13 @@ fn main() {
                 Ok(output) => {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     println!(
-                        "cargo:warning=nvcc failed for {kernel}; CUDA Phase 14 PTX kernels are disabled: {stderr}"
+                        "cargo:warning=nvcc failed for {kernel}; custom CUDA PTX kernels are disabled: {stderr}"
                     );
                     return;
                 }
                 Err(err) => {
                     println!(
-                        "cargo:warning=failed to run nvcc for {kernel}; CUDA Phase 14 PTX kernels are disabled: {err}"
+                        "cargo:warning=failed to run nvcc for {kernel}; custom CUDA PTX kernels are disabled: {err}"
                     );
                     return;
                 }

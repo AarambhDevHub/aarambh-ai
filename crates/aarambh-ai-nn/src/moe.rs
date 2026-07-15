@@ -209,18 +209,15 @@ pub fn top_k_gating(logits: &Tensor, top_k: usize) -> Result<GatingOutput> {
     let selected_logits = logits_f32.gather(&indices, D::Minus1)?;
     let weights = candle_nn::ops::softmax(&selected_logits, D::Minus1)?;
 
-    let dispatch_weights = Tensor::zeros(
-        (batch, seq_len, num_experts),
-        DType::F32,
-        logits.device(),
-    )?
-    .scatter_add(&indices, &weights, D::Minus1)?;
-    let selected_mask = Tensor::zeros((batch, seq_len, num_experts), DType::F32, logits.device())?
-        .scatter_add(
-            &indices,
-            &Tensor::ones((batch, seq_len, top_k), DType::F32, logits.device())?,
-            D::Minus1,
-        )?;
+    let mut expert_weights = Vec::with_capacity(num_experts);
+    let mut expert_masks = Vec::with_capacity(num_experts);
+    for expert_idx in 0..num_experts {
+        let mask = indices.eq(expert_idx as u32)?.to_dtype(DType::F32)?;
+        expert_weights.push(weights.broadcast_mul(&mask)?.sum_keepdim(D::Minus1)?);
+        expert_masks.push(mask.sum_keepdim(D::Minus1)?);
+    }
+    let dispatch_weights = Tensor::cat(&expert_weights.iter().collect::<Vec<_>>(), D::Minus1)?;
+    let selected_mask = Tensor::cat(&expert_masks.iter().collect::<Vec<_>>(), D::Minus1)?;
 
     let router_probs = candle_nn::ops::softmax(&logits_f32, D::Minus1)?;
     let token_count = (batch * seq_len) as f64;
@@ -286,6 +283,34 @@ mod tests {
         for row in sums.into_iter().flatten() {
             assert!((row - 1.0).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn top_one_gating_backward_reaches_router_logits() {
+        let device = Device::Cpu;
+        let varmap = VarMap::new();
+        let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
+        let logits = vb
+            .get_with_hints(
+                (1, 4, 2),
+                "logits",
+                Init::Randn {
+                    mean: 0.0,
+                    stdev: 0.1,
+                },
+            )
+            .unwrap();
+        let gating = top_k_gating(&logits, 1).unwrap();
+        let expert_values = Tensor::from_vec(vec![1.0f32, 2.0], (1, 1, 2), &device).unwrap();
+        let loss = gating
+            .dispatch_weights
+            .broadcast_mul(&expert_values)
+            .unwrap()
+            .sum_all()
+            .unwrap();
+        let gradients = loss.backward().unwrap();
+        let variables = varmap.data().lock().unwrap();
+        assert!(gradients.get(variables["logits"].as_tensor()).is_some());
     }
 
     #[test]

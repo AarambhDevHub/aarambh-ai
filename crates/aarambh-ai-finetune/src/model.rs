@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use aarambh_ai_core::{AarambhError, ModelConfig, Result};
 use aarambh_ai_model::AarambhModel;
 use aarambh_ai_nn::RopeCache;
-use candle_core::{Device, Tensor};
-use candle_nn::{Embedding, Module, VarMap};
+use candle_core::{DType, Device, Tensor};
+use candle_nn::{Embedding, Module, VarBuilder, VarMap};
 
 use crate::lora::{LoraConfig, LoraLinear, linear_forward};
 
@@ -19,6 +19,7 @@ pub struct LoraAarambhModel {
     rope_cache: RopeCache,
     adapter_param_count: usize,
     base_param_count: usize,
+    hybrid: Option<HybridLoraModel>,
 }
 
 impl LoraAarambhModel {
@@ -39,6 +40,32 @@ impl LoraAarambhModel {
         lora_config.validate()?;
         let varmap = VarMap::new();
         let embedding_weight = required_tensor(tensors, "embedding.weight")?;
+        if config.attention_schedule.is_some() {
+            let hybrid = HybridLoraModel::new(
+                config,
+                tensors,
+                lora_config,
+                &varmap,
+                quantized_base,
+                device,
+            )?;
+            let adapter_param_count = hybrid.adapter_param_count();
+            let base_param_count = tensors.values().map(tensor_elem_count).sum();
+            return Ok((
+                Self {
+                    config: config.clone(),
+                    embedding_weight,
+                    blocks: Vec::new(),
+                    final_norm_weight: required_tensor(tensors, "final_norm.weight")?,
+                    lm_head: None,
+                    rope_cache: RopeCache::from_config(config, DType::F32, device)?,
+                    adapter_param_count,
+                    base_param_count,
+                    hybrid: Some(hybrid),
+                },
+                varmap,
+            ));
+        }
         let mut blocks = Vec::with_capacity(config.n_layers);
 
         for layer_idx in 0..config.n_layers {
@@ -80,6 +107,7 @@ impl LoraAarambhModel {
             rope_cache,
             adapter_param_count,
             base_param_count,
+            hybrid: None,
         };
         Ok((model, varmap))
     }
@@ -137,6 +165,9 @@ impl LoraAarambhModel {
 
     /// Return checkpoint tensors with adapters merged into base weights.
     pub fn merged_tensors(&self) -> Result<HashMap<String, Tensor>> {
+        if let Some(hybrid) = &self.hybrid {
+            return hybrid.merged_tensors();
+        }
         let mut tensors = HashMap::new();
         tensors.insert(
             "embedding.weight".to_string(),
@@ -199,6 +230,9 @@ impl LoraAarambhModel {
 
     fn forward_embeddings(&self, embeddings: &Tensor, train: bool) -> Result<Tensor> {
         self.check_embeddings(embeddings)?;
+        if let Some(hybrid) = &self.hybrid {
+            return hybrid.forward_embeddings(embeddings, train);
+        }
         let mut x = embeddings.clone();
 
         for block in &self.blocks {
@@ -268,6 +302,89 @@ impl LoraAarambhModel {
         }
         Ok((batch, seq_len))
     }
+}
+
+#[derive(Debug, Clone)]
+struct HybridLoraModel {
+    config: ModelConfig,
+    base_tensors: HashMap<String, Tensor>,
+    linears: HashMap<String, LoraLinear>,
+    device: Device,
+    dtype: candle_core::DType,
+}
+
+impl HybridLoraModel {
+    fn new(
+        config: &ModelConfig,
+        tensors: &HashMap<String, Tensor>,
+        lora_config: &LoraConfig,
+        varmap: &VarMap,
+        quantized_base: bool,
+        device: &Device,
+    ) -> Result<Self> {
+        let mut base_tensors = HashMap::with_capacity(tensors.len());
+        let mut linears = HashMap::new();
+        for (name, tensor) in tensors {
+            base_tensors.insert(name.clone(), tensor.detach());
+            if is_projection_weight(name, tensor) {
+                linears.insert(
+                    name.clone(),
+                    LoraLinear::new(name, tensor, lora_config, varmap, quantized_base, device)?,
+                );
+            }
+        }
+        Ok(Self {
+            config: config.clone(),
+            base_tensors,
+            linears,
+            device: device.clone(),
+            dtype: required_ref(tensors, "embedding.weight")?.dtype(),
+        })
+    }
+
+    fn adapter_param_count(&self) -> usize {
+        self.linears
+            .values()
+            .map(LoraLinear::adapter_param_count)
+            .sum()
+    }
+
+    fn effective_tensors(&self, train: bool) -> Result<HashMap<String, Tensor>> {
+        let mut tensors = self.base_tensors.clone();
+        for (name, linear) in &self.linears {
+            tensors.insert(name.clone(), linear.effective_weight(train)?);
+        }
+        Ok(tensors)
+    }
+
+    fn forward_embeddings(&self, embeddings: &Tensor, train: bool) -> Result<Tensor> {
+        let tensors = self.effective_tensors(train)?;
+        let model = AarambhModel::new(
+            &self.config,
+            VarBuilder::from_tensors(tensors, self.dtype, &self.device),
+        )?;
+        if train {
+            model.forward_embeddings_train(embeddings)
+        } else {
+            model.forward_embeddings(embeddings)
+        }
+    }
+
+    fn merged_tensors(&self) -> Result<HashMap<String, Tensor>> {
+        let mut tensors = self.base_tensors.clone();
+        for (name, linear) in &self.linears {
+            tensors.insert(name.clone(), linear.merged_weight()?);
+        }
+        Ok(tensors)
+    }
+}
+
+fn is_projection_weight(name: &str, tensor: &Tensor) -> bool {
+    tensor.rank() == 2
+        && (name.contains(".attn.")
+            || name.contains(".ffn.")
+            || (name.contains(".deltanet.") && name.ends_with("_proj.weight"))
+            || name == "lm_head.weight")
 }
 
 #[derive(Debug, Clone)]
@@ -566,7 +683,7 @@ fn tensor_elem_count(tensor: &Tensor) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aarambh_ai_core::MoeConfig;
+    use aarambh_ai_core::{GatedDeltaNetConfig, HybridAttentionSchedule, MoeConfig};
     use candle_core::{DType, Device};
     use candle_nn::{VarBuilder, VarMap};
 
@@ -584,6 +701,7 @@ mod tests {
             rope_theta: 10000.0,
             rope_scaling: None,
             moe: None,
+            attention_schedule: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -617,6 +735,7 @@ mod tests {
             rope_theta: 10000.0,
             rope_scaling: None,
             moe: None,
+            attention_schedule: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -643,6 +762,68 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_lora_backward_reaches_deltanet_adapters() {
+        let device = Device::Cpu;
+        let config = ModelConfig {
+            vocab_size: 32,
+            hidden_dim: 64,
+            ffn_dim: 128,
+            n_layers: 2,
+            n_heads: 1,
+            n_kv_heads: 1,
+            max_seq_len: 8,
+            rope_theta: 10000.0,
+            rope_scaling: None,
+            moe: None,
+            attention_schedule: Some(HybridAttentionSchedule {
+                full_attention_every_n: 2,
+                gated_deltanet: GatedDeltaNetConfig {
+                    n_heads: 1,
+                    key_head_dim: 16,
+                    value_head_dim: 32,
+                    conv_kernel_size: 4,
+                    chunk_size: 16,
+                },
+            }),
+            norm_eps: 1e-5,
+            tie_embeddings: true,
+        };
+        let base_varmap = VarMap::new();
+        let vb = VarBuilder::from_varmap(&base_varmap, DType::F32, &device);
+        let base = AarambhModel::new(&config, vb).unwrap();
+        let lora = LoraConfig {
+            rank: 2,
+            alpha: 4.0,
+            dropout: 0.0,
+            ..Default::default()
+        };
+        let (model, varmap) =
+            LoraAarambhModel::from_tensors(&config, &base.named_tensors(), &lora, false, &device)
+                .unwrap();
+        let ids = Tensor::from_vec(vec![1u32, 2, 3, 4], (1, 4), &device).unwrap();
+        let loss = model
+            .forward_train(&ids)
+            .unwrap()
+            .sqr()
+            .unwrap()
+            .sum_all()
+            .unwrap();
+        let grads = loss.backward().unwrap();
+        let data = varmap.data().lock().unwrap();
+        let deltanet_gradients = data
+            .iter()
+            .filter(|(name, _)| name.contains("blocks.1.deltanet"))
+            .map(|(name, var)| (name.clone(), grads.get(var.as_tensor()).is_some()))
+            .collect::<Vec<_>>();
+        assert!(
+            deltanet_gradients.iter().any(|(name, present)| {
+                name.contains("blocks.1.deltanet") && name.ends_with(".lora_b") && *present
+            }),
+            "{deltanet_gradients:?}"
+        );
+    }
+
+    #[test]
     fn lora_model_rejects_moe_config() {
         let device = Device::Cpu;
         let config = ModelConfig {
@@ -662,6 +843,7 @@ mod tests {
                 aux_loss_weight: 0.01,
                 every_n_layers: 2,
             }),
+            attention_schedule: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };

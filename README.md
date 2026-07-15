@@ -6,9 +6,10 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.89%2B-orange.svg)](https://www.rust-lang.org)
 
-A decoder-only transformer with four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA/DoRA fine-tuning, GRPO and DPO alignment, exact speculative decoding, grammar-constrained function calling, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, evaluation harness, a frozen-encoder vision projector path, and an OpenAI-compatible inference server — all in one clean 17-crate Rust workspace.
+A decoder-only hybrid language model with GQA plus Gated DeltaNet, four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA/DoRA fine-tuning, GRPO and DPO alignment, exact speculative decoding, grammar-constrained function calling, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, evaluation harness, a frozen-encoder vision projector path, and an OpenAI-compatible inference server — all in one clean 17-crate Rust workspace.
 
-v2.0.0 is a production GitHub source release. The workspace crates are internal
+v2.0.0 is the production GitHub source release; the current mainline is
+v3.0.0-alpha.1. The workspace crates are internal
 implementation units and remain non-publishable; no pretrained checkpoints or
 compiled binaries are attached to the release.
 
@@ -52,6 +53,7 @@ compiled binaries are attached to the release.
 | Tool use: schema-constrained JSON calls, Tool SFT/QLoRA, selection evaluation | Phase 26 ✅ |
 | OpenAI-compatible Axum HTTP/SSE server with continuous batching | Phase 27 ✅ |
 | Production v2.0 source release: locked dependencies, strict docs, CI and release audit | Phase 28 ✅ |
+| Hybrid Gated DeltaNet: fixed recurrent state, full-attention schedule, v2 retrofit | Phase 29 ✅ |
 
 ---
 
@@ -261,12 +263,53 @@ for user-run continuation from locally trained or converted model weights.
 
 ---
 
+## Hybrid Gated DeltaNet
+
+Phase 29 keeps every fourth zero-based layer on full GQA/RoPE attention by
+default and uses Gated DeltaNet for the other layers. DeltaNet decode stores a
+fixed `[batch, heads, key_dim, value_dim]` recurrent matrix plus short
+convolution history, so its cache does not grow with generated sequence length.
+Configs without `[model.attention_schedule]` retain the v1/v2 dense path.
+
+```sh
+# Two-step CPU training and backward smoke test.
+cargo run --release -p aarambh-ai -- train \
+  --config configs/gated_deltanet_smoke.toml
+
+# Two-step CUDA/BF16 smoke test.
+cargo run --release -p aarambh-ai --features cuda -- train \
+  --config configs/wikitext103_hybrid_cuda_smoke.toml
+
+# Prepare long-document data for a dense-v2-to-hybrid retrofit.
+scripts/phase29_prepare_hybrid_retrofit.sh \
+  data checkpoints/wikitext103_medium/model.safetensors
+
+# Continue training with untouched dense weights copied exactly and freshly
+# initialized DeltaNet weights at 0.1x the configured learning rate.
+cargo run --release -p aarambh-ai --features cuda -- train \
+  --config configs/wikitext103_medium_hybrid.toml
+
+# Evaluate deterministic key-value recall.
+cargo run --release -p aarambh-ai -- eval \
+  --config configs/wikitext103_medium_hybrid.toml \
+  --model checkpoints/wikitext103_medium_hybrid/best/model.safetensors \
+  --tokenizer checkpoints/wikitext103_medium/tokenizer.json \
+  --tasks associative-recall --data-dir data/eval --max-new-tokens 8
+```
+
+`configs/wikitext103_large_hybrid.toml` provides the 32K Large recipe. Use
+`scripts/phase29_benchmark_hybrid.sh` with matched dense and hybrid checkpoints
+to report release-mode `tok/s`; the script reports measurements and does not
+turn hardware-specific throughput into a CI gate.
+
+---
+
 ## Evaluation Harness
 
 Phase 17 adds `aarambh-ai eval` for comparable before/after model quality
 tracking. It reports JSON and Markdown scorecards for perplexity,
 MMLU-lite, HellaSwag, GSM8K-subset, HumanEval-lite, pairwise preference
-win rate, and the Phase 19 image-caption smoke task.
+win rate, associative recall, and the Phase 19 image-caption smoke task.
 
 ```sh
 # Prepare public eval subsets. Requires Python's datasets package.
@@ -1129,8 +1172,12 @@ aarambh-ai/
 | 26 | Tool use / function calling | i3 + GPU | ✅ |
 | 27 | OpenAI-compatible inference server | i3 | ✅ |
 | 28 | Production release v2.0.0 | all | ✅ |
+| 29 | Gated DeltaNet hybrid linear attention | i3 + GPU | ✅ |
 
-See [ROADMAP.md](ROADMAP.md) and [ROADMAP_V2.md](ROADMAP_V2.md) for the full phased delivery plans with tests and milestones.
+See [ROADMAP.md](ROADMAP.md), [ROADMAP_V2.md](ROADMAP_V2.md), and
+[ROADMAP_V3.md](ROADMAP_V3.md) for the full phased delivery plans with tests
+and milestones. Phase 29's design details are in
+[ARCHITECTURE_V3.md](ARCHITECTURE_V3.md#38-gated-deltanet-hybrid-linear-attention).
 
 ---
 
@@ -1142,6 +1189,7 @@ cargo test --workspace --no-fail-fast --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings -D clippy::undocumented_unsafe_blocks
 cargo fmt --all --check
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --locked
+# v2.0.0 release tag audit; current v3 alpha intentionally has a different version.
 scripts/phase28_release_audit.sh
 ```
 

@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use aarambh_ai_core::{AarambhError, Configurable, Forward, ModelConfig, Result};
+use aarambh_ai_core::{AarambhError, AttentionKind, Configurable, Forward, ModelConfig, Result};
 use aarambh_ai_nn::{
-    FeedForwardLayer, GroupedQueryAttention, KVCache, MoeFfn, MoeForwardStats, RMSNorm, RopeCache,
-    SwiGluFfn, TransformerBlock,
+    DeltaNetState, FeedForwardLayer, GatedDeltaNetLayer, GroupedQueryAttention, HybridKvCache,
+    KVCache, MoeFfn, MoeForwardStats, RMSNorm, RopeCache, SwiGluFfn, TokenMixer, TransformerBlock,
 };
-use candle_core::Tensor;
+use candle_core::{DType, Tensor};
 use candle_nn::{Init, VarBuilder, linear_no_bias};
 
 use crate::embedding::TokenEmbedding;
@@ -40,6 +40,11 @@ impl AarambhModel {
 
         let embedding = TokenEmbedding::new(cfg.vocab_size, cfg.hidden_dim, vb.pp("embedding"))?;
         let mut blocks = Vec::with_capacity(cfg.n_layers);
+        let deltanet_config = cfg
+            .attention_schedule
+            .as_ref()
+            .map(|schedule| schedule.validate(cfg.n_layers, cfg.hidden_dim, cfg.n_heads))
+            .transpose()?;
 
         for layer_idx in 0..cfg.n_layers {
             let block_vb = vb.pp("blocks").pp(layer_idx);
@@ -56,17 +61,42 @@ impl AarambhModel {
                 cfg.norm_eps as f32,
             );
 
-            let attn_vb = block_vb.pp("attn");
-            let head_dim = cfg.head_dim();
-            let attn = GroupedQueryAttention::new(
-                linear_no_bias(cfg.hidden_dim, cfg.n_heads * head_dim, attn_vb.pp("wq"))?,
-                linear_no_bias(cfg.hidden_dim, cfg.n_kv_heads * head_dim, attn_vb.pp("wk"))?,
-                linear_no_bias(cfg.hidden_dim, cfg.n_kv_heads * head_dim, attn_vb.pp("wv"))?,
-                linear_no_bias(cfg.n_heads * head_dim, cfg.hidden_dim, attn_vb.pp("wo"))?,
-                cfg.n_heads,
-                cfg.n_kv_heads,
-                head_dim,
-            );
+            let attention_kind = cfg
+                .attention_schedule
+                .as_ref()
+                .map(|schedule| schedule.kind_for_layer(layer_idx))
+                .unwrap_or(AttentionKind::Full);
+            let mixer = match attention_kind {
+                AttentionKind::Full => {
+                    let attn_vb = block_vb.pp("attn");
+                    let head_dim = cfg.head_dim();
+                    TokenMixer::Attention(GroupedQueryAttention::new(
+                        linear_no_bias(cfg.hidden_dim, cfg.n_heads * head_dim, attn_vb.pp("wq"))?,
+                        linear_no_bias(
+                            cfg.hidden_dim,
+                            cfg.n_kv_heads * head_dim,
+                            attn_vb.pp("wk"),
+                        )?,
+                        linear_no_bias(
+                            cfg.hidden_dim,
+                            cfg.n_kv_heads * head_dim,
+                            attn_vb.pp("wv"),
+                        )?,
+                        linear_no_bias(cfg.n_heads * head_dim, cfg.hidden_dim, attn_vb.pp("wo"))?,
+                        cfg.n_heads,
+                        cfg.n_kv_heads,
+                        head_dim,
+                    ))
+                }
+                AttentionKind::GatedDeltaNet => TokenMixer::GatedDelta(build_gated_deltanet(
+                    cfg.hidden_dim,
+                    cfg.norm_eps as f32,
+                    deltanet_config
+                        .as_ref()
+                        .expect("validated hybrid config has Gated DeltaNet settings"),
+                    block_vb.pp("deltanet"),
+                )?),
+            };
 
             let ffn_vb = block_vb.pp("ffn");
             let ffn = match cfg
@@ -110,7 +140,7 @@ impl AarambhModel {
                 )),
             };
 
-            blocks.push(TransformerBlock::new_with_ffn(norm1, attn, norm2, ffn));
+            blocks.push(TransformerBlock::new_with_mixer(norm1, mixer, norm2, ffn));
         }
 
         let final_norm = RMSNorm::new(
@@ -175,6 +205,9 @@ impl AarambhModel {
         }
         if let Some(moe) = &cfg.moe {
             moe.validate(cfg.n_layers)?;
+        }
+        if let Some(schedule) = &cfg.attention_schedule {
+            schedule.validate(cfg.n_layers, cfg.hidden_dim, cfg.n_heads)?;
         }
         Ok(())
     }
@@ -273,11 +306,11 @@ impl AarambhModel {
         &self,
         token_ids: &Tensor,
         seqlen_offset: usize,
-        kv_caches: &mut [KVCache],
+        kv_caches: &mut [HybridKvCache],
     ) -> Result<Tensor> {
         if kv_caches.len() != self.blocks.len() {
             return Err(AarambhError::Shape(format!(
-                "expected {} KV caches, got {}",
+                "expected {} hybrid caches, got {}",
                 self.blocks.len(),
                 kv_caches.len()
             )));
@@ -293,11 +326,11 @@ impl AarambhModel {
         &self,
         embeddings: &Tensor,
         seqlen_offset: usize,
-        kv_caches: &mut [KVCache],
+        kv_caches: &mut [HybridKvCache],
     ) -> Result<Tensor> {
         if kv_caches.len() != self.blocks.len() {
             return Err(AarambhError::Shape(format!(
-                "expected {} KV caches, got {}",
+                "expected {} hybrid caches, got {}",
                 self.blocks.len(),
                 kv_caches.len()
             )));
@@ -319,7 +352,7 @@ impl AarambhModel {
         &self,
         token_ids: &Tensor,
         seqlen_offsets: &[usize],
-        caches: &mut [&mut [KVCache]],
+        caches: &mut [&mut [HybridKvCache]],
     ) -> Result<Tensor> {
         let dims = token_ids.dims();
         if dims.len() != 2 || dims[1] != 1 {
@@ -344,7 +377,7 @@ impl AarambhModel {
             }
             if cache.len() != self.blocks.len() {
                 return Err(AarambhError::Shape(format!(
-                    "batch row {row} has {} KV layers, expected {}",
+                    "batch row {row} has {} cache layers, expected {}",
                     cache.len(),
                     self.blocks.len()
                 )));
@@ -368,10 +401,19 @@ impl AarambhModel {
         Ok(self.lm_head.forward(&x)?)
     }
 
-    /// Create one empty KV cache per transformer block.
-    pub fn empty_kv_cache(&self) -> Vec<KVCache> {
-        (0..self.blocks.len())
-            .map(|_| KVCache::with_capacity(self.config.max_seq_len))
+    /// Create one correctly typed empty cache per transformer block.
+    pub fn empty_kv_cache(&self) -> Vec<HybridKvCache> {
+        self.empty_kv_cache_with_capacity(self.config.max_seq_len)
+    }
+
+    /// Create one correctly typed cache with a requested full-attention capacity.
+    pub fn empty_kv_cache_with_capacity(&self, capacity: usize) -> Vec<HybridKvCache> {
+        self.blocks
+            .iter()
+            .map(|block| match block.mixer() {
+                TokenMixer::Attention(_) => HybridKvCache::Full(KVCache::with_capacity(capacity)),
+                TokenMixer::GatedDelta(_) => HybridKvCache::Linear(DeltaNetState::new()),
+            })
             .collect()
     }
 
@@ -388,22 +430,7 @@ impl AarambhModel {
                 format!("blocks.{idx}.norm1.weight"),
                 block.norm1().weight().clone(),
             );
-            tensors.insert(
-                format!("blocks.{idx}.attn.wq.weight"),
-                block.attn().wq_weight().clone(),
-            );
-            tensors.insert(
-                format!("blocks.{idx}.attn.wk.weight"),
-                block.attn().wk_weight().clone(),
-            );
-            tensors.insert(
-                format!("blocks.{idx}.attn.wv.weight"),
-                block.attn().wv_weight().clone(),
-            );
-            tensors.insert(
-                format!("blocks.{idx}.attn.wo.weight"),
-                block.attn().wo_weight().clone(),
-            );
+            insert_mixer_tensors(&mut tensors, idx, block.mixer());
             tensors.insert(
                 format!("blocks.{idx}.norm2.weight"),
                 block.norm2().weight().clone(),
@@ -440,15 +467,19 @@ impl AarambhModel {
             };
             return match suffix {
                 "norm1.weight" => Some(block.norm1().weight()),
-                "attn.wq.weight" => Some(block.attn().wq_weight()),
-                "attn.wk.weight" => Some(block.attn().wk_weight()),
-                "attn.wv.weight" => Some(block.attn().wv_weight()),
-                "attn.wo.weight" => Some(block.attn().wo_weight()),
+                "attn.wq.weight" => block.mixer().as_attention().map(|v| v.wq_weight()),
+                "attn.wk.weight" => block.mixer().as_attention().map(|v| v.wk_weight()),
+                "attn.wv.weight" => block.mixer().as_attention().map(|v| v.wv_weight()),
+                "attn.wo.weight" => block.mixer().as_attention().map(|v| v.wo_weight()),
                 "norm2.weight" => Some(block.norm2().weight()),
                 "ffn.w_gate.weight" => block.ffn().as_dense().map(SwiGluFfn::w_gate_weight),
                 "ffn.w_up.weight" => block.ffn().as_dense().map(SwiGluFfn::w_up_weight),
                 "ffn.w_down.weight" => block.ffn().as_dense().map(SwiGluFfn::w_down_weight),
                 "ffn.router.weight" => block.ffn().as_moe().map(MoeFfn::router_weight),
+                _ if suffix.starts_with("deltanet.") => block
+                    .mixer()
+                    .as_gated_delta()
+                    .and_then(|layer| layer.get_weight(&suffix[9..])),
                 _ => get_moe_expert_weight(block.ffn(), suffix),
             };
         }
@@ -571,6 +602,89 @@ fn insert_ffn_tensors(
             }
         }
     }
+}
+
+fn insert_mixer_tensors(
+    tensors: &mut HashMap<String, Tensor>,
+    layer_idx: usize,
+    mixer: &TokenMixer,
+) {
+    match mixer {
+        TokenMixer::Attention(attn) => {
+            for (name, tensor) in [
+                ("wq", attn.wq_weight()),
+                ("wk", attn.wk_weight()),
+                ("wv", attn.wv_weight()),
+                ("wo", attn.wo_weight()),
+            ] {
+                tensors.insert(
+                    format!("blocks.{layer_idx}.attn.{name}.weight"),
+                    tensor.clone(),
+                );
+            }
+        }
+        TokenMixer::GatedDelta(layer) => {
+            for (name, tensor) in layer.named_tensors() {
+                tensors.insert(
+                    format!("blocks.{layer_idx}.deltanet.{name}"),
+                    tensor.clone(),
+                );
+            }
+        }
+    }
+}
+
+fn build_gated_deltanet(
+    hidden_dim: usize,
+    _norm_eps: f32,
+    config: &aarambh_ai_core::GatedDeltaNetConfig,
+    vb: VarBuilder<'_>,
+) -> Result<GatedDeltaNetLayer> {
+    let key_dim = config.n_heads * config.key_head_dim;
+    let value_dim = config.n_heads * config.value_head_dim;
+    let conv_init = Init::Uniform {
+        lo: -(1.0 / config.conv_kernel_size as f64).sqrt(),
+        up: (1.0 / config.conv_kernel_size as f64).sqrt(),
+    };
+    Ok(GatedDeltaNetLayer::new(
+        linear_no_bias(hidden_dim, key_dim, vb.pp("q_proj"))?,
+        linear_no_bias(hidden_dim, key_dim, vb.pp("k_proj"))?,
+        linear_no_bias(hidden_dim, value_dim, vb.pp("v_proj"))?,
+        linear_no_bias(hidden_dim, config.n_heads, vb.pp("beta_proj"))?,
+        linear_no_bias(hidden_dim, config.n_heads, vb.pp("alpha_proj"))?,
+        linear_no_bias(hidden_dim, value_dim, vb.pp("gate_proj"))?,
+        linear_no_bias(value_dim, hidden_dim, vb.pp("out_proj"))?,
+        vb.pp("q_conv")
+            .get_with_hints((key_dim, config.conv_kernel_size), "weight", conv_init)?,
+        vb.pp("k_conv")
+            .get_with_hints((key_dim, config.conv_kernel_size), "weight", conv_init)?,
+        vb.pp("v_conv").get_with_hints(
+            (value_dim, config.conv_kernel_size),
+            "weight",
+            conv_init,
+        )?,
+        vb.pp("out_norm")
+            .get_with_hints(config.value_head_dim, "weight", Init::Const(1.0))?,
+        vb.get_with_hints_dtype(
+            config.n_heads,
+            "A_log",
+            Init::Uniform {
+                lo: -6.907_755,
+                up: 2.772_589,
+            },
+            DType::F32,
+        )?,
+        vb.get_with_hints_dtype(
+            config.n_heads,
+            "dt_bias",
+            Init::Uniform {
+                lo: -6.907_255,
+                up: -2.252_168,
+            },
+            DType::F32,
+        )?,
+        config.clone(),
+    ))
 }
 
 fn get_moe_expert_weight<'a>(ffn: &'a FeedForwardLayer, suffix: &str) -> Option<&'a Tensor> {

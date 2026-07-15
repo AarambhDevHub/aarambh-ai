@@ -4,7 +4,7 @@ use aarambh_ai_core::{AarambhError, ModelConfig, Result};
 use aarambh_ai_model::AarambhModel;
 use aarambh_ai_nn::RopeCache;
 use candle_core::{DType, Device, Tensor};
-use candle_nn::{Embedding, Init, Module, VarMap};
+use candle_nn::{Embedding, Init, Module, VarBuilder, VarMap};
 
 use crate::lora::{BaseLinear, LoraConfig, adapter_tensor_name, linear_forward};
 
@@ -146,8 +146,9 @@ impl DoraLinear {
         count
     }
 
-    fn effective_weight(&self, train: bool) -> Result<Tensor> {
+    pub(crate) fn effective_weight(&self, train: bool) -> Result<Tensor> {
         let base = self.base.weight(&self.device)?;
+        let base_dtype = base.dtype();
         let (Some(magnitude), Some(direction_lora_a), Some(direction_lora_b)) = (
             &self.magnitude,
             &self.direction_lora_a,
@@ -163,11 +164,11 @@ impl DoraLinear {
         } else {
             delta
         };
-        let source = (base + delta)?;
+        let source = (base.to_dtype(DType::F32)? + delta)?;
         let norm = row_norm_keepdim(&source)?;
         let direction = source.broadcast_div(&norm)?;
         let magnitude = magnitude.reshape((magnitude.elem_count(), 1))?;
-        Ok(direction.broadcast_mul(&magnitude)?)
+        Ok(direction.broadcast_mul(&magnitude)?.to_dtype(base_dtype)?)
     }
 }
 
@@ -182,6 +183,7 @@ pub struct DoraAarambhModel {
     rope_cache: RopeCache,
     adapter_param_count: usize,
     base_param_count: usize,
+    hybrid: Option<HybridDoraModel>,
 }
 
 impl DoraAarambhModel {
@@ -202,6 +204,32 @@ impl DoraAarambhModel {
         dora_config.validate()?;
         let varmap = VarMap::new();
         let embedding_weight = required_tensor(tensors, "embedding.weight")?;
+        if config.attention_schedule.is_some() {
+            let hybrid = HybridDoraModel::new(
+                config,
+                tensors,
+                dora_config,
+                &varmap,
+                quantized_base,
+                device,
+            )?;
+            let adapter_param_count = hybrid.adapter_param_count();
+            let base_param_count = tensors.values().map(tensor_elem_count).sum();
+            return Ok((
+                Self {
+                    config: config.clone(),
+                    embedding_weight,
+                    blocks: Vec::new(),
+                    final_norm_weight: required_tensor(tensors, "final_norm.weight")?,
+                    lm_head: None,
+                    rope_cache: RopeCache::from_config(config, DType::F32, device)?,
+                    adapter_param_count,
+                    base_param_count,
+                    hybrid: Some(hybrid),
+                },
+                varmap,
+            ));
+        }
         let mut blocks = Vec::with_capacity(config.n_layers);
 
         for layer_idx in 0..config.n_layers {
@@ -243,6 +271,7 @@ impl DoraAarambhModel {
             rope_cache,
             adapter_param_count,
             base_param_count,
+            hybrid: None,
         };
         Ok((model, varmap))
     }
@@ -300,6 +329,9 @@ impl DoraAarambhModel {
 
     /// Return checkpoint tensors with adapters merged into base weights.
     pub fn merged_tensors(&self) -> Result<HashMap<String, Tensor>> {
+        if let Some(hybrid) = &self.hybrid {
+            return hybrid.merged_tensors();
+        }
         let mut tensors = HashMap::new();
         tensors.insert(
             "embedding.weight".to_string(),
@@ -363,6 +395,9 @@ impl DoraAarambhModel {
 
     fn forward_embeddings(&self, embeddings: &Tensor, train: bool) -> Result<Tensor> {
         self.check_embeddings(embeddings)?;
+        if let Some(hybrid) = &self.hybrid {
+            return hybrid.forward_embeddings(embeddings, train);
+        }
         let mut x = embeddings.clone();
 
         for block in &self.blocks {
@@ -432,6 +467,88 @@ impl DoraAarambhModel {
         }
         Ok((batch, seq_len))
     }
+}
+
+#[derive(Debug, Clone)]
+struct HybridDoraModel {
+    config: ModelConfig,
+    base_tensors: HashMap<String, Tensor>,
+    linears: HashMap<String, DoraLinear>,
+    device: Device,
+    dtype: DType,
+}
+
+impl HybridDoraModel {
+    fn new(
+        config: &ModelConfig,
+        tensors: &HashMap<String, Tensor>,
+        dora_config: &DoraConfig,
+        varmap: &VarMap,
+        quantized_base: bool,
+        device: &Device,
+    ) -> Result<Self> {
+        let mut base_tensors = HashMap::with_capacity(tensors.len());
+        let mut linears = HashMap::new();
+        for (name, tensor) in tensors {
+            base_tensors.insert(name.clone(), tensor.detach());
+            if is_dora_projection_weight(name, tensor) {
+                linears.insert(
+                    name.clone(),
+                    DoraLinear::new(name, tensor, dora_config, varmap, quantized_base, device)?,
+                );
+            }
+        }
+        Ok(Self {
+            config: config.clone(),
+            base_tensors,
+            linears,
+            device: device.clone(),
+            dtype: required_ref(tensors, "embedding.weight")?.dtype(),
+        })
+    }
+
+    fn adapter_param_count(&self) -> usize {
+        self.linears
+            .values()
+            .map(DoraLinear::adapter_param_count)
+            .sum()
+    }
+
+    fn effective_tensors(&self, train: bool) -> Result<HashMap<String, Tensor>> {
+        let mut tensors = self.base_tensors.clone();
+        for (name, linear) in &self.linears {
+            tensors.insert(name.clone(), linear.effective_weight(train)?);
+        }
+        Ok(tensors)
+    }
+
+    fn forward_embeddings(&self, embeddings: &Tensor, train: bool) -> Result<Tensor> {
+        let model = AarambhModel::new(
+            &self.config,
+            VarBuilder::from_tensors(self.effective_tensors(train)?, self.dtype, &self.device),
+        )?;
+        if train {
+            model.forward_embeddings_train(embeddings)
+        } else {
+            model.forward_embeddings(embeddings)
+        }
+    }
+
+    fn merged_tensors(&self) -> Result<HashMap<String, Tensor>> {
+        let mut tensors = self.base_tensors.clone();
+        for (name, linear) in &self.linears {
+            tensors.insert(name.clone(), linear.merged_weight()?);
+        }
+        Ok(tensors)
+    }
+}
+
+fn is_dora_projection_weight(name: &str, tensor: &Tensor) -> bool {
+    tensor.rank() == 2
+        && (name.contains(".attn.")
+            || name.contains(".ffn.")
+            || (name.contains(".deltanet.") && name.ends_with("_proj.weight"))
+            || name == "lm_head.weight")
 }
 
 #[derive(Debug, Clone)]
@@ -738,6 +855,7 @@ fn tensor_elem_count(tensor: &Tensor) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aarambh_ai_core::{GatedDeltaNetConfig, HybridAttentionSchedule};
     use candle_nn::VarBuilder;
 
     fn tiny_config() -> ModelConfig {
@@ -752,6 +870,7 @@ mod tests {
             rope_theta: 10000.0,
             rope_scaling: None,
             moe: None,
+            attention_schedule: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -828,6 +947,58 @@ mod tests {
             data.iter()
                 .any(|(name, var)| name.ends_with(".direction_lora_b")
                     && grads.get(var.as_tensor()).is_some())
+        );
+    }
+
+    #[test]
+    fn hybrid_dora_backward_reaches_deltanet_adapters() {
+        let device = Device::Cpu;
+        let mut config = tiny_config();
+        config.n_layers = 2;
+        config.attention_schedule = Some(HybridAttentionSchedule {
+            full_attention_every_n: 2,
+            gated_deltanet: GatedDeltaNetConfig {
+                n_heads: 1,
+                key_head_dim: 16,
+                value_head_dim: 32,
+                conv_kernel_size: 4,
+                chunk_size: 16,
+            },
+        });
+        let base_varmap = VarMap::new();
+        let vb = VarBuilder::from_varmap(&base_varmap, DType::F32, &device);
+        let base = AarambhModel::new(&config, vb).unwrap();
+        let dora = DoraConfig {
+            rank: 2,
+            alpha: 4.0,
+            dropout: 0.0,
+            ..Default::default()
+        };
+        let (model, varmap) =
+            DoraAarambhModel::from_tensors(&config, &base.named_tensors(), &dora, false, &device)
+                .unwrap();
+        let ids = Tensor::from_vec(vec![1u32, 2, 3, 4], (1, 4), &device).unwrap();
+        let loss = model
+            .forward_train(&ids)
+            .unwrap()
+            .sqr()
+            .unwrap()
+            .sum_all()
+            .unwrap();
+        let grads = loss.backward().unwrap();
+        let data = varmap.data().lock().unwrap();
+        let deltanet_gradients = data
+            .iter()
+            .filter(|(name, _)| name.contains("blocks.1.deltanet"))
+            .map(|(name, var)| (name.clone(), grads.get(var.as_tensor()).is_some()))
+            .collect::<Vec<_>>();
+        assert!(
+            deltanet_gradients.iter().any(|(name, present)| {
+                name.contains("blocks.1.deltanet")
+                    && name.ends_with(".direction_lora_b")
+                    && *present
+            }),
+            "{deltanet_gradients:?}"
         );
     }
 

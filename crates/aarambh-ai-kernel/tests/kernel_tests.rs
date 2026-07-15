@@ -1,6 +1,9 @@
 use aarambh_ai_kernel::cpu::parallel_attn::{cpu_parallel_attn, cpu_sequential_attn};
 use aarambh_ai_kernel::dispatch::{AttentionMaskKind, KernelPath, attention_forward_candle};
-use aarambh_ai_kernel::{attention_forward, attention_path, rms_norm, rms_norm_path};
+use aarambh_ai_kernel::{
+    attention_forward, attention_path, gated_delta_path, gated_delta_recurrent, rms_norm,
+    rms_norm_path,
+};
 use candle_core::{DType, Device, Tensor};
 
 fn flat_f32(tensor: &Tensor) -> Vec<f32> {
@@ -177,6 +180,53 @@ fn cuda_phase14_wrappers_report_kernel_availability() {
     );
 }
 
+#[test]
+fn cpu_gated_delta_recurrence_matches_scalar_reference() {
+    let device = Device::Cpu;
+    let dk = 2;
+    let dv = 3;
+    let packed = Tensor::from_vec(
+        vec![0.5f32, -0.25, 0.2, 0.4, 1.0, -0.5, 0.25, 0.8, 0.3],
+        (1, 1, dk * 2 + dv + 2),
+        &device,
+    )
+    .unwrap();
+    let state = Tensor::from_vec(
+        vec![0.1f32, 0.2, 0.3, -0.1, 0.4, 0.2],
+        (1, 1, dk, dv),
+        &device,
+    )
+    .unwrap();
+    assert_eq!(gated_delta_path(&packed, &state), KernelPath::CpuSimd);
+    let result = gated_delta_recurrent(&packed, &state, dk, dv).unwrap();
+
+    let input = flat_f32(&packed);
+    let previous = flat_f32(&state);
+    let mut expected = vec![0.0f32; dk * dv + dv];
+    let q = &input[..dk];
+    let k = &input[dk..2 * dk];
+    let v = &input[2 * dk..2 * dk + dv];
+    let alpha = input[2 * dk + dv];
+    let beta = input[2 * dk + dv + 1];
+    for j in 0..dv {
+        let prediction = (0..dk)
+            .map(|i| k[i] * previous[i * dv + j] * alpha)
+            .sum::<f32>();
+        let error = v[j] - prediction;
+        for i in 0..dk {
+            expected[i * dv + j] = previous[i * dv + j] * alpha + beta * k[i] * error;
+        }
+        expected[dk * dv + j] = (0..dk).map(|i| q[i] * expected[i * dv + j]).sum::<f32>();
+    }
+    let actual = flat_f32(&result);
+    assert!(
+        actual
+            .iter()
+            .zip(expected.iter())
+            .all(|(actual, expected)| (actual - expected).abs() < 1e-6)
+    );
+}
+
 #[cfg(all(feature = "cuda", aarambh_cuda_kernels))]
 mod cuda_tests {
     use super::*;
@@ -238,5 +288,36 @@ mod cuda_tests {
                 &expected.to_device(&Device::Cpu).unwrap()
             ) < 1e-4
         );
+    }
+
+    #[test]
+    fn cuda_gated_delta_matches_cpu_kernel() {
+        let cpu = Device::Cpu;
+        let cuda = Device::new_cuda(0).unwrap();
+        let dk = 4;
+        let dv = 8;
+        let packed_cpu = Tensor::from_vec(
+            patterned_values(2 * 3 * (dk * 2 + dv + 2), 0.01),
+            (2, 3, dk * 2 + dv + 2),
+            &cpu,
+        )
+        .unwrap();
+        let state_cpu = Tensor::from_vec(
+            patterned_values(2 * 3 * dk * dv, 0.02),
+            (2, 3, dk, dv),
+            &cpu,
+        )
+        .unwrap();
+        let expected = gated_delta_recurrent(&packed_cpu, &state_cpu, dk, dv).unwrap();
+        let actual = gated_delta_recurrent(
+            &packed_cpu.to_device(&cuda).unwrap(),
+            &state_cpu.to_device(&cuda).unwrap(),
+            dk,
+            dv,
+        )
+        .unwrap()
+        .to_device(&cpu)
+        .unwrap();
+        assert!(max_abs_diff(&actual, &expected) < 1e-5);
     }
 }

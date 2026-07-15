@@ -62,7 +62,7 @@ pub fn save_gguf(model: &AarambhModel, format: GgufFormat, path: impl AsRef<Path
         write_string(&mut writer, &name)?;
         let shape = tensor.dims().to_vec();
         write_shape(&mut writer, &shape)?;
-        let (encoding, payload) = encode_tensor(&tensor, format)?;
+        let (encoding, payload) = encode_tensor(&name, &tensor, format)?;
         writer.write_all(&[encoding as u8])?;
         write_u64(&mut writer, payload.len() as u64)?;
         writer.write_all(&payload)?;
@@ -130,8 +130,12 @@ pub fn load_gguf_tensors(
     Ok((metadata.config, tensors))
 }
 
-fn encode_tensor(tensor: &Tensor, format: GgufFormat) -> Result<(TensorEncoding, Vec<u8>)> {
-    if tensor.dims().len() < 2 {
+fn encode_tensor(
+    name: &str,
+    tensor: &Tensor,
+    format: GgufFormat,
+) -> Result<(TensorEncoding, Vec<u8>)> {
+    if tensor.dims().len() != 2 || name.contains("_conv.") {
         return Ok((TensorEncoding::F32, encode_f32_tensor(tensor)?));
     }
     match format {

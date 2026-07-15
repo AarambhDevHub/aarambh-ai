@@ -8,8 +8,8 @@ use candle_core::{DType, Device};
 
 use crate::report::{Scorecard, TaskScore};
 use crate::tasks::{
-    Gsm8kSubsetTask, HellaSwagTask, HumanEvalLiteTask, ImageCaptionTask, MmluLiteTask, PplTask,
-    PreferenceTask, ToolCallingTask, VqaTask,
+    AssociativeRecallTask, Gsm8kSubsetTask, HellaSwagTask, HumanEvalLiteTask, ImageCaptionTask,
+    MmluLiteTask, PplTask, PreferenceTask, ToolCallingTask, VqaTask,
 };
 
 /// Evaluation run configuration.
@@ -171,9 +171,12 @@ fn selected_tasks(selectors: &[String], allow_code_exec: bool) -> Result<Vec<Box
             "tool-calling" | "tool_calling" | "function-calling" | "function_calling" => {
                 tasks.push(Box::new(ToolCallingTask));
             }
+            "associative-recall" | "associative_recall" | "assoc-recall" | "assoc_recall" => {
+                tasks.push(Box::new(AssociativeRecallTask));
+            }
             other => {
                 return Err(AarambhError::Config(format!(
-                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,humaneval,preference,image-caption,vqa,tool-calling,all"
+                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,humaneval,preference,image-caption,vqa,tool-calling,associative-recall,all"
                 )));
             }
         }

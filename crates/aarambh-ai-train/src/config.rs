@@ -45,6 +45,10 @@ pub struct TrainingRunConfig {
     pub shuffle: bool,
     /// Whether to resume from the latest checkpoint.
     pub resume: bool,
+    /// Optional dense v2 SafeTensors checkpoint to retrofit into a hybrid model.
+    pub retrofit_from: Option<PathBuf>,
+    /// Learning-rate multiplier applied during hybrid retrofit training.
+    pub retrofit_lr_scale: f64,
     /// Device selector string such as `cpu` or `cuda:0`.
     pub device: String,
     /// Dtype selector string such as `f32`, `f16`, or `bf16`.
@@ -71,6 +75,8 @@ impl Default for TrainingRunConfig {
             validation_split: 0.05,
             shuffle: true,
             resume: false,
+            retrofit_from: None,
+            retrofit_lr_scale: 0.1,
             device: "cpu".to_string(),
             dtype: "f32".to_string(),
             model: ModelConfig::tiny(),
@@ -146,6 +152,24 @@ impl TrainingRunConfig {
         }
         if self.vocab_size == 0 {
             return Err(AarambhError::Config("vocab_size must be non-zero".into()));
+        }
+        if self.resume && self.retrofit_from.is_some() {
+            return Err(AarambhError::Config(
+                "resume and retrofit_from cannot be enabled together".into(),
+            ));
+        }
+        if self.retrofit_from.is_some() && self.model.attention_schedule.is_none() {
+            return Err(AarambhError::Config(
+                "retrofit_from requires model.attention_schedule".into(),
+            ));
+        }
+        if !(0.0..=1.0).contains(&self.retrofit_lr_scale)
+            || self.retrofit_lr_scale == 0.0
+            || !self.retrofit_lr_scale.is_finite()
+        {
+            return Err(AarambhError::Config(
+                "retrofit_lr_scale must be finite and in (0, 1]".into(),
+            ));
         }
         let device = self.device()?;
         self.dtype_for_device(&device)?;
@@ -280,15 +304,30 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
         distributed_config.as_ref(),
     );
 
+    let mut train_config = config.train.clone();
+    if config.retrofit_from.is_some() {
+        train_config.lr *= config.retrofit_lr_scale;
+    }
     let mut trainer = Trainer::new_with_distributed(
         model_config,
-        config.train.clone(),
+        train_config,
         train_loader,
         val_loader,
         candle_device,
         dtype,
         distributed_context,
     )?;
+    if let Some(path) = &config.retrofit_from {
+        let report = trainer.load_retrofit_checkpoint(path, dtype)?;
+        if trainer.is_rank0() {
+            println!(
+                "hybrid retrofit: loaded={} initialized_deltanet={} lr_scale={:.3}",
+                report.loaded_tensors,
+                report.initialized_deltanet_tensors,
+                config.retrofit_lr_scale
+            );
+        }
+    }
     if config.resume && trainer.load_latest_checkpoint()? && trainer.is_rank0() {
         println!("resumed checkpoint at step={}", trainer.state().step);
     }
@@ -470,6 +509,7 @@ fn build_loaders(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aarambh_ai_model::AarambhModel;
 
     #[test]
     fn default_config_uses_architecture_adamw_beta2() {
@@ -533,5 +573,24 @@ mod tests {
         };
         let err = config.validate().unwrap_err().to_string();
         assert!(err.contains("train.max_steps"), "{err}");
+    }
+
+    #[test]
+    fn phase29_hybrid_configs_parse_and_validate() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for name in [
+            "gated_deltanet_smoke.toml",
+            "wikitext103_hybrid_cuda_smoke.toml",
+            "wikitext103_medium_hybrid.toml",
+            "wikitext103_large_hybrid.toml",
+        ] {
+            let config = TrainingRunConfig::from_toml(workspace.join("configs").join(name))
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            config
+                .validate()
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            AarambhModel::validate_config(&config.model)
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+        }
     }
 }

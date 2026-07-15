@@ -243,6 +243,8 @@ impl SpeculativeEngine {
             let proposal_count = self.config.num_draft_tokens.min(remaining);
             let committed_len = prompt_ids.len() + output.token_ids.len();
             let target_base_len = target_cache.seqlen();
+            let mut target_snapshot = Some(target_cache.snapshot());
+            let mut draft_snapshot = Some(draft_cache.snapshot());
             debug_assert_eq!(
                 target_base_len + usize::from(pending_target_token.is_some()),
                 committed_len
@@ -293,7 +295,8 @@ impl SpeculativeEngine {
             }
             target_input_ids.extend(proposals.iter().map(|proposal| proposal.token_id));
             let target_input_len = target_input_ids.len();
-            let target_input = Tensor::from_vec(target_input_ids, (1, target_input_len), device)?;
+            let target_input =
+                Tensor::from_vec(target_input_ids.clone(), (1, target_input_len), device)?;
             let verified = self.target.model().forward_with_cache(
                 &target_input,
                 target_base_len,
@@ -368,8 +371,43 @@ impl SpeculativeEngine {
                     config.sampler.sample_probabilities(&residual)?
                 };
                 let accepted_before = index;
-                target_cache.truncate(committed_len + accepted_before)?;
-                draft_cache.truncate(committed_len + accepted_before)?;
+                target_cache.restore(
+                    target_snapshot
+                        .take()
+                        .expect("speculative target snapshot is available"),
+                );
+                draft_cache.restore(
+                    draft_snapshot
+                        .take()
+                        .expect("speculative draft snapshot is available"),
+                );
+
+                let target_replay_len = usize::from(has_pending) + accepted_before;
+                if target_replay_len > 0 {
+                    let replay = Tensor::from_vec(
+                        target_input_ids[..target_replay_len].to_vec(),
+                        (1, target_replay_len),
+                        device,
+                    )?;
+                    let _ = self.target.model().forward_with_cache(
+                        &replay,
+                        target_base_len,
+                        target_cache.layers_mut(),
+                    )?;
+                }
+                if accepted_before > 0 {
+                    let accepted_ids = proposals[..accepted_before]
+                        .iter()
+                        .map(|proposal| proposal.token_id)
+                        .collect::<Vec<_>>();
+                    let replay = Tensor::from_vec(accepted_ids, (1, accepted_before), device)?;
+                    let _ = self.draft.model().forward_with_cache(
+                        &replay,
+                        committed_len,
+                        draft_cache.layers_mut(),
+                    )?;
+                    stats.draft_decode_forwards += 1;
+                }
                 if replacement == eos && controller.eos_terminates() {
                     finish_reason = FinishReason::EosToken;
                     break 'generation;
@@ -827,6 +865,7 @@ mod tests {
             rope_theta: 10000.0,
             rope_scaling: None,
             moe: None,
+            attention_schedule: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
