@@ -17,6 +17,7 @@ pub use config::MoeConfig;
 pub use config::RopeScalingConfig;
 pub use config::RopeScalingMethod;
 pub use config::TrainConfig;
+pub use config::{AttentionKind, GatedDeltaNetConfig, HybridAttentionSchedule};
 pub use device::Device;
 pub use dtype::DType;
 pub use dtype::Precision;

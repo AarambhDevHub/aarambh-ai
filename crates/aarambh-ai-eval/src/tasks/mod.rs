@@ -4,6 +4,8 @@ use std::path::Path;
 use aarambh_ai_core::{AarambhError, Result};
 use serde::de::DeserializeOwned;
 
+/// Associative key-value recall task.
+pub mod associative_recall;
 /// GSM8K subset task.
 pub mod gsm8k_subset;
 /// HellaSwag task.
@@ -23,6 +25,7 @@ pub mod tool_calling;
 /// Vision-question-answering task.
 pub mod vqa;
 
+pub use associative_recall::AssociativeRecallTask;
 pub use gsm8k_subset::Gsm8kSubsetTask;
 pub use hellaswag::HellaSwagTask;
 pub use humaneval_lite::HumanEvalLiteTask;

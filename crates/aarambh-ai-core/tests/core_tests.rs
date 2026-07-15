@@ -41,3 +41,15 @@ fn default_train_config_beta2_is_correct() {
         cfg.beta2
     );
 }
+
+#[test]
+fn hybrid_schedule_resolves_phase29_dimensions() {
+    let schedule = HybridAttentionSchedule::default();
+    let resolved = schedule.validate(8, 384, 6).unwrap();
+    assert_eq!(resolved.n_heads, 3);
+    assert_eq!(resolved.key_head_dim, 96);
+    assert_eq!(resolved.value_head_dim, 192);
+    assert_eq!(schedule.kind_for_layer(0), AttentionKind::Full);
+    assert_eq!(schedule.kind_for_layer(1), AttentionKind::GatedDeltaNet);
+    assert_eq!(schedule.kind_for_layer(4), AttentionKind::Full);
+}

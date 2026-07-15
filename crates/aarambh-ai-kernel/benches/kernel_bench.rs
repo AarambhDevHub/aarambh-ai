@@ -1,5 +1,6 @@
 use aarambh_ai_kernel::cpu::parallel_attn::{cpu_parallel_attn, cpu_sequential_attn};
 use aarambh_ai_kernel::cpu::simd_norm::cpu_rms_norm_simd;
+use aarambh_ai_kernel::gated_delta_recurrent;
 use candle_core::{Device, Tensor};
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 
@@ -90,5 +91,38 @@ fn bench_attention(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_rms_norm, bench_attention);
+fn bench_gated_delta(c: &mut Criterion) {
+    let device = Device::Cpu;
+    let batch = 2;
+    let heads = 6;
+    let key_dim = 64;
+    let value_dim = 128;
+    let packed_width = key_dim * 2 + value_dim + 2;
+    let packed = Tensor::from_vec(
+        patterned_values(batch * heads * packed_width, 0.005),
+        (batch, heads, packed_width),
+        &device,
+    )
+    .unwrap();
+    let state = Tensor::zeros(
+        (batch, heads, key_dim, value_dim),
+        candle_core::DType::F32,
+        &device,
+    )
+    .unwrap();
+
+    c.bench_function("gated_delta/recurrent_token", |b| {
+        b.iter(|| {
+            gated_delta_recurrent(
+                black_box(&packed),
+                black_box(&state),
+                black_box(key_dim),
+                black_box(value_dim),
+            )
+            .unwrap()
+        })
+    });
+}
+
+criterion_group!(benches, bench_rms_norm, bench_attention, bench_gated_delta);
 criterion_main!(benches);

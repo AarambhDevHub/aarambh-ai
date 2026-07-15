@@ -20,7 +20,7 @@ impl RMSNorm {
 
     /// Run training RMSNorm through Candle.
     pub fn forward_train(&self, x: &Tensor) -> Result<Tensor> {
-        candle_nn::ops::rms_norm(x, &self.weight, self.eps)
+        candle_nn::ops::rms_norm_slow(x, &self.weight, self.eps)
     }
 
     /// Return the normalization weight tensor.

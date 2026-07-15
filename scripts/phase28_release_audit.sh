@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-EXPECTED_VERSION="2.0.0"
+EXPECTED_VERSION="${AARAMBH_EXPECTED_VERSION:-}"
 EXPECTED_PACKAGES=17
 
 command -v jq >/dev/null 2>&1 || {
@@ -27,6 +27,16 @@ package_count="$(jq '.packages | length' <<<"$metadata")"
 if [[ "$package_count" -ne "$EXPECTED_PACKAGES" ]]; then
   echo "expected $EXPECTED_PACKAGES workspace packages, found $package_count" >&2
   exit 1
+fi
+
+if [[ -z "$EXPECTED_VERSION" ]]; then
+  version_count="$(jq '[.packages[].version] | unique | length' <<<"$metadata")"
+  if [[ "$version_count" -ne 1 ]]; then
+    echo "workspace packages must use one shared version:" >&2
+    jq -r '.packages[] | "\(.name): version=\(.version)"' <<<"$metadata" >&2
+    exit 1
+  fi
+  EXPECTED_VERSION="$(jq -r '.packages[0].version' <<<"$metadata")"
 fi
 
 invalid_packages="$(

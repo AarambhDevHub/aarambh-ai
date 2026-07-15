@@ -1,5 +1,85 @@
 use candle_core::{Result, Tensor};
 
+use crate::gated_deltanet::DeltaNetState;
+
+#[derive(Debug, Clone)]
+/// Per-layer cache for either full attention or Gated DeltaNet.
+pub enum HybridKvCache {
+    /// Growing key/value cache used by a full-attention layer.
+    Full(KVCache),
+    /// Fixed-size recurrent state used by a Gated DeltaNet layer.
+    Linear(DeltaNetState),
+}
+
+impl HybridKvCache {
+    /// Remove all cached sequence state.
+    pub fn clear(&mut self) {
+        match self {
+            Self::Full(cache) => cache.clear(),
+            Self::Linear(state) => state.clear(),
+        }
+    }
+
+    /// Return the number of cached tokens.
+    pub fn seq_len(&self) -> usize {
+        match self {
+            Self::Full(cache) => cache.seq_len(),
+            Self::Linear(state) => state.seq_len(),
+        }
+    }
+
+    /// Truncate a full-attention cache.
+    ///
+    /// Recurrent caches cannot be reversed and must instead be restored from
+    /// a transaction snapshot.
+    pub fn truncate(&mut self, new_len: usize) -> Result<()> {
+        match self {
+            Self::Full(cache) => cache.truncate(new_len),
+            Self::Linear(state) if state.seq_len() == new_len => Ok(()),
+            Self::Linear(state) if new_len == 0 => {
+                state.clear();
+                Ok(())
+            }
+            Self::Linear(state) => Err(candle_core::Error::msg(format!(
+                "cannot truncate Gated DeltaNet state from {} to {new_len}; restore a cache snapshot",
+                state.seq_len()
+            ))),
+        }
+    }
+
+    /// Return the full-attention cache when this layer uses GQA.
+    pub fn as_full_mut(&mut self) -> Option<&mut KVCache> {
+        match self {
+            Self::Full(cache) => Some(cache),
+            Self::Linear(_) => None,
+        }
+    }
+
+    /// Return the recurrent state when this layer uses Gated DeltaNet.
+    pub fn as_linear_mut(&mut self) -> Option<&mut DeltaNetState> {
+        match self {
+            Self::Full(_) => None,
+            Self::Linear(state) => Some(state),
+        }
+    }
+
+    /// Return the recurrent state when this layer uses Gated DeltaNet.
+    pub fn as_linear(&self) -> Option<&DeltaNetState> {
+        match self {
+            Self::Full(_) => None,
+            Self::Linear(state) => Some(state),
+        }
+    }
+
+    /// Return preallocated full-attention capacity, or `None` for linear state.
+    pub fn capacity(&self) -> Option<usize> {
+        match self {
+            Self::Full(cache) => cache.capacity(),
+            Self::Linear(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 /// Key/value cache for autoregressive attention.
 pub struct KVCache {

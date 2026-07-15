@@ -16,6 +16,8 @@ pub enum KernelPath {
     CudaFlashAttention,
     /// CUDA fused RMSNorm kernel.
     CudaFusedRmsNorm,
+    /// CUDA fused Gated DeltaNet recurrent update.
+    CudaGatedDelta,
     /// Candle fallback path.
     CandleFallback,
 }
@@ -29,6 +31,26 @@ pub enum AttentionMaskKind {
     Causal,
     /// Additive attention bias mask.
     Additive,
+}
+
+/// Return the recurrent Gated DeltaNet kernel path for packed input and state tensors.
+pub fn gated_delta_path(packed: &Tensor, state: &Tensor) -> KernelPath {
+    if packed.device().same_device(state.device())
+        && packed.device().is_cpu()
+        && packed.dtype() == DType::F32
+        && state.dtype() == DType::F32
+    {
+        KernelPath::CpuSimd
+    } else if cfg!(all(feature = "cuda", aarambh_cuda_kernels))
+        && packed.device().same_device(state.device())
+        && packed.device().is_cuda()
+        && packed.dtype() == DType::F32
+        && state.dtype() == DType::F32
+    {
+        KernelPath::CudaGatedDelta
+    } else {
+        KernelPath::CandleFallback
+    }
 }
 
 /// Run RMSNorm with the fastest available kernel and fall back to Candle.

@@ -1,5 +1,40 @@
 # Changelog
 
+## [3.0.0-alpha.1] - 2026-07-15
+
+### Added
+
+- **Phase 29 Gated DeltaNet hybrid linear attention**
+  - Added configurable per-layer scheduling that keeps every Nth layer on the
+    existing GQA/RoPE path and converts the remaining layers to Gated DeltaNet.
+  - Added causal depthwise q/k/v convolutions, normalized q/k features,
+    learnable decay and delta-rule gates, output gating, and fixed recurrent
+    state with constant decode memory.
+  - Added CPU-parallel and CUDA recurrent-update kernels with portable Candle
+    fallback behavior and a Criterion recurrence benchmark.
+  - Added hybrid cache snapshots for exact speculative rollback and independent
+    batched decode state.
+  - Added dense v2 SafeTensors retrofit loading, reduced-LR continued training,
+    hybrid GGUF handling, calibration capture, and LoRA/QLoRA/DoRA/QDoRA targets.
+  - Added CPU/CUDA smoke configs, Medium/Large 16K/32K retrofit configs,
+    associative-recall evaluation data, and long-context benchmark scripts.
+
+### Changed
+
+- Training RMSNorm now uses Candle's differentiable implementation; the prior
+  no-backward custom operation stopped gradients at normalization boundaries.
+- Inference, serving, speculative decoding, quantisation, adapter merging, and
+  checkpoint inspection now understand mixed full-attention/recurrent layers.
+- Workspace version is now `3.0.0-alpha.1`; v2.0.0 remains the production
+  source release while the v3 roadmap is implemented.
+
+### Verified
+
+- Full-sequence versus cached-token hybrid parity and constant recurrent-state size.
+- Dense and hybrid last-block gradient propagation, including Gated DeltaNet LoRA/DoRA adapters.
+- Partial checkpoint copy fidelity and hybrid GGUF round-trip behavior.
+- CPU scalar/kernel parity and optional CUDA/CPU recurrence parity.
+
 ## [2.0.0] - 2026-07-12
 
 ### Added

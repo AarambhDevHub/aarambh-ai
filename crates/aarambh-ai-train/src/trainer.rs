@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::Instant;
 
 use aarambh_ai_core::{AarambhError, Configurable, ModelConfig, Result, TrainConfig};
@@ -171,6 +172,23 @@ impl Trainer {
             }
             None => Ok(false),
         }
+    }
+
+    /// Load compatible v2 weights while retaining fresh Gated DeltaNet parameters.
+    pub fn load_retrofit_checkpoint(
+        &mut self,
+        path: impl AsRef<Path>,
+        dtype: DType,
+    ) -> Result<aarambh_ai_weights::RetrofitLoadReport> {
+        let report = aarambh_ai_weights::load_retrofit_into_varmap(
+            path,
+            self.model.config(),
+            &mut self.varmap,
+            &self.device,
+            dtype,
+        )?;
+        self.optimizer = AdamW::from_varmap(&self.varmap, AdamWConfig::from(&self.train_config))?;
+        Ok(report)
     }
 
     /// Replace train/validation loaders while preserving model, optimizer, and schedule state.
@@ -541,6 +559,7 @@ mod tests {
             rope_theta: 10000.0,
             rope_scaling: None,
             moe: None,
+            attention_schedule: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -625,6 +644,7 @@ mod tests {
                 aux_loss_weight: 0.01,
                 every_n_layers: 2,
             }),
+            attention_schedule: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };

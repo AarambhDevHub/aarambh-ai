@@ -167,6 +167,151 @@ impl MoeConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+/// Token-mixing implementation selected for one decoder layer.
+pub enum AttentionKind {
+    /// Existing grouped-query causal attention with RoPE.
+    #[default]
+    Full,
+    /// Fixed-state Gated DeltaNet linear attention.
+    GatedDeltaNet,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+/// Shape and execution settings for Gated DeltaNet layers.
+pub struct GatedDeltaNetConfig {
+    /// Number of recurrent state heads, or zero to derive half the GQA head count.
+    pub n_heads: usize,
+    /// Key width per recurrent head, or zero to derive a parameter-balanced width.
+    pub key_head_dim: usize,
+    /// Value width per recurrent head, or zero to use twice the resolved key width.
+    pub value_head_dim: usize,
+    /// Width of the causal depthwise short convolution.
+    pub conv_kernel_size: usize,
+    /// Sequence chunk size used by the training and prefill implementation.
+    pub chunk_size: usize,
+}
+
+impl Default for GatedDeltaNetConfig {
+    fn default() -> Self {
+        Self {
+            n_heads: 0,
+            key_head_dim: 0,
+            value_head_dim: 0,
+            conv_kernel_size: 4,
+            chunk_size: 64,
+        }
+    }
+}
+
+impl GatedDeltaNetConfig {
+    /// Resolve automatic dimensions against a transformer model.
+    pub fn resolve(&self, hidden_dim: usize, transformer_heads: usize) -> Result<Self> {
+        let n_heads = if self.n_heads == 0 {
+            (transformer_heads / 2).max(1)
+        } else {
+            self.n_heads
+        };
+        let key_head_dim = if self.key_head_dim == 0 {
+            hidden_dim
+                .checked_mul(3)
+                .and_then(|value| value.checked_div(4 * n_heads))
+                .unwrap_or(0)
+        } else {
+            self.key_head_dim
+        };
+        let value_head_dim = if self.value_head_dim == 0 {
+            key_head_dim.saturating_mul(2)
+        } else {
+            self.value_head_dim
+        };
+        let resolved = Self {
+            n_heads,
+            key_head_dim,
+            value_head_dim,
+            conv_kernel_size: self.conv_kernel_size,
+            chunk_size: self.chunk_size,
+        };
+        resolved.validate()?;
+        Ok(resolved)
+    }
+
+    /// Validate resolved Gated DeltaNet dimensions and execution settings.
+    pub fn validate(&self) -> Result<()> {
+        if self.n_heads == 0 || self.key_head_dim == 0 || self.value_head_dim == 0 {
+            return Err(AarambhError::Config(
+                "gated_deltanet head counts and dimensions must resolve to non-zero values".into(),
+            ));
+        }
+        if self.conv_kernel_size < 2 {
+            return Err(AarambhError::Config(
+                "gated_deltanet.conv_kernel_size must be at least 2".into(),
+            ));
+        }
+        if self.chunk_size < 16 || self.chunk_size > 256 || !self.chunk_size.is_power_of_two() {
+            return Err(AarambhError::Config(
+                "gated_deltanet.chunk_size must be a power of two in 16..=256".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+/// Per-layer schedule for hybrid full and Gated DeltaNet attention.
+pub struct HybridAttentionSchedule {
+    /// Keep every Nth zero-based layer as full attention; other layers use Gated DeltaNet.
+    pub full_attention_every_n: usize,
+    /// Gated DeltaNet shape and execution settings.
+    pub gated_deltanet: GatedDeltaNetConfig,
+}
+
+impl Default for HybridAttentionSchedule {
+    fn default() -> Self {
+        Self {
+            full_attention_every_n: 4,
+            gated_deltanet: GatedDeltaNetConfig::default(),
+        }
+    }
+}
+
+impl HybridAttentionSchedule {
+    /// Return the token mixer selected for `layer_idx`.
+    pub fn kind_for_layer(&self, layer_idx: usize) -> AttentionKind {
+        if self.full_attention_every_n > 0 && layer_idx.is_multiple_of(self.full_attention_every_n)
+        {
+            AttentionKind::Full
+        } else {
+            AttentionKind::GatedDeltaNet
+        }
+    }
+
+    /// Validate this schedule and resolve its Gated DeltaNet dimensions.
+    pub fn validate(
+        &self,
+        n_layers: usize,
+        hidden_dim: usize,
+        transformer_heads: usize,
+    ) -> Result<GatedDeltaNetConfig> {
+        if self.full_attention_every_n == 0 {
+            return Err(AarambhError::Config(
+                "attention_schedule.full_attention_every_n must be non-zero".into(),
+            ));
+        }
+        if n_layers < 2
+            || !(0..n_layers).any(|idx| self.kind_for_layer(idx) == AttentionKind::GatedDeltaNet)
+        {
+            return Err(AarambhError::Config(
+                "attention_schedule must select at least one Gated DeltaNet layer".into(),
+            ));
+        }
+        self.gated_deltanet.resolve(hidden_dim, transformer_heads)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// Decoder-only transformer model shape and numerical defaults.
 pub struct ModelConfig {
@@ -192,6 +337,9 @@ pub struct ModelConfig {
     /// Optional Mixture-of-Experts FFN configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moe: Option<MoeConfig>,
+    /// Optional per-layer hybrid full/Gated DeltaNet attention schedule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention_schedule: Option<HybridAttentionSchedule>,
     /// RMSNorm epsilon.
     pub norm_eps: f64,
     /// Whether the output head shares weights with token embeddings.
@@ -212,6 +360,7 @@ impl ModelConfig {
             rope_theta: 10000.0,
             rope_scaling: None,
             moe: None,
+            attention_schedule: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -230,6 +379,7 @@ impl ModelConfig {
             rope_theta: 10000.0,
             rope_scaling: None,
             moe: None,
+            attention_schedule: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -248,6 +398,7 @@ impl ModelConfig {
             rope_theta: 500000.0,
             rope_scaling: None,
             moe: None,
+            attention_schedule: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -266,6 +417,7 @@ impl ModelConfig {
             rope_theta: 500000.0,
             rope_scaling: None,
             moe: None,
+            attention_schedule: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }

@@ -9,6 +9,8 @@ pub mod block;
 pub mod dispatch;
 /// SwiGLU feed-forward layer.
 pub mod ffn;
+/// Gated DeltaNet linear-attention layer and recurrent state.
+pub mod gated_deltanet;
 /// Training/inference KV cache helper.
 pub mod kvcache;
 /// Mixture-of-Experts feed-forward layer.
@@ -21,10 +23,11 @@ pub mod rope;
 pub mod rope_scaling;
 
 pub use attention::GroupedQueryAttention;
-pub use block::{FeedForwardLayer, TransformerBlock};
+pub use block::{FeedForwardLayer, TokenMixer, TransformerBlock};
 pub use dispatch::dense_weighted_dispatch;
 pub use ffn::SwiGluFfn;
-pub use kvcache::KVCache;
+pub use gated_deltanet::{DeltaNetForm, DeltaNetState, GatedDeltaNetLayer};
+pub use kvcache::{HybridKvCache, KVCache};
 pub use moe::{
     GatingOutput, MoeFfn, MoeForwardStats, load_balancing_loss_from_stats, top_k_gating,
 };

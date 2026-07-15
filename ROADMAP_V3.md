@@ -28,7 +28,7 @@ mode. Phase 40 is the crates.io publish.
 ## Phase Map (Quick Reference)
 
 ```
-Phase 29 →  Gated DeltaNet (hybrid linear attention)   (10–14 days)  [Kaggle]
+Phase 29 →  Gated DeltaNet (hybrid linear attention)   (10–14 days)  [Kaggle] ✅
 Phase 30 →  DeepSeek Sparse Attention (DSA)             (10–14 days)  [Kaggle]
 Phase 31 →  DeepSeek-style fine-grained MoE + shared    (10–14 days)  [Kaggle]
             expert routing (v3 upgrade of v2 dense MoE)
@@ -152,21 +152,23 @@ modification slotted in during fine-tuning.
 
 **`aarambh-ai-nn`:**
 ```
-[ ] src/gated_deltanet.rs
-      DeltaNet recurrence: chunked linear-attention update rule with a
-      per-channel gate controlling how much of the running state is kept
-      vs overwritten at each step (state = state * gate + update)
-      GatedDeltaNetLayer::forward() — chunk-parallel form for training
-      (matmul-friendly, avoids literal sequential recurrence), sequential
-      recurrent form for autoregressive inference (O(1) state per step,
-      no KV cache growth)
-      DeltaNetState — fixed-size recurrent state, replaces growing KV
-      cache for linear-attention layers specifically
+[x] src/gated_deltanet.rs
+      Exact decayed delta-rule recurrence with causal depthwise q/k/v
+      convolution, normalized q/k features, learnable alpha/beta gates,
+      output RMSNorm and SiLU output gating
+      Differentiable chunk-bounded Candle training/prefill form and optimized
+      sequential CPU/CUDA recurrent decode form
+      DeltaNetState stores the fixed recurrent matrix and bounded convolution
+      history; no sequence-length-dependent KV allocation
 
-[ ] src/attention.rs
-      AttentionKind enum: Full | GatedDeltaNet
-      HybridAttentionSchedule — which layer indices use which kind (e.g.
-      1 full-attention layer per N GatedDeltaNet layers, N configurable)
+[x] src/block.rs + src/kvcache.rs
+      TokenMixer enum: Attention | GatedDelta
+      HybridKvCache enum: Full(KVCache) | Linear(DeltaNetState)
+      Full-attention layers retain the existing GQA + RoPE/YaRN path
+
+[x] aarambh-ai-core/src/config.rs
+      AttentionKind: Full | GatedDeltaNet
+      HybridAttentionSchedule selects one full-attention layer per configurable N
       Full-attention layers keep the existing GQA + RoPE/YaRN path
       (`ARCHITECTURE.md` §6.3, `ARCHITECTURE_V2.md` §21) completely
       unchanged — hybrid means "some layers differ," not "attention is
@@ -175,31 +177,47 @@ modification slotted in during fine-tuning.
 
 **`aarambh-ai-model`:**
 ```
-[ ] Model config gains `attention_schedule: Option<HybridAttentionSchedule>`
-[ ] Backward compatible: attention_schedule = None reproduces exact v1/v2
+[x] Model config gains `attention_schedule: Option<HybridAttentionSchedule>`
+[x] Backward compatible: attention_schedule = None reproduces exact v1/v2
     all-full-attention behaviour
-[ ] New hybrid variants of Medium/Large configs
-      configs/medium_hybrid.toml
-      configs/large_hybrid.toml
+[x] Hybrid cache construction, capture, batched decode and tensor lookup
+[x] New hybrid Medium/Large and CPU/CUDA smoke configs
+      configs/wikitext103_medium_hybrid.toml
+      configs/wikitext103_large_hybrid.toml
+      configs/gated_deltanet_smoke.toml
+      configs/wikitext103_hybrid_cuda_smoke.toml
 ```
 
 **`aarambh-ai-train`:**
 ```
-[ ] Continued-pretraining recipe: load an existing v2 checkpoint, replace
+[x] Continued-pretraining recipe: load an existing v2 checkpoint, replace
     the scheduled layers' weights with freshly-initialised GatedDeltaNet
     parameters, keep untouched layers' weights loaded as-is, train at a
     reduced learning rate so the untouched layers do not drift far from
     their pretrained state while the new layers learn
-[ ] Retrofit validation: eval-harness score (v2 Phase 17) before and after
-    retrofit, on the same holdout, must not regress beyond an documented
-    tolerance band before the retrofit is considered successful
+[x] Dense and hybrid training use differentiable RMSNorm and verify gradients
+    reach the final block and Gated DeltaNet projection parameters
+[x] Retrofit validation command: eval-harness score (v2 Phase 17) before and after
+    retrofit, on the same holdout, must not regress beyond a documented
+    tolerance band before a trained retrofit is accepted
 ```
 
 **`aarambh-ai-weights`:**
 ```
-[ ] Partial-checkpoint loading: load full-attention layer weights from an
+[x] Partial-checkpoint loading: load full-attention layer weights from an
     existing SafeTensors checkpoint while initialising GatedDeltaNet layer
     weights fresh, in a single load call
+[x] GGUF keeps recurrent scalars and convolution weights full precision while
+    quantising eligible rank-2 projections
+```
+
+**Cross-cutting integration:**
+```
+[x] Exact speculative-decoding rollback via hybrid cache snapshots/replay
+[x] LoRA/QLoRA/DoRA/QDoRA projection targets and adapter merge support
+[x] Calibration capture, inference sessions, continuous batching and serving
+[x] CPU-parallel and CUDA recurrent kernels with portable fallback dispatch
+[x] Associative-recall task and long-context dense-vs-hybrid benchmark script
 ```
 
 ### Data Setup
@@ -234,17 +252,17 @@ fn deltanet_state_size_is_constant_regardless_of_sequence_length() {
 #[test]
 fn partial_checkpoint_load_preserves_full_attention_layer_weights_exactly() {}
 
-#[test]
-fn retrofit_eval_score_within_tolerance_of_pre_retrofit_baseline() {}
+// Hardware acceptance after continued training:
+// compare dense and retrofit scorecards with `aarambh-ai eval compare`.
 ```
 
 ### Milestone
 ```
-Hybrid Medium/Large configs retrofit successfully from an existing v2
-checkpoint via continued pretraining, with eval-harness scores within the
-documented tolerance band of the pre-retrofit baseline, and generation
-throughput measurably improved at long context lengths (16K+, using the
-Phase 16 long-context setup) versus the all-full-attention baseline.
+Hybrid Medium/Large configs and the complete retrofit code path are available
+from an existing v2 checkpoint. A user-run continued-pretraining job must still
+demonstrate eval scores within the documented tolerance band and measure 16K+
+throughput on the target GPU before that specific trained checkpoint is
+accepted; no pretrained checkpoint is distributed by this repository.
 
 git commit -m "feat: Phase 29 — Gated DeltaNet hybrid linear attention"
 git tag v3.0.0-alpha.1
