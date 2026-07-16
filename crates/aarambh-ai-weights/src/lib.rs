@@ -11,7 +11,7 @@ pub mod gguf;
 use aarambh_ai_core::{ModelConfig, Result};
 use aarambh_ai_model::AarambhModel;
 pub use aarambh_ai_quant::GgufFormat;
-use candle_core::{DType, Device};
+use candle_core::{DType, Device, Tensor};
 use candle_nn::{VarBuilder, VarMap};
 
 pub use convert::{HfArch, convert_hf, convert_hf_tensors, convert_hf_with_arch};
@@ -26,6 +26,19 @@ pub struct RetrofitLoadReport {
     pub initialized_deltanet_tensors: usize,
     /// Number of new DSA indexer tensors left at their fresh initialization.
     pub initialized_dsa_tensors: usize,
+    /// Number of coarse router tensors expanded across fine-grained children.
+    pub expanded_moe_router_tensors: usize,
+    /// Number of coarse expert tensors sharded into fine-grained children.
+    pub sharded_moe_expert_tensors: usize,
+    /// Number of new shared-expert tensors initialized by the retrofit.
+    pub initialized_shared_expert_tensors: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Options for a function-preserving coarse-to-fine MoE retrofit.
+pub struct MoeRetrofitOptions {
+    /// Number of experts selected by the source coarse router.
+    pub source_top_k: usize,
 }
 
 /// Save an Aarambh model as a safetensors checkpoint.
@@ -69,17 +82,77 @@ pub fn load_retrofit_into_varmap(
     device: &Device,
     dtype: DType,
 ) -> Result<RetrofitLoadReport> {
-    if cfg.attention_schedule.is_none() {
+    load_retrofit_into_varmap_with_moe(path, cfg, varmap, device, dtype, None)
+}
+
+/// Copy a checkpoint into a hybrid model and optionally expand a coarse MoE pool.
+pub fn load_retrofit_into_varmap_with_moe(
+    path: impl AsRef<Path>,
+    cfg: &ModelConfig,
+    varmap: &mut VarMap,
+    device: &Device,
+    dtype: DType,
+    moe_options: Option<MoeRetrofitOptions>,
+) -> Result<RetrofitLoadReport> {
+    if cfg.attention_schedule.is_none() && moe_options.is_none() {
         return Err(aarambh_ai_core::AarambhError::Config(
-            "retrofit loading requires model.attention_schedule".into(),
+            "retrofit loading requires model.attention_schedule or moe_retrofit options".into(),
         ));
+    }
+    if let Some(options) = moe_options {
+        validate_moe_retrofit(cfg, options)?;
     }
     let source = candle_core::safetensors::load(path.as_ref(), device)?;
     let mut loaded_tensors = 0usize;
     let mut initialized_deltanet_tensors = 0usize;
     let mut initialized_dsa_tensors = 0usize;
+    let mut expanded_moe_router_tensors = 0usize;
+    let mut sharded_moe_expert_tensors = 0usize;
+    let mut initialized_shared_expert_tensors = 0usize;
     let variables = varmap.data().lock().unwrap();
     for (name, variable) in variables.iter() {
+        if moe_options.is_some() {
+            if name.ends_with(".ffn.router.weight") {
+                let source_router = source.get(name).ok_or_else(|| {
+                    aarambh_ai_core::AarambhError::Checkpoint(format!(
+                        "MoE retrofit source is missing coarse router tensor {name}"
+                    ))
+                })?;
+                let expanded = expand_router(source_router, variable.as_tensor(), cfg, name)?;
+                variable.set(&expanded.to_dtype(dtype)?)?;
+                expanded_moe_router_tensors += 1;
+                continue;
+            }
+            if let Some((source_name, child_idx, projection)) = coarse_expert_source(name, cfg)? {
+                let source_weight = source.get(&source_name).ok_or_else(|| {
+                    aarambh_ai_core::AarambhError::Checkpoint(format!(
+                        "MoE retrofit source is missing coarse expert tensor {source_name} for {name}"
+                    ))
+                })?;
+                let sharded = shard_expert_weight(
+                    source_weight,
+                    variable.as_tensor(),
+                    cfg,
+                    child_idx,
+                    projection,
+                    name,
+                )?;
+                variable.set(&sharded.to_dtype(dtype)?)?;
+                sharded_moe_expert_tensors += 1;
+                continue;
+            }
+            if name.contains(".ffn.shared_experts.") && !source.contains_key(name) {
+                if name.ends_with(".w_down.weight") {
+                    variable.set(&Tensor::zeros(
+                        variable.shape(),
+                        variable.dtype(),
+                        variable.device(),
+                    )?)?;
+                }
+                initialized_shared_expert_tensors += 1;
+                continue;
+            }
+        }
         match source.get(name) {
             Some(value) => {
                 if value.dims() != variable.dims() {
@@ -115,7 +188,140 @@ pub fn load_retrofit_into_varmap(
         loaded_tensors,
         initialized_deltanet_tensors,
         initialized_dsa_tensors,
+        expanded_moe_router_tensors,
+        sharded_moe_expert_tensors,
+        initialized_shared_expert_tensors,
     })
+}
+
+fn validate_moe_retrofit(cfg: &ModelConfig, options: MoeRetrofitOptions) -> Result<()> {
+    let moe = cfg.moe.as_ref().ok_or_else(|| {
+        aarambh_ai_core::AarambhError::Config(
+            "moe_retrofit requires model.moe to be configured".into(),
+        )
+    })?;
+    if moe.fine_grained_factor <= 1 {
+        return Err(aarambh_ai_core::AarambhError::Config(
+            "moe_retrofit requires fine_grained_factor greater than one".into(),
+        ));
+    }
+    if options.source_top_k == 0 {
+        return Err(aarambh_ai_core::AarambhError::Config(
+            "moe_retrofit.source_top_k must be non-zero".into(),
+        ));
+    }
+    let expected_top_k = options
+        .source_top_k
+        .checked_mul(moe.fine_grained_factor)
+        .ok_or_else(|| {
+            aarambh_ai_core::AarambhError::Config(
+                "moe_retrofit source_top_k scaling overflows usize".into(),
+            )
+        })?;
+    if moe.top_k != expected_top_k {
+        return Err(aarambh_ai_core::AarambhError::Config(format!(
+            "function-preserving MoE retrofit requires target top_k={expected_top_k}, got {}",
+            moe.top_k
+        )));
+    }
+    Ok(())
+}
+
+fn expand_router(
+    source: &Tensor,
+    target: &Tensor,
+    cfg: &ModelConfig,
+    name: &str,
+) -> Result<Tensor> {
+    let moe = cfg.moe.as_ref().expect("validated MoE retrofit config");
+    let factor = moe.fine_grained_factor;
+    let (source_experts, source_hidden) = source.dims2()?;
+    let (target_experts, target_hidden) = target.dims2()?;
+    if source_experts != moe.num_experts
+        || target_experts != moe.routed_expert_count()?
+        || source_hidden != target_hidden
+    {
+        return Err(aarambh_ai_core::AarambhError::Checkpoint(format!(
+            "cannot expand router {name}: source {:?}, target {:?}, expected {} coarse groups and factor {factor}",
+            source.dims(),
+            target.dims(),
+            moe.num_experts
+        )));
+    }
+    Ok(source
+        .unsqueeze(1)?
+        .broadcast_as((source_experts, factor, source_hidden))?
+        .contiguous()?
+        .reshape((target_experts, target_hidden))?)
+}
+
+fn coarse_expert_source(
+    target_name: &str,
+    cfg: &ModelConfig,
+) -> Result<Option<(String, usize, &'static str)>> {
+    let Some((prefix, suffix)) = target_name.split_once(".ffn.experts.") else {
+        return Ok(None);
+    };
+    let Some((fine_idx, projection)) = suffix.split_once('.') else {
+        return Ok(None);
+    };
+    let projection = match projection {
+        "w_gate.weight" => "w_gate",
+        "w_up.weight" => "w_up",
+        "w_down.weight" => "w_down",
+        _ => return Ok(None),
+    };
+    let fine_idx = fine_idx.parse::<usize>().map_err(|err| {
+        aarambh_ai_core::AarambhError::Checkpoint(format!(
+            "invalid fine expert index in {target_name}: {err}"
+        ))
+    })?;
+    let moe = cfg.moe.as_ref().expect("validated MoE retrofit config");
+    if fine_idx >= moe.routed_expert_count()? {
+        return Err(aarambh_ai_core::AarambhError::Checkpoint(format!(
+            "fine expert index {fine_idx} exceeds configured routed pool"
+        )));
+    }
+    let coarse_idx = fine_idx / moe.fine_grained_factor;
+    let child_idx = fine_idx % moe.fine_grained_factor;
+    Ok(Some((
+        format!("{prefix}.ffn.experts.{coarse_idx}.{projection}.weight"),
+        child_idx,
+        projection,
+    )))
+}
+
+fn shard_expert_weight(
+    source: &Tensor,
+    target: &Tensor,
+    cfg: &ModelConfig,
+    child_idx: usize,
+    projection: &str,
+    target_name: &str,
+) -> Result<Tensor> {
+    let moe = cfg.moe.as_ref().expect("validated MoE retrofit config");
+    let fine_dim = moe.fine_grained_expert_dim()?;
+    let start = child_idx.checked_mul(fine_dim).ok_or_else(|| {
+        aarambh_ai_core::AarambhError::Checkpoint(
+            "fine expert channel offset overflows usize".into(),
+        )
+    })?;
+    let shard = match projection {
+        "w_gate" | "w_up" => source.narrow(0, start, fine_dim)?,
+        "w_down" => source
+            .narrow(1, start, fine_dim)?
+            .affine(moe.fine_grained_factor as f64, 0.0)?,
+        _ => unreachable!("projection was validated"),
+    };
+    if shard.dims() != target.dims() {
+        return Err(aarambh_ai_core::AarambhError::Checkpoint(format!(
+            "cannot shard expert tensor {target_name}: source {:?} produced {:?}, target {:?}",
+            source.dims(),
+            shard.dims(),
+            target.dims()
+        )));
+    }
+    Ok(shard)
 }
 
 /// Load either a safetensors or GGUF checkpoint using f32 parameters.

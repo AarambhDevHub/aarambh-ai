@@ -641,7 +641,7 @@ fn model_output_path(output: impl AsRef<Path>) -> PathBuf {
 fn reject_moe_adapters(model_config: &ModelConfig) -> Result<()> {
     if model_config.moe.is_some() {
         return Err(AarambhError::Config(
-            "LoRA/DoRA adapter training for MoE models is not supported in Phase 22; train the MoE base model directly or use a dense config".into(),
+            "LoRA/DoRA adapter training for MoE models is not supported; train the MoE base model directly or use a dense config".into(),
         ));
     }
     Ok(())

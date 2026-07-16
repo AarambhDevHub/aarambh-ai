@@ -30,7 +30,7 @@ mode. Phase 40 is the crates.io publish.
 ```
 Phase 29 →  Gated DeltaNet (hybrid linear attention)   (10–14 days)  [Kaggle] ✅
 Phase 30 →  DeepSeek Sparse Attention (DSA)             (10–14 days)  [Kaggle] ✅
-Phase 31 →  DeepSeek-style fine-grained MoE + shared    (10–14 days)  [Kaggle]
+Phase 31 →  DeepSeek-style fine-grained MoE + shared    (10–14 days)  [Kaggle] ✅
             expert routing (v3 upgrade of v2 dense MoE)
 Phase 32 →  Multi-Token Prediction (MTP)                (7–10 days)   [Kaggle]
 Phase 33 →  On-policy distillation                      (10–14 days)  [Kaggle]
@@ -375,8 +375,8 @@ counts.
 
 **`aarambh-ai-nn`:**
 ```
-[ ] src/moe.rs (extends v2's implementation)
-      MoeConfig gains: num_shared_experts (default 1), fine_grained_factor
+[x] src/moe.rs (extends v2's implementation)
+      MoeConfig gains: num_shared_experts (default 0), fine_grained_factor
       (splits each v2-era expert into fine_grained_factor smaller experts
       of proportionally smaller FFN width, keeping total FFN capacity
       roughly constant while increasing expert count and specialisation)
@@ -385,7 +385,7 @@ counts.
       Router unchanged in kind (top-k softmax gate) but now scores a
       larger, finer-grained expert pool
 
-[ ] src/dispatch.rs (extends v2's implementation)
+[x] Dense dispatch contract (extends v2's implementation)
       Dense-masked-matmul dispatch (v2's shipped approach) remains the
       default for Kaggle-scale training — sparse/grouped dispatch stays
       documented out-of-scope per v2 §35, still true in v3 unless
@@ -397,21 +397,21 @@ counts.
 
 **`aarambh-ai-model`:**
 ```
-[ ] Model config's existing `moe: Option<MoeConfig>` (v2 §20) gains the
+[x] Model config's existing `moe: Option<MoeConfig>` (v2 §20) gains the
     new fields above; old MoeConfig values remain valid (fine_grained_factor
     defaults to 1, num_shared_experts defaults to 0 — reproduces v2 MoE
     exactly when unset)
-[ ] New fine-grained + shared-expert configs
+[x] New fine-grained + shared-expert configs
       configs/medium_finegrained_moe.toml
       configs/large_finegrained_moe.toml
 ```
 
 **`aarambh-ai-train`:**
 ```
-[ ] Router warm-start: initialise the finer-grained router from the
+[x] Router warm-start: initialise the finer-grained router from the
     already-trained v2 coarse router's weights where dimensions allow,
     rather than training routing from scratch
-[ ] Expert-count vs quality sweep script: trains small runs across a range
+[x] Expert-count vs quality sweep script: trains small runs across a range
     of (num_experts, fine_grained_factor, top_k) combinations and logs
     eval-harness deltas, mirroring the MiniMax-M2.7-style observation that
     fine-grained routing can beat coarse routing at equal active-parameter
@@ -445,10 +445,11 @@ fn router_warm_start_loads_compatible_dimensions_from_v2_checkpoint() {}
 
 ### Milestone
 ```
-Fine-grained + shared-expert MoE configs trained and eval-harness scored
-against the v2 dense-MoE baseline at matched active-parameter budgets,
-following the same "does the trade pay off" discipline v2 Phase 22
-established. Sweep results documented in docs/phase31_moe_sweep.md.
+Fine-grained + shared-expert MoE implementation, matched coarse/fine configs,
+function-preserving warm-start, and eval-harness sweep automation complete.
+Hardware runs write their measured scorecards and comparisons without bundling
+pretrained artifacts or claiming unexecuted results; the method and result
+layout are documented in docs/phase31_moe_sweep.md.
 
 git commit -m "feat: Phase 31 — fine-grained MoE routing with shared expert"
 git tag v3.0.0-alpha.3

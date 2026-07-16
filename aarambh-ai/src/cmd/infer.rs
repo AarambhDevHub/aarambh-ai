@@ -578,6 +578,26 @@ fn print_generation_stats(
             stored_kv_bytes + index_bytes,
         );
     }
+    if let Some(moe) = &run_config.model.moe
+        && let (Ok(routed_experts), Ok(fine_dim), Ok(active_width)) = (
+            moe.routed_expert_count(),
+            moe.fine_grained_expert_dim(),
+            moe.active_routed_width(),
+        )
+    {
+        let moe_layers = (0..run_config.model.n_layers)
+            .filter(|layer| moe.applies_to_layer(*layer))
+            .count();
+        let expert_params = 3u128 * run_config.model.hidden_dim as u128 * fine_dim as u128;
+        let router_params = run_config.model.hidden_dim as u128 * routed_experts as u128;
+        let total_params_per_layer =
+            (routed_experts + moe.num_shared_experts) as u128 * expert_params + router_params;
+        let active_params_per_token = (moe.top_k + moe.num_shared_experts) as u128 * expert_params;
+        eprintln!(
+            "moe_stats layers={moe_layers} routed_experts={routed_experts} active_routed={} shared_experts={} fine_dim={fine_dim} active_width={active_width} params_per_moe_layer={total_params_per_layer} active_expert_params_per_token={active_params_per_token}",
+            moe.top_k, moe.num_shared_experts,
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

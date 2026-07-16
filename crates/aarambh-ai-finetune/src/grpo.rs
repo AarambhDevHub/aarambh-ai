@@ -684,7 +684,7 @@ pub fn run_grpo_from_config(config: GrpoRunConfig) -> Result<()> {
     model_config.vocab_size = tokenizer.vocab_size();
     if model_config.moe.is_some() {
         return Err(AarambhError::Config(
-            "GRPO LoRA training for MoE models is not supported in Phase 22; train the MoE base model directly or use a dense config".into(),
+            "GRPO LoRA training for MoE models is not supported; train the MoE base model directly or use a dense config".into(),
         ));
     }
 
