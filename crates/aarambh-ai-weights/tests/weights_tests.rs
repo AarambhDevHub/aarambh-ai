@@ -5,7 +5,8 @@ use aarambh_ai_core::{
 };
 use aarambh_ai_model::AarambhModel;
 use aarambh_ai_weights::{
-    GgufFormat, load_gguf, load_model, load_retrofit_into_varmap, save_gguf, save_model,
+    GgufFormat, MoeRetrofitOptions, load_gguf, load_model, load_retrofit_into_varmap,
+    load_retrofit_into_varmap_with_moe, save_gguf, save_model,
 };
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{VarBuilder, VarMap};
@@ -37,6 +38,22 @@ fn moe_mini_config() -> ModelConfig {
             expert_ffn_dim: 64,
             aux_loss_weight: 0.01,
             every_n_layers: 2,
+            ..MoeConfig::default()
+        }),
+        ..mini_config()
+    }
+}
+
+fn fine_moe_mini_config() -> ModelConfig {
+    ModelConfig {
+        moe: Some(MoeConfig {
+            num_experts: 4,
+            top_k: 4,
+            expert_ffn_dim: 64,
+            aux_loss_weight: 0.01,
+            every_n_layers: 2,
+            fine_grained_factor: 2,
+            num_shared_experts: 1,
         }),
         ..mini_config()
     }
@@ -209,6 +226,89 @@ fn moe_gguf_roundtrip_produces_logits() {
         loaded
             .get_weight("blocks.1.ffn.experts.0.w_gate.weight")
             .is_some()
+    );
+}
+
+#[test]
+fn fine_grained_moe_gguf_roundtrip_preserves_shared_experts() {
+    let device = Device::Cpu;
+    let cfg = fine_moe_mini_config();
+    let varmap = VarMap::new();
+    let model =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&varmap, DType::F32, &device)).unwrap();
+    let path = temp_gguf_path();
+    save_gguf(&model, GgufFormat::Q4KM, &path).unwrap();
+    let loaded = load_gguf(&path, &device).unwrap();
+    let _ = std::fs::remove_file(path);
+    let moe = loaded.config().moe.as_ref().unwrap();
+    assert_eq!(moe.fine_grained_factor, 2);
+    assert_eq!(moe.num_shared_experts, 1);
+    assert!(
+        loaded
+            .get_weight("blocks.1.ffn.shared_experts.0.w_gate.weight")
+            .is_some()
+    );
+    let ids = Tensor::from_vec(vec![1u32, 2, 3], (1, 3), &device).unwrap();
+    assert_eq!(loaded.forward(&ids).unwrap().dims(), [1, 3, 128]);
+}
+
+#[test]
+fn coarse_moe_retrofit_preserves_function_and_zero_starts_shared_output() {
+    let device = Device::Cpu;
+    let source_cfg = moe_mini_config();
+    let source_vars = VarMap::new();
+    let source = AarambhModel::new(
+        &source_cfg,
+        VarBuilder::from_varmap(&source_vars, DType::F32, &device),
+    )
+    .unwrap();
+    let path = temp_safetensors_path();
+    save_model(&source, &path).unwrap();
+
+    let target_cfg = fine_moe_mini_config();
+    let mut target_vars = VarMap::new();
+    let target = AarambhModel::new(
+        &target_cfg,
+        VarBuilder::from_varmap(&target_vars, DType::F32, &device),
+    )
+    .unwrap();
+    let report = load_retrofit_into_varmap_with_moe(
+        &path,
+        &target_cfg,
+        &mut target_vars,
+        &device,
+        DType::F32,
+        Some(MoeRetrofitOptions { source_top_k: 2 }),
+    )
+    .unwrap();
+    let _ = std::fs::remove_file(path);
+    assert_eq!(report.expanded_moe_router_tensors, 1);
+    assert_eq!(report.sharded_moe_expert_tensors, 24);
+    assert_eq!(report.initialized_shared_expert_tensors, 3);
+
+    let shared_down = target
+        .get_weight("blocks.1.ffn.shared_experts.0.w_down.weight")
+        .unwrap()
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    assert_eq!(shared_down, 0.0);
+
+    let ids = Tensor::from_vec(vec![1u32, 2, 3, 4], (1, 4), &device).unwrap();
+    let diff = (source.forward(&ids).unwrap() - target.forward(&ids).unwrap())
+        .unwrap()
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    assert!(
+        diff < 1e-5,
+        "coarse-to-fine retrofit logits differ by {diff}"
     );
 }
 

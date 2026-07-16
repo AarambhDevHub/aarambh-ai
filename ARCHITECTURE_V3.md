@@ -506,6 +506,38 @@ MoE versus dense — fine-grained routing is adopted only where the sweep
 shows it actually beats coarse routing at equal active-parameter cost,
 not assumed from the literature alone.
 
+### 40.6 Phase 31 implementation contract
+
+`MoeConfig::routed_expert_count` computes `num_experts ×
+fine_grained_factor`, while `fine_grained_expert_dim` requires the configured
+coarse `expert_ffn_dim` to divide exactly by the factor. The model constructs
+the router against that expanded pool and constructs every routed and shared
+SwiGLU with the divided width. The default factor `1` and zero shared experts
+produce exactly identical logits to the Phase 22 path.
+
+Dense dispatch remains the execution contract: all routed experts still run
+for every token. The implementation accumulates each weighted expert output
+immediately instead of stacking every expert result, reducing temporary output
+memory without pretending this is sparse dispatch. Shared outputs are summed
+after routed accumulation and are absent from router utilization and auxiliary
+loss statistics.
+
+Coarse-to-fine SafeTensors retrofit is function-preserving at initialization.
+Each coarse router row is repeated for its children; gate/up rows and down
+columns are partitioned by child; every child down projection is multiplied by
+the split factor so the expanded top-k weighted sum reconstructs the coarse
+output. New shared gate/up tensors keep their initialized values and shared
+down projections start at zero. Consequently, the shared path learns from the
+first update without perturbing the source checkpoint's initial function.
+
+The Medium and Large Phase 31 recipes use 8 coarse groups, factor 4, top-k 8,
+and one shared expert. Their fine widths are 424 and 832 respectively. The
+matched coarse source recipes use top-k 2, preserving routed active width when
+the target top-k is multiplied by the factor. `scripts/phase31_sweep_moe.sh`
+enforces scratch-only comparison runs and emits raw scorecards plus
+baseline-relative Markdown; repository documentation does not substitute
+unrun benchmark values for those artifacts.
+
 ---
 
 ## 41. Multi-Token Prediction (MTP)

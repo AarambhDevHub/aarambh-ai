@@ -93,7 +93,7 @@ impl OnlineGrpo {
         build.model_config.vocab_size = tokenizer.vocab_size();
         if build.model_config.moe.is_some() {
             return Err(AarambhError::Config(
-                "self-learning LoRA updates for MoE models are not supported in Phase 22; train the MoE base model directly or use a dense config".into(),
+                "self-learning LoRA updates for MoE models are not supported; train the MoE base model directly or use a dense config".into(),
             ));
         }
 

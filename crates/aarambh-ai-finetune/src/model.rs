@@ -34,7 +34,7 @@ impl LoraAarambhModel {
         AarambhModel::validate_config(config)?;
         if config.moe.is_some() {
             return Err(AarambhError::Config(
-                "LoRA for MoE models is not supported in Phase 22; train the MoE base model directly or use a dense config".into(),
+                "LoRA for MoE models is not supported; train the MoE base model directly or use a dense config".into(),
             ));
         }
         lora_config.validate()?;
@@ -845,6 +845,7 @@ mod tests {
                 expert_ffn_dim: 64,
                 aux_loss_weight: 0.01,
                 every_n_layers: 2,
+                ..MoeConfig::default()
             }),
             attention_schedule: None,
             dsa_config: None,

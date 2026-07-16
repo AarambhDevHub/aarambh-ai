@@ -31,7 +31,8 @@ pub use ffn::SwiGluFfn;
 pub use gated_deltanet::{DeltaNetForm, DeltaNetState, GatedDeltaNetLayer};
 pub use kvcache::{DsaKvCache, HybridKvCache, KVCache};
 pub use moe::{
-    GatingOutput, MoeFfn, MoeForwardStats, load_balancing_loss_from_stats, top_k_gating,
+    GatingOutput, MoeFfn, MoeForwardStats, SharedExpertPath, load_balancing_loss_from_stats,
+    top_k_gating,
 };
 pub use norm::RMSNorm;
 pub use rope::RopeCache;

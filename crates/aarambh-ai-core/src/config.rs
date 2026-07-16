@@ -100,16 +100,20 @@ impl RopeScalingConfig {
 #[serde(default)]
 /// Mixture-of-Experts feed-forward configuration.
 pub struct MoeConfig {
-    /// Number of independent feed-forward experts.
+    /// Number of coarse expert groups before fine-grained subdivision.
     pub num_experts: usize,
-    /// Number of experts selected per token.
+    /// Number of routed fine-grained experts selected per token.
     pub top_k: usize,
-    /// Intermediate width used inside each expert SwiGLU FFN.
+    /// Intermediate width of one coarse expert before subdivision.
     pub expert_ffn_dim: usize,
     /// Weight applied to the load-balancing auxiliary loss.
     pub aux_loss_weight: f64,
     /// Use MoE every Nth layer, selecting zero-based layers `N - 1, 2N - 1, ...`.
     pub every_n_layers: usize,
+    /// Number of fine experts created from each coarse expert group.
+    pub fine_grained_factor: usize,
+    /// Number of always-active fine-width shared experts.
+    pub num_shared_experts: usize,
 }
 
 impl Default for MoeConfig {
@@ -120,11 +124,53 @@ impl Default for MoeConfig {
             expert_ffn_dim: 0,
             aux_loss_weight: 0.01,
             every_n_layers: 2,
+            fine_grained_factor: 1,
+            num_shared_experts: 0,
         }
     }
 }
 
 impl MoeConfig {
+    /// Return the number of independently routed fine-grained experts.
+    pub fn routed_expert_count(&self) -> Result<usize> {
+        self.num_experts
+            .checked_mul(self.fine_grained_factor)
+            .ok_or_else(|| {
+                AarambhError::Config("moe.num_experts * fine_grained_factor overflows usize".into())
+            })
+    }
+
+    /// Return the intermediate width of one routed or shared fine expert.
+    pub fn fine_grained_expert_dim(&self) -> Result<usize> {
+        if self.fine_grained_factor == 0 {
+            return Err(AarambhError::Config(
+                "moe.fine_grained_factor must be non-zero".into(),
+            ));
+        }
+        if self.expert_ffn_dim == 0 || !self.expert_ffn_dim.is_multiple_of(self.fine_grained_factor)
+        {
+            return Err(AarambhError::Config(format!(
+                "moe.expert_ffn_dim {} must be non-zero and divisible by fine_grained_factor {}",
+                self.expert_ffn_dim, self.fine_grained_factor
+            )));
+        }
+        Ok(self.expert_ffn_dim / self.fine_grained_factor)
+    }
+
+    /// Return the summed routed intermediate width across the full expert pool.
+    pub fn routed_capacity_width(&self) -> Result<usize> {
+        self.routed_expert_count()?
+            .checked_mul(self.fine_grained_expert_dim()?)
+            .ok_or_else(|| AarambhError::Config("MoE routed capacity overflows usize".into()))
+    }
+
+    /// Return the routed intermediate width activated conceptually per token.
+    pub fn active_routed_width(&self) -> Result<usize> {
+        self.top_k
+            .checked_mul(self.fine_grained_expert_dim()?)
+            .ok_or_else(|| AarambhError::Config("MoE active width overflows usize".into()))
+    }
+
     /// Return true when the zero-based layer index should use an MoE FFN.
     pub fn applies_to_layer(&self, layer_idx: usize) -> bool {
         self.every_n_layers > 0 && (layer_idx + 1).is_multiple_of(self.every_n_layers)
@@ -137,16 +183,13 @@ impl MoeConfig {
                 "moe.num_experts must be at least 2".into(),
             ));
         }
-        if self.top_k == 0 || self.top_k > self.num_experts {
+        let routed_experts = self.routed_expert_count()?;
+        let _fine_dim = self.fine_grained_expert_dim()?;
+        if self.top_k == 0 || self.top_k > routed_experts {
             return Err(AarambhError::Config(format!(
-                "moe.top_k must be in 1..={} for num_experts={}",
-                self.num_experts, self.num_experts
+                "moe.top_k must be in 1..={routed_experts} for num_experts={} and fine_grained_factor={}",
+                self.num_experts, self.fine_grained_factor
             )));
-        }
-        if self.expert_ffn_dim == 0 {
-            return Err(AarambhError::Config(
-                "moe.expert_ffn_dim must be non-zero".into(),
-            ));
         }
         if self.aux_loss_weight < 0.0 || !self.aux_loss_weight.is_finite() {
             return Err(AarambhError::Config(
@@ -563,6 +606,56 @@ mod tests {
         };
         let err = cfg.validate(2).unwrap_err().to_string();
         assert!(err.contains("top_k"), "{err}");
+    }
+
+    #[test]
+    fn old_moe_json_defaults_to_phase22_behavior() {
+        let json = r#"{
+            "num_experts": 8,
+            "top_k": 2,
+            "expert_ffn_dim": 512,
+            "aux_loss_weight": 0.01,
+            "every_n_layers": 2
+        }"#;
+        let cfg: MoeConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.fine_grained_factor, 1);
+        assert_eq!(cfg.num_shared_experts, 0);
+        assert_eq!(cfg.routed_expert_count().unwrap(), 8);
+        assert_eq!(cfg.fine_grained_expert_dim().unwrap(), 512);
+        assert_eq!(cfg.active_routed_width().unwrap(), 1024);
+    }
+
+    #[test]
+    fn fine_grained_moe_conserves_routed_capacity_and_active_width() {
+        let coarse = MoeConfig {
+            num_experts: 8,
+            top_k: 2,
+            expert_ffn_dim: 512,
+            ..MoeConfig::default()
+        };
+        let fine = MoeConfig {
+            top_k: 8,
+            fine_grained_factor: 4,
+            num_shared_experts: 1,
+            ..coarse.clone()
+        };
+        assert_eq!(coarse.routed_capacity_width().unwrap(), 4096);
+        assert_eq!(fine.routed_capacity_width().unwrap(), 4096);
+        assert_eq!(coarse.active_routed_width().unwrap(), 1024);
+        assert_eq!(fine.active_routed_width().unwrap(), 1024);
+        assert_eq!(fine.routed_expert_count().unwrap(), 32);
+        assert_eq!(fine.fine_grained_expert_dim().unwrap(), 128);
+    }
+
+    #[test]
+    fn fine_grained_moe_requires_divisible_width() {
+        let cfg = MoeConfig {
+            expert_ffn_dim: 510,
+            fine_grained_factor: 4,
+            ..MoeConfig::default()
+        };
+        let err = cfg.validate(2).unwrap_err().to_string();
+        assert!(err.contains("divisible"), "{err}");
     }
 
     #[test]

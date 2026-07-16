@@ -55,6 +55,22 @@ fn moe_mini_config() -> ModelConfig {
             expert_ffn_dim: 64,
             aux_loss_weight: 0.01,
             every_n_layers: 2,
+            ..MoeConfig::default()
+        }),
+        ..mini_config()
+    }
+}
+
+fn fine_moe_mini_config() -> ModelConfig {
+    ModelConfig {
+        moe: Some(MoeConfig {
+            num_experts: 4,
+            top_k: 4,
+            expert_ffn_dim: 64,
+            aux_loss_weight: 0.01,
+            every_n_layers: 2,
+            fine_grained_factor: 2,
+            num_shared_experts: 1,
         }),
         ..mini_config()
     }
@@ -424,6 +440,73 @@ fn moe_tensor_names_use_router_and_expert_paths() {
             .is_some()
     );
     assert!(model.get_weight("blocks.1.ffn.w_gate.weight").is_none());
+}
+
+#[test]
+fn fine_grained_moe_uses_expanded_router_and_shared_tensor_namespace() {
+    let device = Device::Cpu;
+    let cfg = fine_moe_mini_config();
+    let varmap = VarMap::new();
+    let model =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&varmap, DType::F32, &device)).unwrap();
+    assert_eq!(
+        model
+            .get_weight("blocks.1.ffn.router.weight")
+            .unwrap()
+            .dims(),
+        [8, 64]
+    );
+    assert_eq!(
+        model
+            .get_weight("blocks.1.ffn.experts.7.w_gate.weight")
+            .unwrap()
+            .dims(),
+        [32, 64]
+    );
+    assert_eq!(
+        model
+            .get_weight("blocks.1.ffn.shared_experts.0.w_down.weight")
+            .unwrap()
+            .dims(),
+        [64, 32]
+    );
+    let ids = Tensor::from_vec(vec![1u32, 2, 3], (1, 3), &device).unwrap();
+    assert_eq!(model.forward(&ids).unwrap().dims(), [1, 3, 128]);
+    let capture = model.linear_inputs(&ids).unwrap();
+    assert!(capture.contains_key("blocks.1.ffn.shared_experts.0.w_gate.weight"));
+    assert!(capture.contains_key("blocks.1.ffn.shared_experts.0.w_down.weight"));
+}
+
+#[test]
+fn explicit_phase22_moe_defaults_produce_identical_logits() {
+    let device = Device::Cpu;
+    let cfg = moe_mini_config();
+    let explicit_cfg = ModelConfig {
+        moe: cfg.moe.as_ref().map(|moe| MoeConfig {
+            fine_grained_factor: 1,
+            num_shared_experts: 0,
+            ..moe.clone()
+        }),
+        ..cfg.clone()
+    };
+    let varmap = VarMap::new();
+    let model =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&varmap, DType::F32, &device)).unwrap();
+    let explicit = AarambhModel::new(
+        &explicit_cfg,
+        VarBuilder::from_varmap(&varmap, DType::F32, &device),
+    )
+    .unwrap();
+    let ids = Tensor::from_vec(vec![1u32, 2, 3], (1, 3), &device).unwrap();
+    let diff = (model.forward(&ids).unwrap() - explicit.forward(&ids).unwrap())
+        .unwrap()
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    assert_eq!(diff, 0.0);
 }
 
 #[test]

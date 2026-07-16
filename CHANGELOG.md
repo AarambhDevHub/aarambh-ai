@@ -1,5 +1,41 @@
 # Changelog
 
+## [3.0.0-alpha.3] - 2026-07-16
+
+### Added
+
+- **Phase 31 DeepSeek-style fine-grained MoE with shared experts**
+  - Added configurable coarse-expert subdivision with conserved routed
+    capacity, scaled top-k active width, and validation for exact expert-width
+    divisibility.
+  - Added always-active shared SwiGLU experts with independent checkpoint
+    namespaces, calibration capture, differentiable training, and exclusion
+    from routed load-balancing statistics.
+  - Added function-preserving coarse-to-fine SafeTensors retrofit: replicated
+    router rows, partitioned expert channels, scaled child down projections,
+    and zero-output shared-path initialization.
+  - Added matched coarse and fine-grained Medium/Large recipes, a combined CPU
+    smoke config, and an expert-count sweep that emits evaluation scorecards
+    and baseline-relative reports.
+
+### Changed
+
+- MoE dense dispatch now accumulates weighted expert outputs incrementally,
+  avoiding a stacked all-expert output tensor while retaining the documented
+  dense-compute behavior.
+- Training and inference diagnostics now report routed pool size, active routed
+  width, shared experts, fine expert width, utilization range, dead experts,
+  and active parameter estimates.
+- Workspace version is now `3.0.0-alpha.3`.
+
+### Verified
+
+- Exact Phase 22 default compatibility and unconditional shared-output
+  addition without auxiliary-loss contamination.
+- Shared-expert backward gradients, two-step fine-grained training, model
+  tensor/capture naming, and fine-grained GGUF round trips.
+- Coarse-to-fine retrofit output fidelity with a zero-start shared output path.
+
 ## [3.0.0-alpha.2] - 2026-07-16
 
 ### Added

@@ -4,7 +4,7 @@ use aarambh_ai_core::{AarambhError, AttentionKind, Configurable, Forward, ModelC
 use aarambh_ai_nn::{
     DeltaNetState, DsaAttention, DsaForwardStats, DsaKvCache, DsaTeacherOutput, FeedForwardLayer,
     GatedDeltaNetLayer, GroupedQueryAttention, HybridKvCache, KVCache, MoeFfn, MoeForwardStats,
-    RMSNorm, RopeCache, SwiGluFfn, TokenMixer, TransformerBlock,
+    RMSNorm, RopeCache, SharedExpertPath, SwiGluFfn, TokenMixer, TransformerBlock,
 };
 use candle_core::{DType, Tensor};
 use candle_nn::{Init, VarBuilder, linear_no_bias};
@@ -104,32 +104,28 @@ impl AarambhModel {
                 .filter(|moe| moe.applies_to_layer(layer_idx))
             {
                 Some(moe) => {
-                    let experts = (0..moe.num_experts)
+                    let routed_expert_count = moe.routed_expert_count()?;
+                    let expert_dim = moe.fine_grained_expert_dim()?;
+                    let experts = (0..routed_expert_count)
                         .map(|expert_idx| {
                             let expert_vb = ffn_vb.pp("experts").pp(expert_idx);
-                            Ok(SwiGluFfn::new(
-                                linear_no_bias(
-                                    cfg.hidden_dim,
-                                    moe.expert_ffn_dim,
-                                    expert_vb.pp("w_gate"),
-                                )?,
-                                linear_no_bias(
-                                    cfg.hidden_dim,
-                                    moe.expert_ffn_dim,
-                                    expert_vb.pp("w_up"),
-                                )?,
-                                linear_no_bias(
-                                    moe.expert_ffn_dim,
-                                    cfg.hidden_dim,
-                                    expert_vb.pp("w_down"),
-                                )?,
-                            ))
+                            build_swiglu(cfg.hidden_dim, expert_dim, expert_vb)
                         })
                         .collect::<Result<Vec<_>>>()?;
-                    FeedForwardLayer::Moe(MoeFfn::new(
+                    let shared_experts = (0..moe.num_shared_experts)
+                        .map(|expert_idx| {
+                            build_swiglu(
+                                cfg.hidden_dim,
+                                expert_dim,
+                                ffn_vb.pp("shared_experts").pp(expert_idx),
+                            )
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    FeedForwardLayer::Moe(MoeFfn::new_with_shared(
                         moe.clone(),
-                        linear_no_bias(cfg.hidden_dim, moe.num_experts, ffn_vb.pp("router"))?,
+                        linear_no_bias(cfg.hidden_dim, routed_expert_count, ffn_vb.pp("router"))?,
                         experts,
+                        SharedExpertPath::new(shared_experts),
                     ))
                 }
                 None => FeedForwardLayer::Dense(SwiGluFfn::new(
@@ -659,6 +655,21 @@ fn insert_ffn_tensors(
                     expert.w_down_weight().clone(),
                 );
             }
+            for (expert_idx, expert) in ffn.shared_experts().experts().iter().enumerate() {
+                let prefix = format!("blocks.{layer_idx}.ffn.shared_experts.{expert_idx}");
+                tensors.insert(
+                    format!("{prefix}.w_gate.weight"),
+                    expert.w_gate_weight().clone(),
+                );
+                tensors.insert(
+                    format!("{prefix}.w_up.weight"),
+                    expert.w_up_weight().clone(),
+                );
+                tensors.insert(
+                    format!("{prefix}.w_down.weight"),
+                    expert.w_down_weight().clone(),
+                );
+            }
         }
     }
 }
@@ -729,6 +740,14 @@ fn build_attention(cfg: &ModelConfig, block_vb: VarBuilder<'_>) -> Result<Groupe
     ))
 }
 
+fn build_swiglu(hidden_dim: usize, ffn_dim: usize, vb: VarBuilder<'_>) -> Result<SwiGluFfn> {
+    Ok(SwiGluFfn::new(
+        linear_no_bias(hidden_dim, ffn_dim, vb.pp("w_gate"))?,
+        linear_no_bias(hidden_dim, ffn_dim, vb.pp("w_up"))?,
+        linear_no_bias(ffn_dim, hidden_dim, vb.pp("w_down"))?,
+    ))
+}
+
 fn average_dsa_loss(teachers: &[DsaTeacherOutput]) -> Result<Option<Tensor>> {
     let Some(first) = teachers.first() else {
         return Ok(None);
@@ -795,9 +814,16 @@ fn build_gated_deltanet(
 
 fn get_moe_expert_weight<'a>(ffn: &'a FeedForwardLayer, suffix: &str) -> Option<&'a Tensor> {
     let ffn = ffn.as_moe()?;
-    let suffix = suffix.strip_prefix("ffn.experts.")?;
+    let (experts, suffix) = if let Some(suffix) = suffix.strip_prefix("ffn.experts.") {
+        (ffn.experts(), suffix)
+    } else {
+        (
+            ffn.shared_experts().experts(),
+            suffix.strip_prefix("ffn.shared_experts.")?,
+        )
+    };
     let (expert_idx, name) = suffix.split_once('.')?;
-    let expert = ffn.experts().get(expert_idx.parse::<usize>().ok()?)?;
+    let expert = experts.get(expert_idx.parse::<usize>().ok()?)?;
     match name {
         "w_gate.weight" => Some(expert.w_gate_weight()),
         "w_up.weight" => Some(expert.w_up_weight()),

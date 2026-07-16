@@ -198,7 +198,7 @@ impl DoraAarambhModel {
         AarambhModel::validate_config(config)?;
         if config.moe.is_some() {
             return Err(AarambhError::Config(
-                "DoRA for MoE models is not supported in Phase 22; train the MoE base model directly or use a dense config".into(),
+                "DoRA for MoE models is not supported; train the MoE base model directly or use a dense config".into(),
             ));
         }
         dora_config.validate()?;

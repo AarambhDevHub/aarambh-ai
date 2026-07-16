@@ -55,6 +55,20 @@ impl DsaTrainingConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+/// Function-preserving coarse-to-fine MoE retrofit settings.
+pub struct MoeRetrofitConfig {
+    /// Number of routed experts selected by the source coarse MoE model.
+    pub source_top_k: usize,
+}
+
+impl Default for MoeRetrofitConfig {
+    fn default() -> Self {
+        Self { source_top_k: 2 }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 /// One progressive context-length training stage.
 pub struct ContextScheduleStage {
     /// Sequence length used when rebuilding train and validation loaders.
@@ -81,7 +95,7 @@ pub struct TrainingRunConfig {
     pub shuffle: bool,
     /// Whether to resume from the latest checkpoint.
     pub resume: bool,
-    /// Optional dense v2 SafeTensors checkpoint to retrofit into a hybrid model.
+    /// Optional SafeTensors checkpoint to retrofit into the configured architecture.
     pub retrofit_from: Option<PathBuf>,
     /// Learning-rate multiplier applied during hybrid retrofit training.
     pub retrofit_lr_scale: f64,
@@ -101,6 +115,8 @@ pub struct TrainingRunConfig {
     pub vision: Option<VisionTrainingConfig>,
     /// DSA indexer teacher cadence and auxiliary-loss weight.
     pub dsa_training: DsaTrainingConfig,
+    /// Optional coarse-to-fine MoE retrofit contract.
+    pub moe_retrofit: Option<MoeRetrofitConfig>,
 }
 
 impl Default for TrainingRunConfig {
@@ -123,6 +139,7 @@ impl Default for TrainingRunConfig {
             context_schedule: Vec::new(),
             vision: None,
             dsa_training: DsaTrainingConfig::default(),
+            moe_retrofit: None,
         }
     }
 }
@@ -197,10 +214,46 @@ impl TrainingRunConfig {
                 "resume and retrofit_from cannot be enabled together".into(),
             ));
         }
-        if self.retrofit_from.is_some() && self.model.attention_schedule.is_none() {
+        if self.retrofit_from.is_some()
+            && self.model.attention_schedule.is_none()
+            && self.moe_retrofit.is_none()
+        {
             return Err(AarambhError::Config(
-                "retrofit_from requires model.attention_schedule".into(),
+                "retrofit_from requires model.attention_schedule or moe_retrofit".into(),
             ));
+        }
+        if let Some(moe_retrofit) = &self.moe_retrofit {
+            if self.retrofit_from.is_none() {
+                return Err(AarambhError::Config(
+                    "moe_retrofit requires retrofit_from".into(),
+                ));
+            }
+            let moe =
+                self.model.moe.as_ref().ok_or_else(|| {
+                    AarambhError::Config("moe_retrofit requires model.moe".into())
+                })?;
+            if moe.fine_grained_factor <= 1 {
+                return Err(AarambhError::Config(
+                    "moe_retrofit requires fine_grained_factor greater than one".into(),
+                ));
+            }
+            if moe_retrofit.source_top_k == 0 {
+                return Err(AarambhError::Config(
+                    "moe_retrofit.source_top_k must be non-zero".into(),
+                ));
+            }
+            let expected_top_k = moe_retrofit
+                .source_top_k
+                .checked_mul(moe.fine_grained_factor)
+                .ok_or_else(|| {
+                    AarambhError::Config("moe_retrofit top-k scaling overflows usize".into())
+                })?;
+            if moe.top_k != expected_top_k {
+                return Err(AarambhError::Config(format!(
+                    "moe_retrofit requires model.moe.top_k={expected_top_k}, got {}",
+                    moe.top_k
+                )));
+            }
         }
         if !(0.0..=1.0).contains(&self.retrofit_lr_scale)
             || self.retrofit_lr_scale == 0.0
@@ -359,13 +412,25 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
     )?;
     trainer.set_dsa_training_config(config.dsa_training.clone());
     if let Some(path) = &config.retrofit_from {
-        let report = trainer.load_retrofit_checkpoint(path, dtype)?;
+        let report = trainer.load_retrofit_checkpoint_with_moe(
+            path,
+            dtype,
+            config
+                .moe_retrofit
+                .as_ref()
+                .map(|moe| aarambh_ai_weights::MoeRetrofitOptions {
+                    source_top_k: moe.source_top_k,
+                }),
+        )?;
         if trainer.is_rank0() {
             println!(
-                "hybrid retrofit: loaded={} initialized_deltanet={} initialized_dsa={} lr_scale={:.3}",
+                "architecture retrofit: loaded={} initialized_deltanet={} initialized_dsa={} expanded_moe_routers={} sharded_moe_experts={} initialized_shared_experts={} lr_scale={:.3}",
                 report.loaded_tensors,
                 report.initialized_deltanet_tensors,
                 report.initialized_dsa_tensors,
+                report.expanded_moe_router_tensors,
+                report.sharded_moe_expert_tensors,
+                report.initialized_shared_expert_tensors,
                 config.retrofit_lr_scale
             );
         }
@@ -654,5 +719,46 @@ mod tests {
                 .unwrap_or_else(|err| panic!("{name}: {err}"));
             assert!(config.model.dsa_config.is_some(), "{name}");
         }
+    }
+
+    #[test]
+    fn phase31_moe_configs_parse_and_validate() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for name in [
+            "moe_finegrained_smoke.toml",
+            "medium_coarse_moe.toml",
+            "large_coarse_moe.toml",
+            "medium_finegrained_moe.toml",
+            "large_finegrained_moe.toml",
+        ] {
+            let config = TrainingRunConfig::from_toml(workspace.join("configs").join(name))
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            config
+                .validate()
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            AarambhModel::validate_config(&config.model)
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            assert!(config.model.moe.is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn moe_retrofit_requires_scaled_active_expert_count() {
+        let mut config = TrainingRunConfig {
+            dataset_path: "data.txt".into(),
+            retrofit_from: Some("coarse.safetensors".into()),
+            moe_retrofit: Some(MoeRetrofitConfig { source_top_k: 2 }),
+            ..TrainingRunConfig::default()
+        };
+        config.model.moe = Some(aarambh_ai_core::MoeConfig {
+            num_experts: 8,
+            top_k: 2,
+            expert_ffn_dim: 512,
+            fine_grained_factor: 4,
+            num_shared_experts: 1,
+            ..aarambh_ai_core::MoeConfig::default()
+        });
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("top_k=8"), "{err}");
     }
 }

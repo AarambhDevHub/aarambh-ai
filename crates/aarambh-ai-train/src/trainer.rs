@@ -208,12 +208,23 @@ impl Trainer {
         path: impl AsRef<Path>,
         dtype: DType,
     ) -> Result<aarambh_ai_weights::RetrofitLoadReport> {
-        let report = aarambh_ai_weights::load_retrofit_into_varmap(
+        self.load_retrofit_checkpoint_with_moe(path, dtype, None)
+    }
+
+    /// Load compatible weights and optionally expand a coarse MoE checkpoint.
+    pub fn load_retrofit_checkpoint_with_moe(
+        &mut self,
+        path: impl AsRef<Path>,
+        dtype: DType,
+        moe_options: Option<aarambh_ai_weights::MoeRetrofitOptions>,
+    ) -> Result<aarambh_ai_weights::RetrofitLoadReport> {
+        let report = aarambh_ai_weights::load_retrofit_into_varmap_with_moe(
             path,
             self.model.config(),
             &mut self.varmap,
             &self.device,
             dtype,
+            moe_options,
         )?;
         self.optimizer = AdamW::from_varmap(&self.varmap, AdamWConfig::from(&self.train_config))?;
         Ok(report)
@@ -494,8 +505,19 @@ impl Trainer {
             let grad_norm = metrics.grad_norm.unwrap_or(0.0);
             let tok_s = self.tokens_per_second_since_last_log();
             if let Some(moe_aux_loss) = metrics.moe_aux_loss {
+                let moe = self
+                    .model
+                    .config()
+                    .moe
+                    .as_ref()
+                    .expect("MoE auxiliary loss requires MoE config");
+                let routed_experts = moe.routed_expert_count()?;
+                let fine_dim = moe.fine_grained_expert_dim()?;
+                let active_width = moe.active_routed_width()?;
+                let (util_min, util_max, dead_experts) =
+                    utilization_summary(&metrics.expert_utilization);
                 println!(
-                    "step={} loss={:.4} ce_loss={:.4} moe_aux={:.6} ppl={:.2} lr={:.6} grad_norm={:.4} expert_util=[{}] tok/s={:.2}",
+                    "step={} loss={:.4} ce_loss={:.4} moe_aux={:.6} ppl={:.2} lr={:.6} grad_norm={:.4} routed_experts={} active_routed={} shared_experts={} fine_dim={} active_width={} util_min={:.3} util_max={:.3} dead_experts={} expert_util=[{}] tok/s={:.2}",
                     metrics.step,
                     metrics.loss,
                     metrics.ce_loss,
@@ -503,6 +525,14 @@ impl Trainer {
                     metrics.perplexity,
                     metrics.lr,
                     grad_norm,
+                    routed_experts,
+                    moe.top_k,
+                    moe.num_shared_experts,
+                    fine_dim,
+                    active_width,
+                    util_min,
+                    util_max,
+                    dead_experts,
                     format_expert_utilization(&metrics.expert_utilization),
                     tok_s
                 );
@@ -579,6 +609,16 @@ fn format_expert_utilization(values: &[f32]) -> String {
         .map(|value| format!("{value:.3}"))
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn utilization_summary(values: &[f32]) -> (f32, f32, usize) {
+    if values.is_empty() {
+        return (0.0, 0.0, 0);
+    }
+    let min = values.iter().copied().fold(f32::INFINITY, f32::min);
+    let max = values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let dead = values.iter().filter(|value| **value <= 1e-6).count();
+    (min, max, dead)
 }
 
 #[cfg(test)]
@@ -705,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn moe_training_step_reports_aux_loss_and_utilization() {
+    fn fine_grained_moe_two_step_training_reports_routed_utilization() {
         let tokenizer = CharTokenizer {
             ids: HashMap::from([('a', 0), ('b', 1), ('c', 2), ('d', 3)]),
         };
@@ -726,10 +766,12 @@ mod tests {
             rope_scaling: None,
             moe: Some(MoeConfig {
                 num_experts: 2,
-                top_k: 1,
+                top_k: 2,
                 expert_ffn_dim: 64,
                 aux_loss_weight: 0.01,
                 every_n_layers: 2,
+                fine_grained_factor: 2,
+                num_shared_experts: 1,
             }),
             attention_schedule: None,
             dsa_config: None,
@@ -741,7 +783,7 @@ mod tests {
             batch_size: 1,
             grad_accum_steps: 1,
             max_epochs: 1,
-            max_steps: 1,
+            max_steps: 2,
             warmup_steps: 0,
             min_lr_ratio: 1.0,
             weight_decay: 0.0,
@@ -765,13 +807,16 @@ mod tests {
             DType::F32,
         )
         .unwrap();
-        let metrics = trainer
-            .train_step(batch_loader.next().unwrap().unwrap())
-            .unwrap();
-        assert!(metrics.moe_aux_loss.is_some());
-        assert_eq!(metrics.expert_utilization.len(), 2);
-        let util_sum = metrics.expert_utilization.iter().sum::<f32>();
-        assert!((util_sum - 1.0).abs() < 1e-5, "util_sum={util_sum}");
+        for expected_step in 1..=2 {
+            let metrics = trainer
+                .train_step(batch_loader.next().unwrap().unwrap())
+                .unwrap();
+            assert_eq!(metrics.step, expected_step);
+            assert!(metrics.moe_aux_loss.is_some());
+            assert_eq!(metrics.expert_utilization.len(), 4);
+            let util_sum = metrics.expert_utilization.iter().sum::<f32>();
+            assert!((util_sum - 1.0).abs() < 1e-5, "util_sum={util_sum}");
+        }
     }
 
     #[test]
