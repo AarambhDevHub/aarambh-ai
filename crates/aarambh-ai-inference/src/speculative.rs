@@ -41,6 +41,8 @@ impl Default for SpeculativeConfig {
 /// Counters collected during one speculative generation request.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SpeculativeStats {
+    /// Proposal source used for this request.
+    pub proposal_source: SpeculativeProposalSource,
     /// Number of target verification rounds.
     pub rounds: usize,
     /// Number of tokens proposed by the draft model.
@@ -53,6 +55,18 @@ pub struct SpeculativeStats {
     pub target_decode_forwards: usize,
     /// Number of draft decode forwards, excluding prompt prefill.
     pub draft_decode_forwards: usize,
+    /// Number of auxiliary MTP-head forwards.
+    pub mtp_head_forwards: usize,
+}
+
+/// Source used to propose speculative tokens.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SpeculativeProposalSource {
+    /// A separately loaded draft model proposed tokens.
+    #[default]
+    ExternalDraft,
+    /// Auxiliary heads in the target checkpoint proposed tokens.
+    Mtp,
 }
 
 impl SpeculativeStats {
@@ -502,14 +516,14 @@ impl SpeculativeEngine {
     }
 }
 
-struct Proposal {
-    token_id: u32,
-    distribution: Vec<f32>,
-    forced: bool,
+pub(crate) struct Proposal {
+    pub(crate) token_id: u32,
+    pub(crate) distribution: Vec<f32>,
+    pub(crate) forced: bool,
 }
 
-struct OutputState {
-    token_ids: Vec<u32>,
+pub(crate) struct OutputState {
+    pub(crate) token_ids: Vec<u32>,
     raw_text: String,
     thinking_text: String,
     answer_text: String,
@@ -521,7 +535,7 @@ struct OutputState {
 }
 
 impl OutputState {
-    fn new(capacity: usize, thinking_mode: ThinkingMode) -> Self {
+    pub(crate) fn new(capacity: usize, thinking_mode: ThinkingMode) -> Self {
         Self {
             token_ids: Vec::with_capacity(capacity),
             raw_text: String::new(),
@@ -536,7 +550,7 @@ impl OutputState {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn commit<F>(
+    pub(crate) fn commit<F>(
         &mut self,
         token_id: u32,
         candidates: Vec<TokenCandidate>,
@@ -575,7 +589,7 @@ impl OutputState {
         Ok(())
     }
 
-    fn finish(
+    pub(crate) fn finish(
         self,
         finish_reason: FinishReason,
         speculative_stats: Option<SpeculativeStats>,
@@ -612,7 +626,7 @@ impl OutputState {
     }
 }
 
-fn constrained_distribution(
+pub(crate) fn constrained_distribution(
     sampler: &Sampler,
     logits: &[f32],
     controller: &mut DecodeController,
@@ -650,13 +664,13 @@ fn constrained_distribution(
 }
 
 #[derive(Debug, Clone)]
-enum DecodeController {
+pub(crate) enum DecodeController {
     Thinking(ThinkingController),
     Tools(ToolCallController),
 }
 
 impl DecodeController {
-    fn constraint(&mut self, tokenizer: &BpeTokenizer) -> Result<TokenConstraint> {
+    pub(crate) fn constraint(&mut self, tokenizer: &BpeTokenizer) -> Result<TokenConstraint> {
         match self {
             Self::Thinking(thinking) => Ok(match thinking.take_forced_token() {
                 Some(force) => TokenConstraint::Forced(force.token_id()),
@@ -666,7 +680,11 @@ impl DecodeController {
         }
     }
 
-    fn phase_for_next(&self, thinking_mode: ThinkingMode, token_id: u32) -> GenerationPhase {
+    pub(crate) fn phase_for_next(
+        &self,
+        thinking_mode: ThinkingMode,
+        token_id: u32,
+    ) -> GenerationPhase {
         match self {
             Self::Thinking(thinking) => phase_for_token(thinking, thinking_mode, token_id),
             Self::Tools(tools) => match tools.phase_for_next() {
@@ -678,7 +696,7 @@ impl DecodeController {
         }
     }
 
-    fn on_token(
+    pub(crate) fn on_token(
         &mut self,
         token_id: u32,
         token_text: &str,
@@ -693,32 +711,32 @@ impl DecodeController {
         }
     }
 
-    fn in_thinking_block(&self) -> bool {
+    pub(crate) fn in_thinking_block(&self) -> bool {
         match self {
             Self::Thinking(thinking) => thinking.in_thinking_block(),
             Self::Tools(tools) => tools.thinking().in_thinking_block(),
         }
     }
 
-    fn tool_complete(&self) -> bool {
+    pub(crate) fn tool_complete(&self) -> bool {
         matches!(self, Self::Tools(tools) if tools.is_complete())
     }
 
-    fn action_is_resolved(&self) -> bool {
+    pub(crate) fn action_is_resolved(&self) -> bool {
         match self {
             Self::Thinking(_) => true,
             Self::Tools(tools) => tools.action_is_resolved(),
         }
     }
 
-    fn tool_call(&self) -> Option<&ToolCall> {
+    pub(crate) fn tool_call(&self) -> Option<&ToolCall> {
         match self {
             Self::Thinking(_) => None,
             Self::Tools(tools) => tools.tool_call(),
         }
     }
 
-    fn eos_terminates(&self) -> bool {
+    pub(crate) fn eos_terminates(&self) -> bool {
         !self.in_thinking_block()
             && !matches!(
                 self,
@@ -726,7 +744,7 @@ impl DecodeController {
             )
     }
 
-    fn token_text(&self, token_id: u32, tokenizer: &BpeTokenizer) -> Result<String> {
+    pub(crate) fn token_text(&self, token_id: u32, tokenizer: &BpeTokenizer) -> Result<String> {
         match self {
             Self::Thinking(_) => tokenizer.decode(&[token_id]),
             Self::Tools(tools) => tools.token_text(token_id, tokenizer),
@@ -734,7 +752,12 @@ impl DecodeController {
     }
 }
 
-fn accept_proposal(sampler: &mut Sampler, token_id: u32, draft: &[f32], target: &[f32]) -> bool {
+pub(crate) fn accept_proposal(
+    sampler: &mut Sampler,
+    token_id: u32,
+    draft: &[f32],
+    target: &[f32],
+) -> bool {
     if sampler.is_deterministic() {
         return argmax(draft) == argmax(target);
     }
@@ -744,7 +767,7 @@ fn accept_proposal(sampler: &mut Sampler, token_id: u32, draft: &[f32], target: 
     q > 0.0 && sampler.draw_uniform() < (p / q).min(1.0)
 }
 
-fn residual_distribution(target: &[f32], draft: &[f32]) -> Result<Vec<f32>> {
+pub(crate) fn residual_distribution(target: &[f32], draft: &[f32]) -> Result<Vec<f32>> {
     if target.len() != draft.len() {
         return Err(AarambhError::Shape(format!(
             "target distribution has {} entries but draft has {}",
@@ -797,7 +820,7 @@ fn is_thinking_marker(token_id: u32) -> bool {
     token_id == THINK_START_ID || token_id == THINK_END_ID
 }
 
-fn last_logits(logits: &Tensor) -> Result<Tensor> {
+pub(crate) fn last_logits(logits: &Tensor) -> Result<Tensor> {
     let dims = logits.dims();
     if dims.len() != 3 || dims[0] != 1 || dims[1] == 0 {
         return Err(AarambhError::Shape(format!(
@@ -867,6 +890,7 @@ mod tests {
             moe: None,
             attention_schedule: None,
             dsa_config: None,
+            mtp: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };

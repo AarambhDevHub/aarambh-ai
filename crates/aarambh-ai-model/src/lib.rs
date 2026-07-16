@@ -10,4 +10,4 @@ pub mod model;
 
 pub use embedding::TokenEmbedding;
 pub use head::LmHead;
-pub use model::{AarambhModel, ModelForwardOutput};
+pub use model::{AarambhModel, CachedModelOutput, ModelForwardOutput, MtpPrediction};

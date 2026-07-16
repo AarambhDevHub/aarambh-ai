@@ -216,10 +216,12 @@ impl TrainingRunConfig {
         }
         if self.retrofit_from.is_some()
             && self.model.attention_schedule.is_none()
+            && self.model.mtp.is_none()
             && self.moe_retrofit.is_none()
         {
             return Err(AarambhError::Config(
-                "retrofit_from requires model.attention_schedule or moe_retrofit".into(),
+                "retrofit_from requires model.attention_schedule, model.mtp, or moe_retrofit"
+                    .into(),
             ));
         }
         if let Some(moe_retrofit) = &self.moe_retrofit {
@@ -424,10 +426,11 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
         )?;
         if trainer.is_rank0() {
             println!(
-                "architecture retrofit: loaded={} initialized_deltanet={} initialized_dsa={} expanded_moe_routers={} sharded_moe_experts={} initialized_shared_experts={} lr_scale={:.3}",
+                "architecture retrofit: loaded={} initialized_deltanet={} initialized_dsa={} initialized_mtp={} expanded_moe_routers={} sharded_moe_experts={} initialized_shared_experts={} lr_scale={:.3}",
                 report.loaded_tensors,
                 report.initialized_deltanet_tensors,
                 report.initialized_dsa_tensors,
+                report.initialized_mtp_tensors,
                 report.expanded_moe_router_tensors,
                 report.sharded_moe_expert_tensors,
                 report.initialized_shared_expert_tensors,
@@ -739,6 +742,21 @@ mod tests {
             AarambhModel::validate_config(&config.model)
                 .unwrap_or_else(|err| panic!("{name}: {err}"));
             assert!(config.model.moe.is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn phase32_mtp_configs_parse_and_validate() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for name in ["mtp_smoke.toml", "medium_mtp.toml", "large_mtp.toml"] {
+            let config = TrainingRunConfig::from_toml(workspace.join("configs").join(name))
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            config
+                .validate()
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            AarambhModel::validate_config(&config.model)
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            assert!(config.model.mtp.is_some(), "{name}");
         }
     }
 

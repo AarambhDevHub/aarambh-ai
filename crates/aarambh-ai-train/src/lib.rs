@@ -9,6 +9,8 @@ pub mod config;
 pub mod distributed;
 /// Language-model loss functions.
 pub mod loss;
+/// Multi-token prediction loss alignment and aggregation.
+pub mod mtp_loss;
 /// Optimizer and gradient utilities.
 pub mod optim;
 /// Learning-rate schedules.
@@ -27,7 +29,8 @@ pub use distributed::{
     ResolvedDistributedConfig,
 };
 pub use loss::cross_entropy_loss;
+pub use mtp_loss::{MtpHeadLoss, MtpLossOutput, combine_mtp_losses, mtp_head_loss};
 pub use optim::{AdamW, AdamWConfig, GradMap, TrainableParameter};
 pub use schedule::CosineScheduleWithWarmup;
-pub use trainer::{Trainer, TrainingMetrics};
+pub use trainer::{MtpHeadMetric, Trainer, TrainingMetrics};
 pub use vision_projector::{VisionTrainingConfig, run_projector_pretrain};

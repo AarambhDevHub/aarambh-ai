@@ -1,5 +1,5 @@
 use aarambh_ai_core::{
-    DsaConfig, GatedDeltaNetConfig, HybridAttentionSchedule, ModelConfig, MoeConfig,
+    DsaConfig, GatedDeltaNetConfig, HybridAttentionSchedule, ModelConfig, MoeConfig, MtpConfig,
     RopeScalingConfig, RopeScalingMethod,
 };
 use aarambh_ai_model::AarambhModel;
@@ -20,6 +20,7 @@ fn mini_config() -> ModelConfig {
         moe: None,
         attention_schedule: None,
         dsa_config: None,
+        mtp: None,
         norm_eps: 1e-5,
         tie_embeddings: true,
     }
@@ -595,4 +596,81 @@ fn all_four_full_scales_construct() {
         let vb = VarBuilder::zeros(DType::F32, &device);
         AarambhModel::new(&cfg, vb).unwrap();
     }
+}
+
+#[test]
+fn mtp_three_builds_two_offset_aligned_auxiliary_heads() {
+    let device = Device::Cpu;
+    let cfg = ModelConfig {
+        mtp: Some(MtpConfig {
+            num_future_tokens: 3,
+            aux_loss_weight: 0.3,
+        }),
+        ..mini_config()
+    };
+    let varmap = VarMap::new();
+    let model =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&varmap, DType::F32, &device)).unwrap();
+    let ids = Tensor::from_vec(vec![1u32, 2, 3, 4, 5, 6], (1, 6), &device).unwrap();
+    let output = model.forward_train_with_aux(&ids).unwrap();
+
+    assert_eq!(model.mtp_heads().len(), 2);
+    assert_eq!(output.final_hidden_states.dims(), &[1, 6, 64]);
+    let second = model
+        .forward_mtp_head_train(0, &output.final_hidden_states, &ids)
+        .unwrap();
+    let third = model
+        .forward_mtp_head_train(1, &output.final_hidden_states, &ids)
+        .unwrap();
+    assert_eq!(second.offset, 2);
+    assert_eq!(second.logits.dims(), &[1, 5, 128]);
+    assert_eq!(third.offset, 3);
+    assert_eq!(third.logits.dims(), &[1, 4, 128]);
+    assert!(
+        model
+            .named_tensors()
+            .contains_key("mtp.heads.1.refine.attn.wq.weight")
+    );
+}
+
+#[test]
+fn mtp_disabled_training_forward_matches_existing_logits_path() {
+    let device = Device::Cpu;
+    let model = mini_model(&device);
+    let ids = Tensor::from_vec(vec![1u32, 2, 3, 4], (1, 4), &device).unwrap();
+    let direct = model.forward_train(&ids).unwrap();
+    let with_metadata = model.forward_train_with_aux(&ids).unwrap().logits;
+    let max_diff = (direct - with_metadata)
+        .unwrap()
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    assert_eq!(max_diff, 0.0);
+    assert!(model.mtp_heads().is_empty());
+}
+
+#[test]
+fn cached_hidden_state_drives_mtp_without_an_auxiliary_cache() {
+    let device = Device::Cpu;
+    let cfg = ModelConfig {
+        mtp: Some(MtpConfig::default()),
+        ..mini_config()
+    };
+    let varmap = VarMap::new();
+    let model =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&varmap, DType::F32, &device)).unwrap();
+    let prompt = Tensor::from_vec(vec![1u32, 2, 3], (1, 3), &device).unwrap();
+    let mut cache = model.empty_kv_cache();
+    let output = model
+        .forward_with_cache_output(&prompt, 0, &mut cache)
+        .unwrap();
+    let anchor = output.final_hidden_states.narrow(1, 2, 1).unwrap();
+    let proposed = Tensor::from_vec(vec![4u32], (1, 1), &device).unwrap();
+    let prediction = model.forward_mtp_head(0, &anchor, &proposed).unwrap();
+    assert_eq!(prediction.offset, 2);
+    assert_eq!(prediction.logits.dims(), &[1, 1, 128]);
+    assert_eq!(cache[0].seq_len(), 3);
 }

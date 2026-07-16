@@ -32,7 +32,7 @@ Phase 29 →  Gated DeltaNet (hybrid linear attention)   (10–14 days)  [Kaggle
 Phase 30 →  DeepSeek Sparse Attention (DSA)             (10–14 days)  [Kaggle] ✅
 Phase 31 →  DeepSeek-style fine-grained MoE + shared    (10–14 days)  [Kaggle] ✅
             expert routing (v3 upgrade of v2 dense MoE)
-Phase 32 →  Multi-Token Prediction (MTP)                (7–10 days)   [Kaggle]
+Phase 32 →  Multi-Token Prediction (MTP)                (7–10 days)   [Kaggle] ✅
 Phase 33 →  On-policy distillation                      (10–14 days)  [Kaggle]
 Phase 34 →  Native QAT (quantization-aware training)    (7–10 days)   [i3 + Kaggle]
 Phase 35 →  Native video understanding                  (14–18 days)  [Kaggle]
@@ -470,23 +470,26 @@ Phase 33's on-policy distillation builds on.
 
 ### Tasks
 
+**`aarambh-ai-core`:**
+```
+[x] Optional `MtpConfig` with explicit total-horizon semantics, defaults,
+    serde compatibility, and range validation
+```
+
 **`aarambh-ai-nn`:**
 ```
-[ ] src/mtp.rs
-      MtpConfig — num_future_tokens (how many extra positions ahead each
-      head predicts, e.g. 2–3 following the MTP-3-style setups used by
-      GLM-4.7/MiniMax M2.1-derived architectures)
-      MtpHead — lightweight additional transformer block + LM head per
-      future-token offset, each conditioned on the shared trunk's hidden
+[x] src/mtp.rs
+      MtpHead — lightweight additional transformer block per future-token
+      offset with the main LM projection shared, each conditioned on the trunk
       state plus the (real or previously-predicted) token embeddings for
       intervening positions
-      MtpHead::forward() used only during training; discarded (or reused
-      as a speculative draft head, see below) at plain inference time
+      MtpHead::forward() supports training and speculative proposal paths;
+      heads are bypassed during ordinary next-token inference
 ```
 
 **`aarambh-ai-train`:**
 ```
-[ ] src/mtp_loss.rs
+[x] src/mtp_loss.rs
       Auxiliary loss: weighted sum of the main next-token loss and each
       MTP head's future-token loss, weight configurable and typically
       small relative to the main loss (auxiliary signal, not the primary
@@ -497,36 +500,49 @@ Phase 33's on-policy distillation builds on.
 
 **`aarambh-ai-inference`:**
 ```
-[ ] MTP heads optionally reused as the draft model for Phase 25's
+[x] MTP heads optionally reused as the draft model for Phase 25's
     speculative decoding (v2 §29) — since they already predict several
     tokens ahead from the same trunk, they are a natural free draft
     source, avoiding the need for a separate small draft checkpoint in
     configs where MTP is enabled
 ```
 
+**Configuration, checkpoints, and tooling:**
+```
+[x] `MtpConfig` is optional and backward-compatible; its horizon includes
+    the main t+1 head, so MTP-2 creates exactly one auxiliary head
+[x] SafeTensors/GGUF preserve all heads; retrofit fresh-initializes a complete
+    absent set and rejects partial MTP checkpoints
+[x] Tiny CPU smoke plus Medium/Large Phase 31 continuation recipes
+[x] Matched training comparison and exact greedy throughput benchmark scripts
+[x] `--speculative` selects internal MTP with no draft paths and retains the
+    existing external draft model path when those paths are supplied
+```
+
 ### Tests
 
 ```rust
-#[test]
+#[test] // complete
 fn mtp_head_output_shape_matches_num_future_tokens_config() {}
 
-#[test]
+#[test] // complete
 fn mtp_disabled_config_trains_identically_to_pre_v3_next_token_only_loss() {}
 
-#[test]
+#[test] // complete
 fn mtp_auxiliary_loss_does_not_dominate_main_loss_at_default_weight() {}
 
-#[test]
+#[test] // complete
 fn mtp_heads_usable_as_speculative_draft_source_without_separate_checkpoint() {}
 ```
 
 ### Milestone
 ```
-MTP-enabled training runs show improved sample efficiency (eval-harness
-score at matched token budget) versus a matched non-MTP run, and MTP-heads-
-as-draft speculative decoding shows a measured throughput improvement over
-Phase 25's separate-draft-checkpoint approach where a draft checkpoint
-would otherwise be needed.
+MTP model, loss, checkpoint, retrofit, and one-checkpoint exact speculative
+decoding paths are complete. CPU smoke tests prove execution and exact greedy
+equivalence. `scripts/phase32_compare_training.sh` and
+`scripts/phase32_benchmark_mtp.sh` produce quality and throughput evidence on
+real trained checkpoints; repository documentation does not claim unexecuted
+hardware gains.
 
 git commit -m "feat: Phase 32 — multi-token prediction heads"
 git tag v3.0.0-alpha.4

@@ -7,6 +7,8 @@ pub mod engine;
 pub mod grammar;
 /// Inference-time key/value cache.
 pub mod kvcache;
+/// One-checkpoint speculative decoding with multi-token prediction heads.
+pub mod mtp_speculative;
 /// Temperature, top-k, top-p, and greedy sampling.
 pub mod sampler;
 /// Exact draft-model speculative decoding.
@@ -24,8 +26,11 @@ pub use engine::{
 };
 pub use grammar::{JsonSchema, JsonSchemaGrammar};
 pub use kvcache::KvCache;
+pub use mtp_speculative::MtpSpeculativeEngine;
 pub use sampler::{Sampler, TokenCandidate};
-pub use speculative::{SpeculativeConfig, SpeculativeEngine, SpeculativeStats};
+pub use speculative::{
+    SpeculativeConfig, SpeculativeEngine, SpeculativeProposalSource, SpeculativeStats,
+};
 pub use stream::StreamEvent;
 pub use thinking::{ForceToken, ThinkingController, ThinkingMode};
 pub use tool_calling::{

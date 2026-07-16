@@ -2,7 +2,8 @@ use std::time::Instant;
 
 use aarambh_ai_core::{AarambhError, Result};
 use aarambh_ai_inference::{
-    GenerationConfig, GenerationOutput, GenerationStep, InferenceEngine, SpeculativeEngine,
+    GenerationConfig, GenerationOutput, GenerationStep, InferenceEngine, MtpSpeculativeEngine,
+    SpeculativeEngine,
 };
 
 use crate::input::{detect_injection, detect_jailbreak, detect_pii, redact_pii};
@@ -61,6 +62,24 @@ impl SafetyGenerator for SpeculativeEngine {
         F: FnMut(&GenerationStep) -> Result<()>,
     {
         SpeculativeEngine::generate_with_callback(self, prompt, config, on_step)
+    }
+}
+
+impl SafetyGenerator for MtpSpeculativeEngine {
+    fn generate(&mut self, prompt: &str, config: GenerationConfig) -> Result<GenerationOutput> {
+        MtpSpeculativeEngine::generate(self, prompt, config)
+    }
+
+    fn generate_with_callback<F>(
+        &mut self,
+        prompt: &str,
+        config: GenerationConfig,
+        on_step: F,
+    ) -> Result<GenerationOutput>
+    where
+        F: FnMut(&GenerationStep) -> Result<()>,
+    {
+        MtpSpeculativeEngine::generate_with_callback(self, prompt, config, on_step)
     }
 }
 

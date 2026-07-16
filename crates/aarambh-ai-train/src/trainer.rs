@@ -12,8 +12,18 @@ use crate::checkpoint::{CheckpointManager, TrainState};
 use crate::config::DsaTrainingConfig;
 use crate::distributed::DistributedContext;
 use crate::loss::cross_entropy_loss;
+use crate::mtp_loss::{combine_mtp_losses, mtp_head_loss};
 use crate::optim::{AdamW, AdamWConfig, GradMap, clip_gradients};
 use crate::schedule::CosineScheduleWithWarmup;
+
+#[derive(Debug, Clone)]
+/// Scalar training metric for one MTP future-token offset.
+pub struct MtpHeadMetric {
+    /// Future-token offset represented by the loss.
+    pub offset: usize,
+    /// Unscaled cross-entropy loss for this head.
+    pub loss: f64,
+}
 
 #[derive(Debug, Clone)]
 /// Metrics emitted after a training micro-step.
@@ -24,6 +34,10 @@ pub struct TrainingMetrics {
     pub loss: f64,
     /// Unscaled cross-entropy loss for this batch.
     pub ce_loss: f64,
+    /// Mean unscaled MTP auxiliary loss before weighting.
+    pub mtp_aux_loss: Option<f64>,
+    /// Individual MTP losses in increasing future-token offset order.
+    pub mtp_head_losses: Vec<MtpHeadMetric>,
     /// Unscaled MoE auxiliary loss for this batch.
     pub moe_aux_loss: Option<f64>,
     /// Periodic DSA indexer teacher loss.
@@ -65,6 +79,8 @@ pub struct Trainer {
     pending_grads: GradMap,
     last_loss: Option<f64>,
     last_ce_loss: Option<f64>,
+    last_mtp_aux_loss: Option<f64>,
+    last_mtp_head_losses: Vec<MtpHeadMetric>,
     last_moe_aux_loss: Option<f64>,
     last_dsa_indexer_loss: Option<f64>,
     last_dsa_top_k_recall: Option<f32>,
@@ -146,6 +162,8 @@ impl Trainer {
             pending_grads: GradMap::new(),
             last_loss: None,
             last_ce_loss: None,
+            last_mtp_aux_loss: None,
+            last_mtp_head_losses: Vec::new(),
             last_moe_aux_loss: None,
             last_dsa_indexer_loss: None,
             last_dsa_top_k_recall: None,
@@ -248,6 +266,27 @@ impl Trainer {
             .model
             .forward_train_with_aux_and_dsa_teacher(&batch.input_ids, collect_dsa_teacher)?;
         let ce_loss = cross_entropy_loss(&output.logits, &batch.labels, &batch.attention_mask)?;
+        let mut mtp_head_losses = Vec::with_capacity(self.model.mtp_heads().len());
+        for head_index in 0..self.model.mtp_heads().len() {
+            let prediction = self.model.forward_mtp_head_train(
+                head_index,
+                &output.final_hidden_states,
+                &batch.input_ids,
+            )?;
+            mtp_head_losses.push(mtp_head_loss(
+                prediction,
+                &batch.labels,
+                &batch.attention_mask,
+            )?);
+        }
+        let mtp_weight = self
+            .model
+            .config()
+            .mtp
+            .as_ref()
+            .map(|mtp| mtp.aux_loss_weight)
+            .unwrap_or(0.0);
+        let mtp_loss = combine_mtp_losses(ce_loss, mtp_head_losses, mtp_weight)?;
         let moe_aux_weight = self
             .model
             .config()
@@ -257,9 +296,9 @@ impl Trainer {
             .unwrap_or(0.0);
         let mut loss = match &output.moe_aux_loss {
             Some(aux_loss) if moe_aux_weight > 0.0 => {
-                (&ce_loss + &aux_loss.affine(moe_aux_weight, 0.0)?)?
+                (&mtp_loss.total_loss + &aux_loss.affine(moe_aux_weight, 0.0)?)?
             }
-            _ => ce_loss.clone(),
+            _ => mtp_loss.total_loss.clone(),
         };
         if let Some(indexer_loss) = &output.dsa_indexer_loss
             && self.dsa_training_config.indexer_loss_weight > 0.0
@@ -267,7 +306,22 @@ impl Trainer {
             loss = (&loss
                 + &indexer_loss.affine(self.dsa_training_config.indexer_loss_weight, 0.0)?)?;
         }
-        let ce_loss_value = ce_loss.to_scalar::<f32>()? as f64;
+        let ce_loss_value = mtp_loss.main_loss.to_scalar::<f32>()? as f64;
+        let mtp_aux_loss_value = mtp_loss
+            .auxiliary_loss
+            .as_ref()
+            .map(|loss| loss.to_scalar::<f32>().map(|value| value as f64))
+            .transpose()?;
+        let mtp_head_loss_values = mtp_loss
+            .head_losses
+            .iter()
+            .map(|head| {
+                Ok(MtpHeadMetric {
+                    offset: head.offset,
+                    loss: head.loss.to_scalar::<f32>()? as f64,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
         let moe_aux_loss_value = output
             .moe_aux_loss
             .as_ref()
@@ -291,6 +345,13 @@ impl Trainer {
                 "non-finite MoE auxiliary loss: {aux}"
             )));
         }
+        if mtp_aux_loss_value.is_some_and(|value| !value.is_finite())
+            || mtp_head_loss_values
+                .iter()
+                .any(|metric| !metric.loss.is_finite())
+        {
+            return Err(AarambhError::Config("non-finite MTP auxiliary loss".into()));
+        }
 
         let scaled_loss = loss.affine(1.0 / self.train_config.grad_accum_steps as f64, 0.0)?;
         let grads = scaled_loss.backward()?;
@@ -299,6 +360,8 @@ impl Trainer {
         self.state.train_loss = Some(loss_value);
         self.last_loss = Some(loss_value);
         self.last_ce_loss = Some(ce_loss_value);
+        self.last_mtp_aux_loss = mtp_aux_loss_value;
+        self.last_mtp_head_losses = mtp_head_loss_values.clone();
         self.last_moe_aux_loss = moe_aux_loss_value;
         self.last_dsa_indexer_loss = dsa_indexer_loss_value;
         self.last_dsa_top_k_recall = output.dsa_top_k_recall;
@@ -318,6 +381,8 @@ impl Trainer {
                 step: self.state.step,
                 loss: loss_value,
                 ce_loss: ce_loss_value,
+                mtp_aux_loss: mtp_aux_loss_value,
+                mtp_head_losses: mtp_head_loss_values,
                 moe_aux_loss: moe_aux_loss_value,
                 dsa_indexer_loss: dsa_indexer_loss_value,
                 dsa_top_k_recall: output.dsa_top_k_recall,
@@ -335,6 +400,8 @@ impl Trainer {
                 step: self.state.step,
                 loss: loss_value,
                 ce_loss: ce_loss_value,
+                mtp_aux_loss: mtp_aux_loss_value,
+                mtp_head_losses: mtp_head_loss_values,
                 moe_aux_loss: moe_aux_loss_value,
                 dsa_indexer_loss: dsa_indexer_loss_value,
                 dsa_top_k_recall: output.dsa_top_k_recall,
@@ -478,6 +545,8 @@ impl Trainer {
             step: self.state.step,
             loss,
             ce_loss,
+            mtp_aux_loss: self.last_mtp_aux_loss,
+            mtp_head_losses: self.last_mtp_head_losses.clone(),
             moe_aux_loss: self.last_moe_aux_loss,
             dsa_indexer_loss: self.last_dsa_indexer_loss,
             dsa_top_k_recall: self.last_dsa_top_k_recall,
@@ -559,6 +628,20 @@ impl Trainer {
                     metrics.dsa_dense_fallbacks,
                 );
             }
+            if let Some(mtp_aux_loss) = metrics.mtp_aux_loss {
+                println!(
+                    "mtp step={} aux_loss={:.6} weight={:.3} heads=[{}]",
+                    metrics.step,
+                    mtp_aux_loss,
+                    self.model
+                        .config()
+                        .mtp
+                        .as_ref()
+                        .expect("MTP metrics require MTP config")
+                        .aux_loss_weight,
+                    format_mtp_losses(&metrics.mtp_head_losses),
+                );
+            }
         }
 
         if self.train_config.eval_steps > 0
@@ -611,6 +694,14 @@ fn format_expert_utilization(values: &[f32]) -> String {
         .join(",")
 }
 
+fn format_mtp_losses(values: &[MtpHeadMetric]) -> String {
+    values
+        .iter()
+        .map(|metric| format!("t+{}:{:.6}", metric.offset, metric.loss))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn utilization_summary(values: &[f32]) -> (f32, f32, usize) {
     if values.is_empty() {
         return (0.0, 0.0, 0);
@@ -626,7 +717,7 @@ mod tests {
     use super::*;
     use aarambh_ai_core::{
         Device as AarambhDevice, DsaConfig, GatedDeltaNetConfig, HybridAttentionSchedule,
-        MoeConfig, TokenizerLike,
+        MoeConfig, MtpConfig, TokenizerLike,
     };
     use aarambh_ai_data::dataset::PlaintextDataset;
     use std::collections::HashMap;
@@ -687,6 +778,7 @@ mod tests {
             moe: None,
             attention_schedule: None,
             dsa_config: None,
+            mtp: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -775,6 +867,7 @@ mod tests {
             }),
             attention_schedule: None,
             dsa_config: None,
+            mtp: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -820,6 +913,102 @@ mod tests {
     }
 
     #[test]
+    fn mtp_two_step_training_updates_auxiliary_heads() {
+        let tokenizer = CharTokenizer {
+            ids: HashMap::from([('a', 0), ('b', 1), ('c', 2), ('d', 3)]),
+        };
+        let dataset = PlaintextDataset::from_lines(vec!["abcdabcdabcdabcdabcdabcd".into()]);
+        let device = AarambhDevice::Cpu;
+        let train_loader = DataLoader::new(&dataset, &tokenizer, 1, 4, false, device.clone());
+        let mut batch_loader = DataLoader::new(&dataset, &tokenizer, 1, 4, false, device.clone());
+        let model_config = ModelConfig {
+            vocab_size: tokenizer.vocab_size(),
+            hidden_dim: 64,
+            ffn_dim: 128,
+            n_layers: 1,
+            n_heads: 1,
+            n_kv_heads: 1,
+            max_seq_len: 4,
+            rope_theta: 10000.0,
+            rope_scaling: None,
+            moe: None,
+            attention_schedule: None,
+            dsa_config: None,
+            mtp: Some(MtpConfig {
+                num_future_tokens: 3,
+                aux_loss_weight: 0.3,
+            }),
+            norm_eps: 1e-5,
+            tie_embeddings: true,
+        };
+        let train_config = TrainConfig {
+            lr: 1e-3,
+            batch_size: 1,
+            grad_accum_steps: 1,
+            max_epochs: 1,
+            max_steps: 2,
+            warmup_steps: 0,
+            min_lr_ratio: 1.0,
+            weight_decay: 0.0,
+            beta1: 0.9,
+            beta2: 0.95,
+            epsilon: 1e-8,
+            clip_grad_norm: 1.0,
+            save_every_n_steps: 0,
+            log_every_n_steps: 0,
+            eval_steps: 0,
+            seed: 42,
+            checkpoint_dir: std::env::temp_dir().join("aarambh_mtp_train_step"),
+        };
+        let mut trainer = Trainer::new(
+            model_config,
+            train_config,
+            train_loader,
+            None,
+            device.to_candle().unwrap(),
+            DType::F32,
+        )
+        .unwrap();
+        let before = trainer
+            .model()
+            .named_tensors()
+            .into_iter()
+            .filter(|(name, _)| name.starts_with("mtp.heads.0."))
+            .map(|(name, tensor)| {
+                let values = tensor.flatten_all().unwrap().to_vec1::<f32>().unwrap();
+                (name, values)
+            })
+            .collect::<HashMap<_, _>>();
+        for expected_step in 1..=2 {
+            let metrics = trainer
+                .train_step(batch_loader.next().unwrap().unwrap())
+                .unwrap();
+            assert_eq!(metrics.step, expected_step);
+            assert!(metrics.mtp_aux_loss.is_some());
+            assert_eq!(metrics.mtp_head_losses.len(), 2);
+            assert!(
+                metrics
+                    .mtp_head_losses
+                    .iter()
+                    .all(|loss| loss.loss.is_finite())
+            );
+        }
+        let changed = trainer
+            .model()
+            .named_tensors()
+            .into_iter()
+            .filter(|(name, _)| name.starts_with("mtp.heads.0."))
+            .any(|(name, tensor)| {
+                let after = tensor.flatten_all().unwrap().to_vec1::<f32>().unwrap();
+                before[&name]
+                    .iter()
+                    .zip(after)
+                    .any(|(before, after)| (before - after).abs() > 0.0)
+            });
+        assert!(changed, "MTP auxiliary head did not update");
+    }
+
+    #[test]
     fn dsa_two_step_smoke_alternates_teacher_and_sparse_steps() {
         let tokenizer = CharTokenizer {
             ids: HashMap::from([('a', 0), ('b', 1), ('c', 2), ('d', 3)]),
@@ -854,6 +1043,7 @@ mod tests {
                 top_k_blocks: 1,
                 min_seq_len_for_sparsity: 16,
             }),
+            mtp: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };

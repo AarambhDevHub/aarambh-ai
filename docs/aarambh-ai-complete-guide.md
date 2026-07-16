@@ -1099,13 +1099,20 @@ computed once before training, so a second full model does not stay in memory.
 
 ## Phase 25: Speculative Decoding
 
-**Definition:** A technique to speed up text generation where a small, fast "draft" model guesses several tokens ahead, and the larger main model simply verifies (and corrects if needed) those guesses instead of generating each token one at a time from scratch.
+**Definition:** A technique where a cheap proposal source guesses several
+tokens ahead and the main model verifies them together. Aarambh-AI supports
+either a separate small draft checkpoint or MTP auxiliary heads inside the
+target checkpoint.
 
 **Beginner explanation:**
 Imagine a fast-writing intern drafting a whole paragraph quickly, and a senior editor just reading through and correcting mistakes, rather than writing every single word themselves from scratch. That's speculative decoding: a small, cheap model proposes multiple tokens, and the big, accurate model verifies (accepting correct guesses in bulk, and only recalculating the wrong ones).
 
 **Why we need it:**
-Normally, generating text token-by-token with a large model is slow because each token requires a full expensive pass through the big model. Speculative decoding lets you accept several tokens at once when the draft model guesses correctly, dramatically speeding up generation without losing output quality.
+Normally, generating text token-by-token with a large model is slow because
+each token requires a full expensive pass through the big model. Speculative
+decoding can accept several tokens per verification pass when proposals are
+accurate. Exact modified rejection sampling preserves the target distribution;
+speed still depends on acceptance rate, proposal cost, model size, and hardware.
 
 **Example:**
 ```
@@ -1138,7 +1145,12 @@ Main model verifies:
 
 **Common beginner questions:**
 - *Q: Does this reduce output quality?* → No — the final output is still checked/corrected by the accurate main model, so quality is preserved; only speed improves.
-- *Q: What if the draft model guesses badly every time?* → Worst case, speed just falls back to normal token-by-token generation — it doesn't get slower than the baseline, just doesn't get the speed boost.
+- *Q: What if proposals are poor?* → Output correctness is preserved, but the
+  rollback and verification overhead can make speculation slower than ordinary
+  decoding. Benchmark the trained checkpoint instead of assuming a speedup.
+- *Q: Do I always need two checkpoints?* → No. A model trained with
+  `[model.mtp]` can use its own future-token heads with `--speculative`. Passing
+  `--draft-model` and `--draft-config` selects the separate-checkpoint path.
 
 ---
 

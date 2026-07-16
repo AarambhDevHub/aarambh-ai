@@ -183,6 +183,7 @@ pub struct DoraAarambhModel {
     rope_cache: RopeCache,
     adapter_param_count: usize,
     base_param_count: usize,
+    frozen_auxiliary_tensors: HashMap<String, Tensor>,
     hybrid: Option<HybridDoraModel>,
 }
 
@@ -225,6 +226,7 @@ impl DoraAarambhModel {
                     rope_cache: RopeCache::from_config(config, DType::F32, device)?,
                     adapter_param_count,
                     base_param_count,
+                    frozen_auxiliary_tensors: HashMap::new(),
                     hybrid: Some(hybrid),
                 },
                 varmap,
@@ -261,6 +263,11 @@ impl DoraAarambhModel {
         let rope_cache = RopeCache::from_config(config, dtype, device)?;
         let adapter_param_count = adapter_param_count(&blocks, lm_head.as_ref());
         let base_param_count = tensors.values().map(tensor_elem_count).sum();
+        let frozen_auxiliary_tensors = tensors
+            .iter()
+            .filter(|(name, _)| name.starts_with("mtp."))
+            .map(|(name, tensor)| (name.clone(), tensor.detach()))
+            .collect();
 
         let model = Self {
             config: config.clone(),
@@ -271,6 +278,7 @@ impl DoraAarambhModel {
             rope_cache,
             adapter_param_count,
             base_param_count,
+            frozen_auxiliary_tensors,
             hybrid: None,
         };
         Ok((model, varmap))
@@ -384,6 +392,7 @@ impl DoraAarambhModel {
         if let Some(lm_head) = &self.lm_head {
             tensors.insert("lm_head.weight".to_string(), lm_head.merged_weight()?);
         }
+        tensors.extend(self.frozen_auxiliary_tensors.clone());
         Ok(tensors)
     }
 
@@ -544,7 +553,8 @@ impl HybridDoraModel {
 }
 
 fn is_dora_projection_weight(name: &str, tensor: &Tensor) -> bool {
-    tensor.rank() == 2
+    !name.starts_with("mtp.")
+        && tensor.rank() == 2
         && (name.contains(".attn.")
             || name.contains(".ffn.")
             || (name.contains(".deltanet.") && name.ends_with("_proj.weight"))
@@ -855,7 +865,7 @@ fn tensor_elem_count(tensor: &Tensor) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aarambh_ai_core::{GatedDeltaNetConfig, HybridAttentionSchedule};
+    use aarambh_ai_core::{GatedDeltaNetConfig, HybridAttentionSchedule, MtpConfig};
     use candle_nn::VarBuilder;
 
     fn tiny_config() -> ModelConfig {
@@ -872,6 +882,7 @@ mod tests {
             moe: None,
             attention_schedule: None,
             dsa_config: None,
+            mtp: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -1035,7 +1046,8 @@ mod tests {
     #[test]
     fn dora_merge_produces_valid_normal_checkpoint_tensors() {
         let device = Device::Cpu;
-        let config = tiny_config();
+        let mut config = tiny_config();
+        config.mtp = Some(MtpConfig::default());
         let base_varmap = VarMap::new();
         let vb = VarBuilder::from_varmap(&base_varmap, DType::F32, &device);
         let base = AarambhModel::new(&config, vb).unwrap();
@@ -1052,5 +1064,6 @@ mod tests {
         assert!(merged.contains_key("embedding.weight"));
         assert!(merged.contains_key("blocks.0.attn.wq.weight"));
         assert!(merged.contains_key("final_norm.weight"));
+        assert!(merged.contains_key("mtp.heads.0.refine.attn.wq.weight"));
     }
 }

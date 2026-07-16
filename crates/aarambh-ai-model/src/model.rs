@@ -4,7 +4,7 @@ use aarambh_ai_core::{AarambhError, AttentionKind, Configurable, Forward, ModelC
 use aarambh_ai_nn::{
     DeltaNetState, DsaAttention, DsaForwardStats, DsaKvCache, DsaTeacherOutput, FeedForwardLayer,
     GatedDeltaNetLayer, GroupedQueryAttention, HybridKvCache, KVCache, MoeFfn, MoeForwardStats,
-    RMSNorm, RopeCache, SharedExpertPath, SwiGluFfn, TokenMixer, TransformerBlock,
+    MtpHead, RMSNorm, RopeCache, SharedExpertPath, SwiGluFfn, TokenMixer, TransformerBlock,
 };
 use candle_core::{DType, Tensor};
 use candle_nn::{Init, VarBuilder, linear_no_bias};
@@ -20,6 +20,7 @@ pub struct AarambhModel {
     blocks: Vec<TransformerBlock>,
     final_norm: RMSNorm,
     lm_head: LmHead,
+    mtp_heads: Vec<MtpHead>,
     rope_cache: RopeCache,
 }
 
@@ -28,6 +29,8 @@ pub struct AarambhModel {
 pub struct ModelForwardOutput {
     /// Language-model logits.
     pub logits: Tensor,
+    /// Final normalized trunk hidden states used by optional auxiliary heads.
+    pub final_hidden_states: Tensor,
     /// Average MoE load-balancing auxiliary loss when MoE layers are active.
     pub moe_aux_loss: Option<Tensor>,
     /// Average per-expert utilization across active MoE layers.
@@ -38,6 +41,24 @@ pub struct ModelForwardOutput {
     pub dsa_top_k_recall: Option<f32>,
     /// Sparse attention selection and fallback counters.
     pub dsa_stats: DsaForwardStats,
+}
+
+#[derive(Debug)]
+/// Logits and final hidden states from a cache-mutating model forward.
+pub struct CachedModelOutput {
+    /// Language-model logits for every supplied token.
+    pub logits: Tensor,
+    /// Final normalized trunk hidden states for every supplied token.
+    pub final_hidden_states: Tensor,
+}
+
+#[derive(Debug)]
+/// Logits produced by one multi-token prediction auxiliary head.
+pub struct MtpPrediction {
+    /// Future-token offset represented by these logits.
+    pub offset: usize,
+    /// Vocabulary logits shaped `[batch, valid_anchors, vocab]`.
+    pub logits: Tensor,
 }
 
 impl AarambhModel {
@@ -149,6 +170,21 @@ impl AarambhModel {
             LmHead::untied(cfg.hidden_dim, cfg.vocab_size, vb.pp("lm_head"))?
         };
 
+        let mtp_heads = match &cfg.mtp {
+            Some(mtp) => (2..=mtp.num_future_tokens)
+                .enumerate()
+                .map(|(head_index, offset)| {
+                    MtpHead::new(
+                        offset,
+                        cfg,
+                        lm_head.weight(),
+                        vb.pp("mtp").pp("heads").pp(head_index),
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?,
+            None => Vec::new(),
+        };
+
         let dtype = embedding.weight().dtype();
         let rope_cache = RopeCache::from_config(cfg, dtype, vb.device())?;
 
@@ -158,6 +194,7 @@ impl AarambhModel {
             blocks,
             final_norm,
             lm_head,
+            mtp_heads,
             rope_cache,
         })
     }
@@ -219,6 +256,9 @@ impl AarambhModel {
                     "dsa_config does not select any sparse attention layer".into(),
                 ));
             }
+        }
+        if let Some(mtp) = &cfg.mtp {
+            mtp.validate(cfg.max_seq_len)?;
         }
         Ok(())
     }
@@ -319,6 +359,7 @@ impl AarambhModel {
         let logits = self.lm_head.forward(&x)?;
         Ok(ModelForwardOutput {
             logits,
+            final_hidden_states: x,
             moe_aux_loss: stats.aux_loss()?,
             expert_utilization: stats.expert_utilization(),
             dsa_indexer_loss: average_dsa_loss(&dsa_teachers)?,
@@ -345,7 +386,13 @@ impl AarambhModel {
 
         let x = self.final_norm.forward(&x)?;
         if !self.lm_head.is_tied() {
-            capture.insert("lm_head.weight".to_string(), x);
+            capture.insert("lm_head.weight".to_string(), x.clone());
+        }
+        for head_index in 0..self.mtp_heads.len() {
+            if token_ids.dim(1)? >= self.mtp_heads[head_index].offset() {
+                let _ =
+                    self.forward_mtp_head_with_capture(head_index, &x, token_ids, &mut capture)?;
+            }
         }
         Ok(capture)
     }
@@ -366,8 +413,28 @@ impl AarambhModel {
         }
 
         self.check_token_ids(token_ids, seqlen_offset)?;
+        Ok(self
+            .forward_with_cache_output(token_ids, seqlen_offset, kv_caches)?
+            .logits)
+    }
+
+    /// Run incremental inference and return both logits and final hidden states.
+    pub fn forward_with_cache_output(
+        &self,
+        token_ids: &Tensor,
+        seqlen_offset: usize,
+        kv_caches: &mut [HybridKvCache],
+    ) -> Result<CachedModelOutput> {
+        if kv_caches.len() != self.blocks.len() {
+            return Err(AarambhError::Shape(format!(
+                "expected {} hybrid caches, got {}",
+                self.blocks.len(),
+                kv_caches.len()
+            )));
+        }
+        self.check_token_ids(token_ids, seqlen_offset)?;
         let x = self.embedding.forward(token_ids)?;
-        self.forward_embeddings_with_cache(&x, seqlen_offset, kv_caches)
+        self.forward_embeddings_with_cache_output(&x, seqlen_offset, kv_caches)
     }
 
     /// Run incremental inference using precomputed embeddings and per-layer KV caches.
@@ -377,6 +444,18 @@ impl AarambhModel {
         seqlen_offset: usize,
         kv_caches: &mut [HybridKvCache],
     ) -> Result<Tensor> {
+        Ok(self
+            .forward_embeddings_with_cache_output(embeddings, seqlen_offset, kv_caches)?
+            .logits)
+    }
+
+    /// Run cached inference from embeddings and retain final hidden states.
+    pub fn forward_embeddings_with_cache_output(
+        &self,
+        embeddings: &Tensor,
+        seqlen_offset: usize,
+        kv_caches: &mut [HybridKvCache],
+    ) -> Result<CachedModelOutput> {
         if kv_caches.len() != self.blocks.len() {
             return Err(AarambhError::Shape(format!(
                 "expected {} hybrid caches, got {}",
@@ -392,8 +471,12 @@ impl AarambhModel {
             x = block.forward(&x, &self.rope_cache, None, Some(cache), seqlen_offset)?;
         }
 
-        let x = self.final_norm.forward(&x)?;
-        Ok(self.lm_head.forward(&x)?)
+        let final_hidden_states = self.final_norm.forward(&x)?;
+        let logits = self.lm_head.forward(&final_hidden_states)?;
+        Ok(CachedModelOutput {
+            logits,
+            final_hidden_states,
+        })
     }
 
     /// Decode one token for multiple independent sequences in a shared model pass.
@@ -498,6 +581,11 @@ impl AarambhModel {
         if !self.lm_head.is_tied() {
             tensors.insert("lm_head.weight".to_string(), self.lm_head.weight().clone());
         }
+        for (head_index, head) in self.mtp_heads.iter().enumerate() {
+            for (name, tensor) in head.named_tensors() {
+                tensors.insert(format!("mtp.heads.{head_index}.{name}"), tensor);
+            }
+        }
         tensors
     }
 
@@ -511,6 +599,13 @@ impl AarambhModel {
         }
         if name == "lm_head.weight" {
             return Some(self.lm_head.weight());
+        }
+        if let Some(suffix) = name.strip_prefix("mtp.heads.") {
+            let (head_index, name) = suffix.split_once('.')?;
+            return self
+                .mtp_heads
+                .get(head_index.parse::<usize>().ok()?)?
+                .get_weight(name);
         }
 
         for (idx, block) in self.blocks.iter().enumerate() {
@@ -555,6 +650,125 @@ impl AarambhModel {
     /// Return the language-model head.
     pub fn lm_head(&self) -> &LmHead {
         &self.lm_head
+    }
+
+    /// Return all configured multi-token prediction auxiliary heads.
+    pub fn mtp_heads(&self) -> &[MtpHead] {
+        &self.mtp_heads
+    }
+
+    /// Run one MTP head over every valid training anchor.
+    pub fn forward_mtp_head_train(
+        &self,
+        head_index: usize,
+        final_hidden_states: &Tensor,
+        token_ids: &Tensor,
+    ) -> Result<MtpPrediction> {
+        self.forward_mtp_head_impl(head_index, final_hidden_states, token_ids, true, None)
+    }
+
+    /// Run one MTP head for a single inference anchor and proposed prefix.
+    pub fn forward_mtp_head(
+        &self,
+        head_index: usize,
+        anchor_hidden: &Tensor,
+        intervening_token_ids: &Tensor,
+    ) -> Result<MtpPrediction> {
+        let head = self.mtp_heads.get(head_index).ok_or_else(|| {
+            AarambhError::Config(format!("MTP head index {head_index} is not configured"))
+        })?;
+        let (batch, anchors, hidden) = anchor_hidden.dims3()?;
+        if anchors != 1 || hidden != self.config.hidden_dim {
+            return Err(AarambhError::Shape(format!(
+                "MTP inference anchor must have shape [batch, 1, {}], got {:?}",
+                self.config.hidden_dim,
+                anchor_hidden.dims()
+            )));
+        }
+        let (token_batch, intervening) = intervening_token_ids.dims2()?;
+        if token_batch != batch || intervening + 1 != head.offset() {
+            return Err(AarambhError::Shape(format!(
+                "MTP offset {} expects token ids [batch, {}], got {:?}",
+                head.offset(),
+                head.offset() - 1,
+                intervening_token_ids.dims()
+            )));
+        }
+        let embeddings = self
+            .embedding
+            .forward(intervening_token_ids)?
+            .unsqueeze(1)?;
+        Ok(MtpPrediction {
+            offset: head.offset(),
+            logits: head.forward(anchor_hidden, &embeddings, &self.rope_cache)?,
+        })
+    }
+
+    fn forward_mtp_head_with_capture(
+        &self,
+        head_index: usize,
+        final_hidden_states: &Tensor,
+        token_ids: &Tensor,
+        capture: &mut HashMap<String, Tensor>,
+    ) -> Result<MtpPrediction> {
+        self.forward_mtp_head_impl(
+            head_index,
+            final_hidden_states,
+            token_ids,
+            false,
+            Some(capture),
+        )
+    }
+
+    fn forward_mtp_head_impl(
+        &self,
+        head_index: usize,
+        final_hidden_states: &Tensor,
+        token_ids: &Tensor,
+        training: bool,
+        capture: Option<&mut HashMap<String, Tensor>>,
+    ) -> Result<MtpPrediction> {
+        let head = self.mtp_heads.get(head_index).ok_or_else(|| {
+            AarambhError::Config(format!("MTP head index {head_index} is not configured"))
+        })?;
+        let (batch, seq_len) = self.check_token_ids(token_ids, 0)?;
+        let hidden_dims = final_hidden_states.dims();
+        if hidden_dims != [batch, seq_len, self.config.hidden_dim] {
+            return Err(AarambhError::Shape(format!(
+                "MTP final hidden states must have shape [{batch}, {seq_len}, {}], got {hidden_dims:?}",
+                self.config.hidden_dim
+            )));
+        }
+        if seq_len < head.offset() {
+            return Err(AarambhError::Shape(format!(
+                "sequence length {seq_len} is shorter than MTP offset {}",
+                head.offset()
+            )));
+        }
+        let anchors = seq_len - head.offset() + 1;
+        let trunk = final_hidden_states.narrow(1, 0, anchors)?;
+        let mut embeddings = Vec::with_capacity(head.offset() - 1);
+        for shift in 1..head.offset() {
+            let ids = token_ids.narrow(1, shift, anchors)?;
+            embeddings.push(self.embedding.forward(&ids)?.unsqueeze(2)?);
+        }
+        let refs = embeddings.iter().collect::<Vec<_>>();
+        let embeddings = Tensor::cat(&refs, 2)?;
+        let logits = match capture {
+            Some(capture) => head.forward_with_capture(
+                &trunk,
+                &embeddings,
+                &self.rope_cache,
+                head_index,
+                capture,
+            )?,
+            None if training => head.forward_train(&trunk, &embeddings, &self.rope_cache)?,
+            None => head.forward(&trunk, &embeddings, &self.rope_cache)?,
+        };
+        Ok(MtpPrediction {
+            offset: head.offset(),
+            logits,
+        })
     }
 
     fn check_token_ids(&self, token_ids: &Tensor, seqlen_offset: usize) -> Result<(usize, usize)> {

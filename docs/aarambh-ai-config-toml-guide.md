@@ -2,9 +2,9 @@
 
 ### Every field in every config file, explained like you've never opened a `.toml` file before
 
-This guide walks through the 19 checked-in config files used to train, tune,
+This guide walks through the checked-in config families used to train, tune,
 and test Aarambh-AI. They cover Tiny through Large, CUDA and long-context
-smoke runs, MoE, two-GPU training, vision projection/VQA, and vision-aware
+smoke runs, MoE, MTP, two-GPU training, vision projection/VQA, and vision-aware
 self-learning.
 
 Same format as the other 3 guides — for every field:
@@ -521,6 +521,31 @@ consistent design choice across this model family to save parameters.
 - *Q: Does tying embeddings ever hurt quality?* → For smaller models it's usually a clear win (fewer parameters, similar quality); for very large models the effect is more debated, but this project consistently ties embeddings across all its configs.
 
 ---
+
+## 16A. Multi-Token Prediction: `[model.mtp]`
+
+This optional section adds future-token auxiliary heads during base training:
+
+```toml
+[model.mtp]
+num_future_tokens = 2
+aux_loss_weight = 0.3
+```
+
+`num_future_tokens` includes the normal main head. A value of `2` means the
+main head predicts `t+1` and one auxiliary head predicts `t+2`; a value of `3`
+adds another head for `t+3`. It must be at least 2 and cannot exceed
+`max_seq_len`.
+
+`aux_loss_weight` scales the mean of all auxiliary-head losses before adding it
+to the normal next-token loss. It must be finite and in `(0, 1]`. The default
+`0.3` keeps MTP as supporting supervision rather than replacing the main
+language-model objective.
+
+Omitting `[model.mtp]` creates no auxiliary tensors and preserves ordinary
+training and inference. MTP checkpoints can use one-checkpoint speculative
+decoding with `infer --speculative`; `--draft-tokens` cannot exceed the trained
+`num_future_tokens` horizon.
 
 # PART 3 — RoPE Scaling: `[model.rope_scaling]`
 
