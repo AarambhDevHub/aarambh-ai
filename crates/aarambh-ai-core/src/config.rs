@@ -174,8 +174,54 @@ pub enum AttentionKind {
     /// Existing grouped-query causal attention with RoPE.
     #[default]
     Full,
+    /// Block-sparse grouped-query attention selected by a learned DSA indexer.
+    Sparse,
     /// Fixed-state Gated DeltaNet linear attention.
     GatedDeltaNet,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+/// DeepSeek-style learned block-sparse attention settings.
+pub struct DsaConfig {
+    /// Number of contiguous tokens represented by one sparse-attention block.
+    pub block_size: usize,
+    /// Maximum number of causal blocks read for each query block.
+    pub top_k_blocks: usize,
+    /// Sequence length below which exact dense attention is used.
+    pub min_seq_len_for_sparsity: usize,
+}
+
+impl Default for DsaConfig {
+    fn default() -> Self {
+        Self {
+            block_size: 64,
+            top_k_blocks: 16,
+            min_seq_len_for_sparsity: 2048,
+        }
+    }
+}
+
+impl DsaConfig {
+    /// Validate block geometry and the dense-fallback threshold.
+    pub fn validate(&self) -> Result<()> {
+        if self.block_size < 16 || self.block_size > 256 || !self.block_size.is_power_of_two() {
+            return Err(AarambhError::Config(
+                "dsa.block_size must be a power of two in 16..=256".into(),
+            ));
+        }
+        if self.top_k_blocks == 0 {
+            return Err(AarambhError::Config(
+                "dsa.top_k_blocks must be non-zero".into(),
+            ));
+        }
+        if self.min_seq_len_for_sparsity < self.block_size {
+            return Err(AarambhError::Config(
+                "dsa.min_seq_len_for_sparsity must be at least dsa.block_size".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -340,6 +386,10 @@ pub struct ModelConfig {
     /// Optional per-layer hybrid full/Gated DeltaNet attention schedule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attention_schedule: Option<HybridAttentionSchedule>,
+    /// Optional learned block-sparse attention configuration. Full-attention
+    /// slots in `attention_schedule` become DSA slots when this is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dsa_config: Option<DsaConfig>,
     /// RMSNorm epsilon.
     pub norm_eps: f64,
     /// Whether the output head shares weights with token embeddings.
@@ -361,6 +411,7 @@ impl ModelConfig {
             rope_scaling: None,
             moe: None,
             attention_schedule: None,
+            dsa_config: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -380,6 +431,7 @@ impl ModelConfig {
             rope_scaling: None,
             moe: None,
             attention_schedule: None,
+            dsa_config: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -399,6 +451,7 @@ impl ModelConfig {
             rope_scaling: None,
             moe: None,
             attention_schedule: None,
+            dsa_config: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -418,6 +471,7 @@ impl ModelConfig {
             rope_scaling: None,
             moe: None,
             attention_schedule: None,
+            dsa_config: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -426,6 +480,21 @@ impl ModelConfig {
     /// Return the per-head hidden width.
     pub fn head_dim(&self) -> usize {
         self.hidden_dim / self.n_heads
+    }
+
+    /// Return the token mixer selected for a layer, including DSA replacement
+    /// of the schedule's full-attention slots.
+    pub fn attention_kind_for_layer(&self, layer_idx: usize) -> AttentionKind {
+        let scheduled = self
+            .attention_schedule
+            .as_ref()
+            .map(|schedule| schedule.kind_for_layer(layer_idx))
+            .unwrap_or(AttentionKind::Full);
+        if self.dsa_config.is_some() && scheduled == AttentionKind::Full {
+            AttentionKind::Sparse
+        } else {
+            scheduled
+        }
     }
 
     /// Load model configuration from a JSON file.
@@ -458,6 +527,7 @@ mod tests {
         let cfg: ModelConfig = serde_json::from_str(json).unwrap();
         assert!(cfg.rope_scaling.is_none());
         assert!(cfg.moe.is_none());
+        assert!(cfg.dsa_config.is_none());
     }
 
     #[test]
@@ -493,6 +563,19 @@ mod tests {
         };
         let err = cfg.validate(2).unwrap_err().to_string();
         assert!(err.contains("top_k"), "{err}");
+    }
+
+    #[test]
+    fn dsa_replaces_only_scheduled_full_attention_layers() {
+        let mut cfg = ModelConfig::tiny();
+        cfg.attention_schedule = Some(HybridAttentionSchedule::default());
+        cfg.dsa_config = Some(DsaConfig::default());
+        assert_eq!(cfg.attention_kind_for_layer(0), AttentionKind::Sparse);
+        assert_eq!(
+            cfg.attention_kind_for_layer(1),
+            AttentionKind::GatedDeltaNet
+        );
+        assert_eq!(cfg.attention_kind_for_layer(4), AttentionKind::Sparse);
     }
 }
 

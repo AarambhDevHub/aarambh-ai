@@ -1,6 +1,8 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use aarambh_ai_core::{GatedDeltaNetConfig, HybridAttentionSchedule, ModelConfig, MoeConfig};
+use aarambh_ai_core::{
+    Configurable, DsaConfig, GatedDeltaNetConfig, HybridAttentionSchedule, ModelConfig, MoeConfig,
+};
 use aarambh_ai_model::AarambhModel;
 use aarambh_ai_weights::{
     GgufFormat, load_gguf, load_model, load_retrofit_into_varmap, save_gguf, save_model,
@@ -21,6 +23,7 @@ fn mini_config() -> ModelConfig {
         rope_scaling: None,
         moe: None,
         attention_schedule: None,
+        dsa_config: None,
         norm_eps: 1e-5,
         tie_embeddings: true,
     }
@@ -52,6 +55,18 @@ fn hybrid_mini_config() -> ModelConfig {
             },
         }),
         ..mini_config()
+    }
+}
+
+fn dsa_mini_config() -> ModelConfig {
+    ModelConfig {
+        max_seq_len: 32,
+        dsa_config: Some(DsaConfig {
+            block_size: 16,
+            top_k_blocks: 1,
+            min_seq_len_for_sparsity: 16,
+        }),
+        ..hybrid_mini_config()
     }
 }
 
@@ -263,4 +278,64 @@ fn hybrid_gguf_roundtrip_keeps_float_recurrent_parameters() {
     );
     let ids = Tensor::from_vec(vec![1u32, 2, 3], (1, 3), &device).unwrap();
     assert_eq!(loaded.forward(&ids).unwrap().dims(), [1, 3, 128]);
+}
+
+#[test]
+fn phase29_retrofit_initializes_only_dsa_indexer_tensors() {
+    let device = Device::Cpu;
+    let source_cfg = hybrid_mini_config();
+    let source_vars = VarMap::new();
+    let source = AarambhModel::new(
+        &source_cfg,
+        VarBuilder::from_varmap(&source_vars, DType::F32, &device),
+    )
+    .unwrap();
+    let path = temp_safetensors_path();
+    save_model(&source, &path).unwrap();
+
+    let dsa_cfg = dsa_mini_config();
+    let mut dsa_vars = VarMap::new();
+    let dsa = AarambhModel::new(
+        &dsa_cfg,
+        VarBuilder::from_varmap(&dsa_vars, DType::F32, &device),
+    )
+    .unwrap();
+    let report =
+        load_retrofit_into_varmap(&path, &dsa_cfg, &mut dsa_vars, &device, DType::F32).unwrap();
+    let _ = std::fs::remove_file(path);
+    assert_eq!(report.initialized_deltanet_tensors, 0);
+    assert_eq!(report.initialized_dsa_tensors, 2);
+    assert!(dsa.get_weight("blocks.0.dsa.index_q.weight").is_some());
+    let diff = (source.get_weight("blocks.0.attn.wq.weight").unwrap()
+        - dsa.get_weight("blocks.0.attn.wq.weight").unwrap())
+    .unwrap()
+    .abs()
+    .unwrap()
+    .max_all()
+    .unwrap()
+    .to_scalar::<f32>()
+    .unwrap();
+    assert!(diff < 1e-6, "DSA retrofit attention diff: {diff}");
+}
+
+#[test]
+fn dsa_gguf_roundtrip_preserves_config_and_indexers() {
+    let device = Device::Cpu;
+    let cfg = dsa_mini_config();
+    let vars = VarMap::new();
+    let model =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&vars, DType::F32, &device)).unwrap();
+    let path = temp_gguf_path();
+    save_gguf(&model, GgufFormat::Q4KM, &path).unwrap();
+    let loaded = load_gguf(&path, &device).unwrap();
+    let _ = std::fs::remove_file(path);
+    assert_eq!(loaded.config().dsa_config, cfg.dsa_config);
+    assert!(loaded.get_weight("blocks.0.dsa.index_q.weight").is_some());
+    let ids = Tensor::from_vec(
+        (0..32).map(|value| (value % 127 + 1) as u32).collect(),
+        (1, 32),
+        &device,
+    )
+    .unwrap();
+    assert_eq!(loaded.forward(&ids).unwrap().dims(), [1, 32, 128]);
 }

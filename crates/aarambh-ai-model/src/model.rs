@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use aarambh_ai_core::{AarambhError, AttentionKind, Configurable, Forward, ModelConfig, Result};
 use aarambh_ai_nn::{
-    DeltaNetState, FeedForwardLayer, GatedDeltaNetLayer, GroupedQueryAttention, HybridKvCache,
-    KVCache, MoeFfn, MoeForwardStats, RMSNorm, RopeCache, SwiGluFfn, TokenMixer, TransformerBlock,
+    DeltaNetState, DsaAttention, DsaForwardStats, DsaKvCache, DsaTeacherOutput, FeedForwardLayer,
+    GatedDeltaNetLayer, GroupedQueryAttention, HybridKvCache, KVCache, MoeFfn, MoeForwardStats,
+    RMSNorm, RopeCache, SwiGluFfn, TokenMixer, TransformerBlock,
 };
 use candle_core::{DType, Tensor};
 use candle_nn::{Init, VarBuilder, linear_no_bias};
@@ -31,6 +32,12 @@ pub struct ModelForwardOutput {
     pub moe_aux_loss: Option<Tensor>,
     /// Average per-expert utilization across active MoE layers.
     pub expert_utilization: Vec<f32>,
+    /// Average periodic DSA indexer teacher loss when requested.
+    pub dsa_indexer_loss: Option<Tensor>,
+    /// Average top-k block recall against the dense teacher.
+    pub dsa_top_k_recall: Option<f32>,
+    /// Sparse attention selection and fallback counters.
+    pub dsa_stats: DsaForwardStats,
 }
 
 impl AarambhModel {
@@ -61,31 +68,23 @@ impl AarambhModel {
                 cfg.norm_eps as f32,
             );
 
-            let attention_kind = cfg
-                .attention_schedule
-                .as_ref()
-                .map(|schedule| schedule.kind_for_layer(layer_idx))
-                .unwrap_or(AttentionKind::Full);
+            let attention_kind = cfg.attention_kind_for_layer(layer_idx);
             let mixer = match attention_kind {
                 AttentionKind::Full => {
-                    let attn_vb = block_vb.pp("attn");
-                    let head_dim = cfg.head_dim();
-                    TokenMixer::Attention(GroupedQueryAttention::new(
-                        linear_no_bias(cfg.hidden_dim, cfg.n_heads * head_dim, attn_vb.pp("wq"))?,
-                        linear_no_bias(
-                            cfg.hidden_dim,
-                            cfg.n_kv_heads * head_dim,
-                            attn_vb.pp("wk"),
-                        )?,
-                        linear_no_bias(
-                            cfg.hidden_dim,
-                            cfg.n_kv_heads * head_dim,
-                            attn_vb.pp("wv"),
-                        )?,
-                        linear_no_bias(cfg.n_heads * head_dim, cfg.hidden_dim, attn_vb.pp("wo"))?,
-                        cfg.n_heads,
-                        cfg.n_kv_heads,
-                        head_dim,
+                    TokenMixer::Attention(build_attention(cfg, block_vb.clone())?)
+                }
+                AttentionKind::Sparse => {
+                    let index_dim = cfg.head_dim();
+                    let dsa_vb = block_vb.pp("dsa");
+                    TokenMixer::Sparse(DsaAttention::new(
+                        build_attention(cfg, block_vb.clone())?,
+                        linear_no_bias(cfg.hidden_dim, index_dim, dsa_vb.pp("index_q"))?,
+                        linear_no_bias(cfg.hidden_dim, index_dim, dsa_vb.pp("index_k"))?,
+                        cfg.dsa_config
+                            .as_ref()
+                            .expect("validated DSA config is present")
+                            .clone(),
+                        index_dim,
                     ))
                 }
                 AttentionKind::GatedDeltaNet => TokenMixer::GatedDelta(build_gated_deltanet(
@@ -209,6 +208,22 @@ impl AarambhModel {
         if let Some(schedule) = &cfg.attention_schedule {
             schedule.validate(cfg.n_layers, cfg.hidden_dim, cfg.n_heads)?;
         }
+        if let Some(dsa) = &cfg.dsa_config {
+            dsa.validate()?;
+            if cfg.attention_schedule.is_none() {
+                return Err(AarambhError::Config(
+                    "dsa_config requires attention_schedule so sparse and Gated DeltaNet layers are explicit"
+                        .into(),
+                ));
+            }
+            if !(0..cfg.n_layers)
+                .any(|layer| cfg.attention_kind_for_layer(layer) == AttentionKind::Sparse)
+            {
+                return Err(AarambhError::Config(
+                    "dsa_config does not select any sparse attention layer".into(),
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -258,9 +273,18 @@ impl AarambhModel {
 
     /// Run the training forward path and collect MoE auxiliary metadata.
     pub fn forward_train_with_aux(&self, token_ids: &Tensor) -> Result<ModelForwardOutput> {
+        self.forward_train_with_aux_and_dsa_teacher(token_ids, false)
+    }
+
+    /// Run training and optionally collect the periodic dense DSA teacher loss.
+    pub fn forward_train_with_aux_and_dsa_teacher(
+        &self,
+        token_ids: &Tensor,
+        collect_dsa_teacher: bool,
+    ) -> Result<ModelForwardOutput> {
         self.check_token_ids(token_ids, 0)?;
         let x = self.embedding.forward(token_ids)?;
-        self.forward_embeddings_train_with_aux(&x)
+        self.forward_embeddings_train_with_aux_and_dsa_teacher(&x, collect_dsa_teacher)
     }
 
     /// Run the training forward path over embeddings and collect MoE auxiliary metadata.
@@ -268,11 +292,31 @@ impl AarambhModel {
         &self,
         embeddings: &Tensor,
     ) -> Result<ModelForwardOutput> {
+        self.forward_embeddings_train_with_aux_and_dsa_teacher(embeddings, false)
+    }
+
+    /// Run embedding training and optionally collect the DSA teacher objective.
+    pub fn forward_embeddings_train_with_aux_and_dsa_teacher(
+        &self,
+        embeddings: &Tensor,
+        collect_dsa_teacher: bool,
+    ) -> Result<ModelForwardOutput> {
         self.check_embeddings(embeddings, 0)?;
         let mut stats = MoeForwardStats::default();
+        let mut dsa_stats = DsaForwardStats::default();
+        let mut dsa_teachers = Vec::new();
         let mut x = embeddings.clone();
         for block in &self.blocks {
-            x = block.forward_train_with_stats(&x, &self.rope_cache, None, 0, &mut stats)?;
+            x = block.forward_train_with_stats(
+                &x,
+                &self.rope_cache,
+                None,
+                0,
+                &mut stats,
+                &mut dsa_stats,
+                collect_dsa_teacher,
+                &mut dsa_teachers,
+            )?;
         }
 
         let x = self.final_norm.forward_train(&x)?;
@@ -281,6 +325,15 @@ impl AarambhModel {
             logits,
             moe_aux_loss: stats.aux_loss()?,
             expert_utilization: stats.expert_utilization(),
+            dsa_indexer_loss: average_dsa_loss(&dsa_teachers)?,
+            dsa_top_k_recall: (!dsa_teachers.is_empty()).then(|| {
+                dsa_teachers
+                    .iter()
+                    .map(|teacher| teacher.top_k_recall)
+                    .sum::<f32>()
+                    / dsa_teachers.len() as f32
+            }),
+            dsa_stats,
         })
     }
 
@@ -412,6 +465,10 @@ impl AarambhModel {
             .iter()
             .map(|block| match block.mixer() {
                 TokenMixer::Attention(_) => HybridKvCache::Full(KVCache::with_capacity(capacity)),
+                TokenMixer::Sparse(attn) => HybridKvCache::Sparse(DsaKvCache::with_capacity(
+                    capacity,
+                    attn.config().block_size,
+                )),
                 TokenMixer::GatedDelta(_) => HybridKvCache::Linear(DeltaNetState::new()),
             })
             .collect()
@@ -471,6 +528,8 @@ impl AarambhModel {
                 "attn.wk.weight" => block.mixer().as_attention().map(|v| v.wk_weight()),
                 "attn.wv.weight" => block.mixer().as_attention().map(|v| v.wv_weight()),
                 "attn.wo.weight" => block.mixer().as_attention().map(|v| v.wo_weight()),
+                "dsa.index_q.weight" => block.mixer().as_sparse().map(DsaAttention::index_q_weight),
+                "dsa.index_k.weight" => block.mixer().as_sparse().map(DsaAttention::index_k_weight),
                 "norm2.weight" => Some(block.norm2().weight()),
                 "ffn.w_gate.weight" => block.ffn().as_dense().map(SwiGluFfn::w_gate_weight),
                 "ffn.w_up.weight" => block.ffn().as_dense().map(SwiGluFfn::w_up_weight),
@@ -623,6 +682,28 @@ fn insert_mixer_tensors(
                 );
             }
         }
+        TokenMixer::Sparse(sparse) => {
+            let attn = sparse.attention();
+            for (name, tensor) in [
+                ("wq", attn.wq_weight()),
+                ("wk", attn.wk_weight()),
+                ("wv", attn.wv_weight()),
+                ("wo", attn.wo_weight()),
+            ] {
+                tensors.insert(
+                    format!("blocks.{layer_idx}.attn.{name}.weight"),
+                    tensor.clone(),
+                );
+            }
+            tensors.insert(
+                format!("blocks.{layer_idx}.dsa.index_q.weight"),
+                sparse.index_q_weight().clone(),
+            );
+            tensors.insert(
+                format!("blocks.{layer_idx}.dsa.index_k.weight"),
+                sparse.index_k_weight().clone(),
+            );
+        }
         TokenMixer::GatedDelta(layer) => {
             for (name, tensor) in layer.named_tensors() {
                 tensors.insert(
@@ -632,6 +713,31 @@ fn insert_mixer_tensors(
             }
         }
     }
+}
+
+fn build_attention(cfg: &ModelConfig, block_vb: VarBuilder<'_>) -> Result<GroupedQueryAttention> {
+    let attn_vb = block_vb.pp("attn");
+    let head_dim = cfg.head_dim();
+    Ok(GroupedQueryAttention::new(
+        linear_no_bias(cfg.hidden_dim, cfg.n_heads * head_dim, attn_vb.pp("wq"))?,
+        linear_no_bias(cfg.hidden_dim, cfg.n_kv_heads * head_dim, attn_vb.pp("wk"))?,
+        linear_no_bias(cfg.hidden_dim, cfg.n_kv_heads * head_dim, attn_vb.pp("wv"))?,
+        linear_no_bias(cfg.n_heads * head_dim, cfg.hidden_dim, attn_vb.pp("wo"))?,
+        cfg.n_heads,
+        cfg.n_kv_heads,
+        head_dim,
+    ))
+}
+
+fn average_dsa_loss(teachers: &[DsaTeacherOutput]) -> Result<Option<Tensor>> {
+    let Some(first) = teachers.first() else {
+        return Ok(None);
+    };
+    let mut loss = first.loss.clone();
+    for teacher in &teachers[1..] {
+        loss = (loss + &teacher.loss)?;
+    }
+    Ok(Some(loss.affine(1.0 / teachers.len() as f64, 0.0)?))
 }
 
 fn build_gated_deltanet(

@@ -127,6 +127,7 @@ mod tests {
                     chunk_size: 16,
                 },
             }),
+            dsa_config: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };

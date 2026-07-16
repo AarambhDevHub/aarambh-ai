@@ -1,5 +1,39 @@
 # Changelog
 
+## [3.0.0-alpha.2] - 2026-07-16
+
+### Added
+
+- **Phase 30 DeepSeek Sparse Attention (DSA)**
+  - Added learned block indexing on Phase 29's scheduled GQA layers, causal
+    top-k block selection, mandatory current-block access, and exact dense
+    fallback below the configured threshold.
+  - Added compact pooled index-key cache state with cached prefill, decode,
+    batched generation, and speculative snapshot compatibility.
+  - Added periodic dense-attention-mass distillation, listwise KL indexer loss,
+    top-k recall, selected-block/token counters, and dense-fallback metrics.
+  - Added Rayon online-softmax sparse attention plus CUDA top-k, sparse forward,
+    and teacher-mass PTX kernels for F32, F16, and BF16.
+  - Added Phase 29 checkpoint retrofit, SafeTensors/GGUF round trips, Q8 indexer
+    preservation, CPU/CUDA smoke configs, Medium/Large recipes, and 4K/16K/32K
+    comparison tooling.
+
+### Changed
+
+- The default v3 hybrid schedule now turns its remaining full-attention slots
+  into DSA layers when `[model.dsa_config]` is present.
+- Inference `--stats` reports DSA stored-cache bytes separately from the
+  selected K/V working set. DSA reduces compute and memory bandwidth, while
+  total K/V storage remains linear in context length.
+- Workspace version is now `3.0.0-alpha.2`.
+
+### Verified
+
+- Exact short-context dense fallback and full-sequence/cached sparse parity.
+- Causal deterministic block selection and indexer-only teacher gradients.
+- Phase 29 retrofit fidelity and DSA SafeTensors/GGUF compatibility.
+- Two-step CPU training coverage for teacher and sparse-only optimizer steps.
+
 ## [3.0.0-alpha.1] - 2026-07-15
 
 ### Added

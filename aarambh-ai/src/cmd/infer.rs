@@ -246,7 +246,7 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
         if let Some(output) = &response.output {
             eprintln!("finish_reason={:?}", output.finish_reason);
             if args.stats {
-                print_generation_stats("target", output, elapsed);
+                print_generation_stats("target", output, elapsed, &run_config);
             }
         } else {
             eprintln!("finish_reason=SafetyBlocked");
@@ -281,7 +281,7 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
     io::stdout().flush()?;
     eprintln!("finish_reason={:?}", output.finish_reason);
     if args.stats {
-        print_generation_stats("target", &output, elapsed);
+        print_generation_stats("target", &output, elapsed, &run_config);
     }
     Ok(())
 }
@@ -353,7 +353,7 @@ fn run_speculative_infer(
         if let Some(output) = &response.output {
             eprintln!("finish_reason={:?}", output.finish_reason);
             if args.stats {
-                print_generation_stats("speculative", output, elapsed);
+                print_generation_stats("speculative", output, elapsed, target_config);
             }
         } else {
             eprintln!("finish_reason=SafetyBlocked");
@@ -381,7 +381,7 @@ fn run_speculative_infer(
     io::stdout().flush()?;
     eprintln!("finish_reason={:?}", output.finish_reason);
     if args.stats {
-        print_generation_stats("speculative", &output, elapsed);
+        print_generation_stats("speculative", &output, elapsed, target_config);
     }
     Ok(())
 }
@@ -522,7 +522,12 @@ fn load_tool_calling_config(
     Ok(Some(ToolCallingConfig::new(definitions, choice)?))
 }
 
-fn print_generation_stats(mode: &str, output: &GenerationOutput, elapsed: Duration) {
+fn print_generation_stats(
+    mode: &str,
+    output: &GenerationOutput,
+    elapsed: Duration,
+    run_config: &TrainingRunConfig,
+) {
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
     let tokens_per_second = if elapsed.is_zero() {
         0.0
@@ -545,6 +550,32 @@ fn print_generation_stats(mode: &str, output: &GenerationOutput, elapsed: Durati
         eprintln!(
             "generation_stats mode={mode} tokens={} elapsed_ms={elapsed_ms:.3} tok_s={tokens_per_second:.3}",
             output.token_ids.len(),
+        );
+    }
+    if let Some(dsa) = &run_config.model.dsa_config {
+        let sparse_layers = (0..run_config.model.n_layers)
+            .filter(|layer| {
+                run_config.model.attention_kind_for_layer(*layer)
+                    == aarambh_ai_core::AttentionKind::Sparse
+            })
+            .count();
+        let seq_len = output.usage.total_tokens;
+        let dtype_bytes = match run_config.dtype.trim().to_ascii_lowercase().as_str() {
+            "f16" | "fp16" | "bf16" => 2usize,
+            _ => 4usize,
+        };
+        let kv_row_elements = 2 * run_config.model.n_kv_heads * run_config.model.head_dim();
+        let stored_kv_bytes = sparse_layers * seq_len * kv_row_elements * dtype_bytes;
+        let index_bytes = sparse_layers
+            * seq_len.div_ceil(dsa.block_size)
+            * run_config.model.head_dim()
+            * std::mem::size_of::<f32>();
+        let selected_tokens = seq_len.min(dsa.top_k_blocks * dsa.block_size);
+        let selected_working_set_bytes =
+            sparse_layers * selected_tokens * kv_row_elements * dtype_bytes;
+        eprintln!(
+            "dsa_cache_stats sparse_layers={sparse_layers} stored_cache_bytes={} selected_working_set_bytes={selected_working_set_bytes} selected_token_limit={selected_tokens}",
+            stored_kv_bytes + index_bytes,
         );
     }
 }

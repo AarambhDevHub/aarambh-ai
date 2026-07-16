@@ -6,10 +6,10 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.89%2B-orange.svg)](https://www.rust-lang.org)
 
-A decoder-only hybrid language model with GQA plus Gated DeltaNet, four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA/DoRA fine-tuning, GRPO and DPO alignment, exact speculative decoding, grammar-constrained function calling, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, evaluation harness, a frozen-encoder vision projector path, and an OpenAI-compatible inference server — all in one clean 17-crate Rust workspace.
+A decoder-only hybrid language model with learned block-sparse GQA plus Gated DeltaNet, four model scales, a three-level thinking engine, full training pipeline, quantisation (INT8/INT4/GGUF), LoRA/QLoRA/DoRA fine-tuning, GRPO and DPO alignment, exact speculative decoding, grammar-constrained function calling, custom CUDA + SIMD kernels, safety guardrails, self-learning loop, evaluation harness, a frozen-encoder vision projector path, and an OpenAI-compatible inference server — all in one clean 17-crate Rust workspace.
 
 v2.0.0 is the production GitHub source release; the current mainline is
-v3.0.0-alpha.1. The workspace crates are internal
+v3.0.0-alpha.2. The workspace crates are internal
 implementation units and remain non-publishable; no pretrained checkpoints or
 compiled binaries are attached to the release.
 
@@ -54,6 +54,7 @@ compiled binaries are attached to the release.
 | OpenAI-compatible Axum HTTP/SSE server with continuous batching | Phase 27 ✅ |
 | Production v2.0 source release: locked dependencies, strict docs, CI and release audit | Phase 28 ✅ |
 | Hybrid Gated DeltaNet: fixed recurrent state, full-attention schedule, v2 retrofit | Phase 29 ✅ |
+| DeepSeek Sparse Attention: learned block indexer, sparse GQA, teacher distillation | Phase 30 ✅ |
 
 ---
 
@@ -301,6 +302,42 @@ cargo run --release -p aarambh-ai -- eval \
 `scripts/phase29_benchmark_hybrid.sh` with matched dense and hybrid checkpoints
 to report release-mode `tok/s`; the script reports measurements and does not
 turn hardware-specific throughput into a CI gate.
+
+---
+
+## DeepSeek Sparse Attention
+
+Phase 30 replaces the Phase 29 schedule's remaining full-attention slots with
+learned block-sparse GQA when `[model.dsa_config]` is present. Each query uses
+a low-rank indexer to rank completed causal blocks, always includes its current
+block, restores selected blocks to chronological order, and runs unchanged
+scaled-dot-product attention over only those K/V rows. Short sequences and
+cases where all blocks fit in `top_k_blocks` use exact dense attention.
+
+```sh
+# Two optimizer steps on CPU: step 0 includes the dense teacher and step 1 is sparse-only.
+cargo run --release -p aarambh-ai -- train --config configs/dsa_smoke.toml
+
+# CUDA/BF16 smoke path with compiled DSA PTX when NVCC is available.
+cargo run --release -p aarambh-ai --features cuda -- train \
+  --config configs/dsa_cuda_smoke.toml
+
+# Prepare a Phase 29 hybrid checkpoint for DSA retrofit training.
+scripts/phase30_prepare_dsa_retrofit.sh \
+  data checkpoints/wikitext103_medium_hybrid/model.safetensors
+
+# Continue Medium training with newly initialized indexers.
+cargo run --release -p aarambh-ai --features cuda -- train \
+  --config configs/medium_hybrid_dsa.toml
+```
+
+`configs/large_hybrid_dsa.toml` is the 32K Large recipe. During periodic
+teacher steps, dense attention mass supervises the indexer with a listwise KL
+loss; ordinary steps use sparse attention. `infer --stats` reports stored DSA
+cache bytes and selected working-set bytes separately. DSA still stores full
+K/V for its layers, so storage is O(context); the savings are attention compute
+and K/V bandwidth. `scripts/phase30_benchmark_dsa.sh` compares matched Phase 29
+and DSA checkpoints at 4K, 16K, and 32K requested contexts.
 
 ---
 
@@ -1173,11 +1210,13 @@ aarambh-ai/
 | 27 | OpenAI-compatible inference server | i3 | ✅ |
 | 28 | Production release v2.0.0 | all | ✅ |
 | 29 | Gated DeltaNet hybrid linear attention | i3 + GPU | ✅ |
+| 30 | DeepSeek Sparse Attention | i3 + GPU | ✅ |
 
 See [ROADMAP.md](ROADMAP.md), [ROADMAP_V2.md](ROADMAP_V2.md), and
 [ROADMAP_V3.md](ROADMAP_V3.md) for the full phased delivery plans with tests
-and milestones. Phase 29's design details are in
-[ARCHITECTURE_V3.md](ARCHITECTURE_V3.md#38-gated-deltanet-hybrid-linear-attention).
+and milestones. Phase 29 and Phase 30 design details are in
+[ARCHITECTURE_V3.md](ARCHITECTURE_V3.md#38-gated-deltanet-hybrid-linear-attention)
+and [ARCHITECTURE_V3.md](ARCHITECTURE_V3.md#39-deepseek-sparse-attention-dsa).
 
 ---
 

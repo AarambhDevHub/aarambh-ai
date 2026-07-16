@@ -1,6 +1,6 @@
 use aarambh_ai_core::{
-    GatedDeltaNetConfig, HybridAttentionSchedule, ModelConfig, MoeConfig, RopeScalingConfig,
-    RopeScalingMethod,
+    DsaConfig, GatedDeltaNetConfig, HybridAttentionSchedule, ModelConfig, MoeConfig,
+    RopeScalingConfig, RopeScalingMethod,
 };
 use aarambh_ai_model::AarambhModel;
 use candle_core::{DType, Device, Tensor};
@@ -19,6 +19,7 @@ fn mini_config() -> ModelConfig {
         rope_scaling: None,
         moe: None,
         attention_schedule: None,
+        dsa_config: None,
         norm_eps: 1e-5,
         tie_embeddings: true,
     }
@@ -72,6 +73,18 @@ fn hybrid_mini_config() -> ModelConfig {
             },
         }),
         ..mini_config()
+    }
+}
+
+fn dsa_mini_config() -> ModelConfig {
+    ModelConfig {
+        max_seq_len: 32,
+        dsa_config: Some(DsaConfig {
+            block_size: 16,
+            top_k_blocks: 1,
+            min_seq_len_for_sparsity: 16,
+        }),
+        ..hybrid_mini_config()
     }
 }
 
@@ -219,6 +232,104 @@ fn hybrid_training_backward_reaches_deltanet_parameters() {
         }),
         "{layer_gradients:?}"
     );
+}
+
+#[test]
+fn dsa_cached_forward_matches_full_sparse_forward() {
+    let device = Device::Cpu;
+    let cfg = dsa_mini_config();
+    let varmap = VarMap::new();
+    let model =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&varmap, DType::F32, &device)).unwrap();
+    let ids = Tensor::from_vec(
+        (0..32).map(|value| (value % 127 + 1) as u32).collect(),
+        (1, 32),
+        &device,
+    )
+    .unwrap();
+    let full_last = model.forward(&ids).unwrap().narrow(1, 31, 1).unwrap();
+    let mut caches = model.empty_kv_cache();
+    assert!(caches[0].as_sparse().is_some());
+    assert!(caches[1].as_linear().is_some());
+    let mut cached_last = None;
+    for position in 0..32 {
+        cached_last = Some(
+            model
+                .forward_with_cache(&ids.narrow(1, position, 1).unwrap(), position, &mut caches)
+                .unwrap(),
+        );
+    }
+    let max_diff = (full_last - cached_last.unwrap())
+        .unwrap()
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    assert!(max_diff < 1e-4, "DSA cached/full mismatch: {max_diff}");
+    assert_eq!(caches[0].as_sparse().unwrap().completed_blocks(), 2);
+}
+
+#[test]
+fn dsa_dense_fallback_matches_phase29_attention_exactly() {
+    let device = Device::Cpu;
+    let dsa_cfg = dsa_mini_config();
+    let vars = VarMap::new();
+    let dsa = AarambhModel::new(
+        &dsa_cfg,
+        VarBuilder::from_varmap(&vars, DType::F32, &device),
+    )
+    .unwrap();
+    let mut dense_cfg = dsa_cfg.clone();
+    dense_cfg.dsa_config = None;
+    let dense = AarambhModel::new(
+        &dense_cfg,
+        VarBuilder::from_tensors(dsa.named_tensors(), DType::F32, &device),
+    )
+    .unwrap();
+    let ids = Tensor::from_vec((1..=8).collect::<Vec<u32>>(), (1, 8), &device).unwrap();
+    let max_diff = (dsa.forward(&ids).unwrap() - dense.forward(&ids).unwrap())
+        .unwrap()
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    assert_eq!(max_diff, 0.0);
+}
+
+#[test]
+fn dsa_teacher_loss_reaches_only_indexer_parameters() {
+    let device = Device::Cpu;
+    let cfg = dsa_mini_config();
+    let vars = VarMap::new();
+    let model =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&vars, DType::F32, &device)).unwrap();
+    let ids = Tensor::from_vec(
+        (0..32).map(|value| (value % 127 + 1) as u32).collect(),
+        (1, 32),
+        &device,
+    )
+    .unwrap();
+    let output = model
+        .forward_train_with_aux_and_dsa_teacher(&ids, true)
+        .unwrap();
+    let loss = output.dsa_indexer_loss.unwrap();
+    assert!(loss.to_scalar::<f32>().unwrap().is_finite());
+    assert!(output.dsa_top_k_recall.unwrap().is_finite());
+    let grads = loss.backward().unwrap();
+    let variables = vars.data().lock().unwrap();
+    assert!(variables.iter().any(|(name, variable)| {
+        name == "blocks.0.dsa.index_q.weight" && grads.get(variable.as_tensor()).is_some()
+    }));
+    assert!(variables.iter().any(|(name, variable)| {
+        name == "blocks.0.dsa.index_k.weight" && grads.get(variable.as_tensor()).is_some()
+    }));
+    assert!(variables.iter().all(|(name, variable)| {
+        name.contains(".dsa.") || grads.get(variable.as_tensor()).is_none()
+    }));
 }
 
 #[test]

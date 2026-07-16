@@ -44,6 +44,129 @@ impl GroupedQueryAttention {
         }
     }
 
+    pub(crate) fn project_inference(
+        &self,
+        x: &Tensor,
+        rope: &RopeCache,
+        seqlen_offset: usize,
+    ) -> Result<(Tensor, Tensor, Tensor)> {
+        let (batch, seq_len, _) = x.dims3()?;
+        let q = self
+            .wq
+            .forward(x)?
+            .reshape((batch, seq_len, self.n_heads, self.head_dim))?;
+        let k = self
+            .wk
+            .forward(x)?
+            .reshape((batch, seq_len, self.n_kv_heads, self.head_dim))?;
+        let v = self
+            .wv
+            .forward(x)?
+            .reshape((batch, seq_len, self.n_kv_heads, self.head_dim))?;
+        let (q, k) = rope.apply_inference(&q, &k, seqlen_offset)?;
+        Ok((q, k, v))
+    }
+
+    pub(crate) fn project_train(
+        &self,
+        x: &Tensor,
+        rope: &RopeCache,
+        seqlen_offset: usize,
+    ) -> Result<(Tensor, Tensor, Tensor)> {
+        let (batch, seq_len, _) = x.dims3()?;
+        let q = self
+            .wq
+            .forward(x)?
+            .reshape((batch, seq_len, self.n_heads, self.head_dim))?;
+        let k = self
+            .wk
+            .forward(x)?
+            .reshape((batch, seq_len, self.n_kv_heads, self.head_dim))?;
+        let v = self
+            .wv
+            .forward(x)?
+            .reshape((batch, seq_len, self.n_kv_heads, self.head_dim))?;
+        let (q, k) = rope.apply(&q, &k, seqlen_offset)?;
+        Ok((q, k, v))
+    }
+
+    pub(crate) fn attend_projected(
+        &self,
+        q: &Tensor,
+        k: &Tensor,
+        v: &Tensor,
+        mask: Option<&Tensor>,
+        training: bool,
+    ) -> Result<Tensor> {
+        let (batch, seq_len, _, _) = q.dims4()?;
+        let n_repeats = self.n_heads / self.n_kv_heads;
+        let k = repeat_heads(k, n_repeats)?;
+        let v = repeat_heads(v, n_repeats)?;
+        let q = q.transpose(1, 2)?.contiguous()?;
+        let k = k.transpose(1, 2)?.contiguous()?;
+        let v = v.transpose(1, 2)?.contiguous()?;
+        let out = if training && mask.is_some() {
+            aarambh_ai_kernel::dispatch::attention_forward_candle(&q, &k, &v, mask, self.scale)?
+        } else if mask.is_some() {
+            // DSA supplies a general additive mask that must not be collapsed
+            // into the boolean causal fast-path.
+            aarambh_ai_kernel::dispatch::attention_forward_additive(
+                &q,
+                &k,
+                &v,
+                mask.expect("checked additive attention mask is present"),
+                self.scale,
+            )?
+        } else if training {
+            aarambh_ai_kernel::dispatch::attention_forward_train_causal(&q, &k, &v, self.scale)?
+        } else {
+            aarambh_ai_kernel::dispatch::attention_forward_causal(&q, &k, &v, self.scale)?
+        };
+        let out = out
+            .transpose(1, 2)?
+            .reshape((batch, seq_len, self.n_heads * self.head_dim))?;
+        self.wo.forward(&out)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn attend_projected_sparse(
+        &self,
+        q: &Tensor,
+        k: &Tensor,
+        v: &Tensor,
+        mask: &Tensor,
+        selected_blocks: &[u32],
+        selected_per_query: usize,
+        block_size: usize,
+        training: bool,
+    ) -> Result<Tensor> {
+        let (batch, seq_len, _, _) = q.dims4()?;
+        let n_repeats = self.n_heads / self.n_kv_heads;
+        let k = repeat_heads(k, n_repeats)?;
+        let v = repeat_heads(v, n_repeats)?;
+        let q = q.transpose(1, 2)?.contiguous()?;
+        let k = k.transpose(1, 2)?.contiguous()?;
+        let v = v.transpose(1, 2)?.contiguous()?;
+        let out = if training {
+            aarambh_ai_kernel::attention_forward_candle(&q, &k, &v, Some(mask), self.scale)?
+        } else {
+            aarambh_ai_kernel::dsa_sparse_attention_forward(
+                &q,
+                &k,
+                &v,
+                mask,
+                selected_blocks,
+                selected_per_query,
+                block_size,
+                self.scale,
+            )?
+        };
+        let out = out
+            .transpose(1, 2)?
+            .reshape((batch, seq_len, self.n_heads * self.head_dim))?;
+        self.wo.forward(&out)
+    }
+
     /// Run inference attention, optionally updating a KV cache.
     pub fn forward(
         &self,

@@ -138,6 +138,9 @@ fn encode_tensor(
     if tensor.dims().len() != 2 || name.contains("_conv.") {
         return Ok((TensorEncoding::F32, encode_f32_tensor(tensor)?));
     }
+    if name.contains(".dsa.index_") {
+        return Ok((TensorEncoding::Q8_0, encode_q8_tensor(tensor)?));
+    }
     match format {
         GgufFormat::Q80 => Ok((TensorEncoding::Q8_0, encode_q8_tensor(tensor)?)),
         GgufFormat::Q4KM | GgufFormat::Q5KM => {

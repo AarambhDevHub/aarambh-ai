@@ -360,6 +360,34 @@ explicit config fallback (`dsa_config: None` on a Full-attention-scheduled
 layer) for debugging and side-by-side comparison, not removed from the
 codebase.
 
+### 39.4 Phase 30 implementation contract
+
+Phase 30 implements DSA at causal block granularity. `DsaAttention` preserves
+the existing `blocks.N.attn.*` projection names and adds only
+`blocks.N.dsa.index_q.weight` and `blocks.N.dsa.index_k.weight`, so a Phase 29
+checkpoint retrofits without remapping its trained tensors. The index width is
+the attention head width and receives the same RoPE/YaRN positions as GQA.
+
+Completed index-key blocks are pooled in FP32. Selection is shared across all
+GQA query heads, deterministic on ties, always contains the current partial
+block, excludes future blocks and future tokens within the current block, and
+returns chosen blocks in chronological order. Dense fallback is exact below
+`min_seq_len_for_sparsity` or whenever the causal block count fits in
+`top_k_blocks`.
+
+`DsaKvCache` stores the ordinary full K/V tensors, one pooled index key per
+completed block, and at most one active block of index keys. The selected K/V
+working set is bounded by `top_k_blocks * block_size`, but total K/V cache
+storage remains O(sequence length). Inference statistics therefore report
+stored cache and selected working-set bytes as separate quantities.
+
+Every eighth optimizer step by default computes true dense causal attention
+mass aggregated by key block and query head. That detached distribution trains
+only the low-rank indexer with listwise KL; ordinary steps train the model
+through sparse attention. CPU inference uses a Rayon selected-mask online
+softmax path. CUDA builds include F32/F16/BF16 top-k, selected-block forward,
+and teacher-mass PTX kernels, with Candle fallbacks for unsupported builds.
+
 ---
 
 ## 40. Fine-Grained MoE with Shared Expert

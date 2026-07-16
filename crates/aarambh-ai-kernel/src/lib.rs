@@ -10,6 +10,8 @@
 pub mod cpu;
 /// Runtime dispatch between Candle fallback, CPU kernels, and CUDA kernels.
 pub mod dispatch;
+/// DeepSeek-style selected-block sparse attention kernels.
+pub mod dsa;
 /// Flash Attention kernel entrypoints.
 pub mod flash_attn;
 /// Fused feed-forward kernel entrypoints.
@@ -23,6 +25,7 @@ pub mod gated_delta;
 
 pub use dispatch::KernelPath;
 pub use dispatch::attention_forward;
+pub use dispatch::attention_forward_additive;
 pub use dispatch::attention_forward_candle;
 pub use dispatch::attention_forward_candle_causal;
 pub use dispatch::attention_forward_causal;
@@ -32,4 +35,5 @@ pub use dispatch::attention_path;
 pub use dispatch::gated_delta_path;
 pub use dispatch::rms_norm;
 pub use dispatch::rms_norm_path;
+pub use dsa::dsa_sparse_attention_forward;
 pub use gated_delta::gated_delta_recurrent;

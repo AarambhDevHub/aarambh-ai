@@ -24,6 +24,8 @@ pub struct RetrofitLoadReport {
     pub loaded_tensors: usize,
     /// Number of new Gated DeltaNet tensors left at their fresh initialization.
     pub initialized_deltanet_tensors: usize,
+    /// Number of new DSA indexer tensors left at their fresh initialization.
+    pub initialized_dsa_tensors: usize,
 }
 
 /// Save an Aarambh model as a safetensors checkpoint.
@@ -58,7 +60,8 @@ pub fn load_model_with_dtype(
 /// Copy a dense SafeTensors checkpoint into an initialized hybrid-model variable map.
 ///
 /// All embedding, normalization, FFN/MoE, output-head, and scheduled full-attention
-/// parameters must exist and match shape. Only new `deltanet` parameters may be absent.
+/// parameters must exist and match shape. Only new `deltanet` and `dsa`
+/// parameters may be absent.
 pub fn load_retrofit_into_varmap(
     path: impl AsRef<Path>,
     cfg: &ModelConfig,
@@ -74,6 +77,7 @@ pub fn load_retrofit_into_varmap(
     let source = candle_core::safetensors::load(path.as_ref(), device)?;
     let mut loaded_tensors = 0usize;
     let mut initialized_deltanet_tensors = 0usize;
+    let mut initialized_dsa_tensors = 0usize;
     let variables = varmap.data().lock().unwrap();
     for (name, variable) in variables.iter() {
         match source.get(name) {
@@ -96,6 +100,9 @@ pub fn load_retrofit_into_varmap(
             None if name.contains(".deltanet.") => {
                 initialized_deltanet_tensors += 1;
             }
+            None if name.contains(".dsa.") => {
+                initialized_dsa_tensors += 1;
+            }
             None => {
                 return Err(aarambh_ai_core::AarambhError::Checkpoint(format!(
                     "retrofit source is missing required tensor {name}"
@@ -107,6 +114,7 @@ pub fn load_retrofit_into_varmap(
     Ok(RetrofitLoadReport {
         loaded_tensors,
         initialized_deltanet_tensors,
+        initialized_dsa_tensors,
     })
 }
 

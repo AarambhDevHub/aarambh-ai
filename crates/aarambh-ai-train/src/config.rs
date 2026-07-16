@@ -18,6 +18,42 @@ use crate::distributed::{
 use crate::trainer::Trainer;
 use crate::vision_projector::{self, VisionTrainingConfig};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+/// Periodic dense-teacher settings for DSA indexer training.
+pub struct DsaTrainingConfig {
+    /// Optimizer-step interval between dense teacher forwards.
+    pub teacher_every_n_steps: usize,
+    /// Weight applied to the indexer listwise KL objective.
+    pub indexer_loss_weight: f64,
+}
+
+impl Default for DsaTrainingConfig {
+    fn default() -> Self {
+        Self {
+            teacher_every_n_steps: 8,
+            indexer_loss_weight: 1.0,
+        }
+    }
+}
+
+impl DsaTrainingConfig {
+    /// Validate teacher cadence and loss scaling.
+    pub fn validate(&self) -> Result<()> {
+        if self.teacher_every_n_steps == 0 {
+            return Err(AarambhError::Config(
+                "dsa_training.teacher_every_n_steps must be non-zero".into(),
+            ));
+        }
+        if self.indexer_loss_weight < 0.0 || !self.indexer_loss_weight.is_finite() {
+            return Err(AarambhError::Config(
+                "dsa_training.indexer_loss_weight must be finite and non-negative".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 /// One progressive context-length training stage.
 pub struct ContextScheduleStage {
@@ -63,6 +99,8 @@ pub struct TrainingRunConfig {
     pub context_schedule: Vec<ContextScheduleStage>,
     /// Optional vision training mode and data configuration.
     pub vision: Option<VisionTrainingConfig>,
+    /// DSA indexer teacher cadence and auxiliary-loss weight.
+    pub dsa_training: DsaTrainingConfig,
 }
 
 impl Default for TrainingRunConfig {
@@ -84,6 +122,7 @@ impl Default for TrainingRunConfig {
             distributed: None,
             context_schedule: Vec::new(),
             vision: None,
+            dsa_training: DsaTrainingConfig::default(),
         }
     }
 }
@@ -176,6 +215,7 @@ impl TrainingRunConfig {
         if let Some(distributed) = &self.distributed {
             distributed.validate()?;
         }
+        self.dsa_training.validate()?;
         self.validate_context_schedule()?;
         Ok(())
     }
@@ -317,13 +357,15 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
         dtype,
         distributed_context,
     )?;
+    trainer.set_dsa_training_config(config.dsa_training.clone());
     if let Some(path) = &config.retrofit_from {
         let report = trainer.load_retrofit_checkpoint(path, dtype)?;
         if trainer.is_rank0() {
             println!(
-                "hybrid retrofit: loaded={} initialized_deltanet={} lr_scale={:.3}",
+                "hybrid retrofit: loaded={} initialized_deltanet={} initialized_dsa={} lr_scale={:.3}",
                 report.loaded_tensors,
                 report.initialized_deltanet_tensors,
+                report.initialized_dsa_tensors,
                 config.retrofit_lr_scale
             );
         }
@@ -591,6 +633,26 @@ mod tests {
                 .unwrap_or_else(|err| panic!("{name}: {err}"));
             AarambhModel::validate_config(&config.model)
                 .unwrap_or_else(|err| panic!("{name}: {err}"));
+        }
+    }
+
+    #[test]
+    fn phase30_dsa_configs_parse_and_validate() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for name in [
+            "dsa_smoke.toml",
+            "dsa_cuda_smoke.toml",
+            "medium_hybrid_dsa.toml",
+            "large_hybrid_dsa.toml",
+        ] {
+            let config = TrainingRunConfig::from_toml(workspace.join("configs").join(name))
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            config
+                .validate()
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            AarambhModel::validate_config(&config.model)
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            assert!(config.model.dsa_config.is_some(), "{name}");
         }
     }
 }
