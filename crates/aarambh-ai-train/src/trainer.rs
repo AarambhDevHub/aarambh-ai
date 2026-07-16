@@ -9,6 +9,7 @@ use candle_core::backprop::GradStore;
 use candle_nn::{VarBuilder, VarMap};
 
 use crate::checkpoint::{CheckpointManager, TrainState};
+use crate::config::DsaTrainingConfig;
 use crate::distributed::DistributedContext;
 use crate::loss::cross_entropy_loss;
 use crate::optim::{AdamW, AdamWConfig, GradMap, clip_gradients};
@@ -25,6 +26,16 @@ pub struct TrainingMetrics {
     pub ce_loss: f64,
     /// Unscaled MoE auxiliary loss for this batch.
     pub moe_aux_loss: Option<f64>,
+    /// Periodic DSA indexer teacher loss.
+    pub dsa_indexer_loss: Option<f64>,
+    /// DSA indexer top-k recall against the dense teacher.
+    pub dsa_top_k_recall: Option<f32>,
+    /// Selected sparse blocks across this micro-step.
+    pub dsa_selected_blocks: usize,
+    /// Selected K/V token rows across this micro-step.
+    pub dsa_selected_tokens: usize,
+    /// Number of DSA layers that used dense fallback.
+    pub dsa_dense_fallbacks: usize,
     /// Average per-expert utilization for this batch.
     pub expert_utilization: Vec<f32>,
     /// Exponential of loss.
@@ -48,12 +59,18 @@ pub struct Trainer {
     train_loader: DataLoader,
     val_loader: Option<DataLoader>,
     train_config: TrainConfig,
+    dsa_training_config: DsaTrainingConfig,
     device: candle_core::Device,
     state: TrainState,
     pending_grads: GradMap,
     last_loss: Option<f64>,
     last_ce_loss: Option<f64>,
     last_moe_aux_loss: Option<f64>,
+    last_dsa_indexer_loss: Option<f64>,
+    last_dsa_top_k_recall: Option<f32>,
+    last_dsa_selected_blocks: usize,
+    last_dsa_selected_tokens: usize,
+    last_dsa_dense_fallbacks: usize,
     last_expert_utilization: Vec<f32>,
     tokens_since_log: usize,
     last_log_at: Instant,
@@ -123,12 +140,18 @@ impl Trainer {
             train_loader,
             val_loader,
             train_config,
+            dsa_training_config: DsaTrainingConfig::default(),
             device,
             state: TrainState::default(),
             pending_grads: GradMap::new(),
             last_loss: None,
             last_ce_loss: None,
             last_moe_aux_loss: None,
+            last_dsa_indexer_loss: None,
+            last_dsa_top_k_recall: None,
+            last_dsa_selected_blocks: 0,
+            last_dsa_selected_tokens: 0,
+            last_dsa_dense_fallbacks: 0,
             last_expert_utilization: Vec::new(),
             tokens_since_log: 0,
             last_log_at: Instant::now(),
@@ -158,6 +181,11 @@ impl Trainer {
     /// Return true when this trainer owns rank-0 side effects.
     pub fn is_rank0(&self) -> bool {
         self.distributed.as_ref().is_none_or(|ctx| ctx.is_rank0())
+    }
+
+    /// Replace the DSA teacher cadence and loss scaling for this run.
+    pub fn set_dsa_training_config(&mut self, config: DsaTrainingConfig) {
+        self.dsa_training_config = config;
     }
 
     /// Load the latest checkpoint if one exists.
@@ -200,7 +228,14 @@ impl Trainer {
     /// Run one training micro-step.
     pub fn train_step(&mut self, batch: Batch) -> Result<TrainingMetrics> {
         let token_count = batch.input_ids.elem_count();
-        let output = self.model.forward_train_with_aux(&batch.input_ids)?;
+        let collect_dsa_teacher = self.model.config().dsa_config.is_some()
+            && self
+                .state
+                .step
+                .is_multiple_of(self.dsa_training_config.teacher_every_n_steps);
+        let output = self
+            .model
+            .forward_train_with_aux_and_dsa_teacher(&batch.input_ids, collect_dsa_teacher)?;
         let ce_loss = cross_entropy_loss(&output.logits, &batch.labels, &batch.attention_mask)?;
         let moe_aux_weight = self
             .model
@@ -209,15 +244,26 @@ impl Trainer {
             .as_ref()
             .map(|moe| moe.aux_loss_weight)
             .unwrap_or(0.0);
-        let loss = match &output.moe_aux_loss {
+        let mut loss = match &output.moe_aux_loss {
             Some(aux_loss) if moe_aux_weight > 0.0 => {
                 (&ce_loss + &aux_loss.affine(moe_aux_weight, 0.0)?)?
             }
             _ => ce_loss.clone(),
         };
+        if let Some(indexer_loss) = &output.dsa_indexer_loss
+            && self.dsa_training_config.indexer_loss_weight > 0.0
+        {
+            loss = (&loss
+                + &indexer_loss.affine(self.dsa_training_config.indexer_loss_weight, 0.0)?)?;
+        }
         let ce_loss_value = ce_loss.to_scalar::<f32>()? as f64;
         let moe_aux_loss_value = output
             .moe_aux_loss
+            .as_ref()
+            .map(|loss| loss.to_scalar::<f32>().map(|value| value as f64))
+            .transpose()?;
+        let dsa_indexer_loss_value = output
+            .dsa_indexer_loss
             .as_ref()
             .map(|loss| loss.to_scalar::<f32>().map(|value| value as f64))
             .transpose()?;
@@ -243,6 +289,11 @@ impl Trainer {
         self.last_loss = Some(loss_value);
         self.last_ce_loss = Some(ce_loss_value);
         self.last_moe_aux_loss = moe_aux_loss_value;
+        self.last_dsa_indexer_loss = dsa_indexer_loss_value;
+        self.last_dsa_top_k_recall = output.dsa_top_k_recall;
+        self.last_dsa_selected_blocks = output.dsa_stats.selected_blocks;
+        self.last_dsa_selected_tokens = output.dsa_stats.selected_tokens;
+        self.last_dsa_dense_fallbacks = output.dsa_stats.dense_fallbacks;
         self.last_expert_utilization = output.expert_utilization.clone();
         self.tokens_since_log += token_count;
 
@@ -257,6 +308,11 @@ impl Trainer {
                 loss: loss_value,
                 ce_loss: ce_loss_value,
                 moe_aux_loss: moe_aux_loss_value,
+                dsa_indexer_loss: dsa_indexer_loss_value,
+                dsa_top_k_recall: output.dsa_top_k_recall,
+                dsa_selected_blocks: output.dsa_stats.selected_blocks,
+                dsa_selected_tokens: output.dsa_stats.selected_tokens,
+                dsa_dense_fallbacks: output.dsa_stats.dense_fallbacks,
                 expert_utilization: output.expert_utilization,
                 perplexity: ce_loss_value.exp(),
                 lr,
@@ -269,6 +325,11 @@ impl Trainer {
                 loss: loss_value,
                 ce_loss: ce_loss_value,
                 moe_aux_loss: moe_aux_loss_value,
+                dsa_indexer_loss: dsa_indexer_loss_value,
+                dsa_top_k_recall: output.dsa_top_k_recall,
+                dsa_selected_blocks: output.dsa_stats.selected_blocks,
+                dsa_selected_tokens: output.dsa_stats.selected_tokens,
+                dsa_dense_fallbacks: output.dsa_stats.dense_fallbacks,
                 expert_utilization: output.expert_utilization,
                 perplexity: ce_loss_value.exp(),
                 lr: self.schedule.lr_at_step(self.state.step),
@@ -407,6 +468,11 @@ impl Trainer {
             loss,
             ce_loss,
             moe_aux_loss: self.last_moe_aux_loss,
+            dsa_indexer_loss: self.last_dsa_indexer_loss,
+            dsa_top_k_recall: self.last_dsa_top_k_recall,
+            dsa_selected_blocks: self.last_dsa_selected_blocks,
+            dsa_selected_tokens: self.last_dsa_selected_tokens,
+            dsa_dense_fallbacks: self.last_dsa_dense_fallbacks,
             expert_utilization: self.last_expert_utilization.clone(),
             perplexity: ce_loss.exp(),
             lr,
@@ -444,6 +510,23 @@ impl Trainer {
                 println!(
                     "step={} loss={:.4} ppl={:.2} lr={:.6} grad_norm={:.4} tok/s={:.2}",
                     metrics.step, metrics.loss, metrics.perplexity, metrics.lr, grad_norm, tok_s
+                );
+            }
+            if self.model.config().dsa_config.is_some() {
+                println!(
+                    "dsa step={} indexer_loss={} top_k_recall={} selected_blocks={} selected_tokens={} dense_fallbacks={}",
+                    metrics.step,
+                    metrics
+                        .dsa_indexer_loss
+                        .map(|value| format!("{value:.6}"))
+                        .unwrap_or_else(|| "-".to_string()),
+                    metrics
+                        .dsa_top_k_recall
+                        .map(|value| format!("{value:.3}"))
+                        .unwrap_or_else(|| "-".to_string()),
+                    metrics.dsa_selected_blocks,
+                    metrics.dsa_selected_tokens,
+                    metrics.dsa_dense_fallbacks,
                 );
             }
         }
@@ -501,7 +584,10 @@ fn format_expert_utilization(values: &[f32]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aarambh_ai_core::{Device as AarambhDevice, MoeConfig, TokenizerLike};
+    use aarambh_ai_core::{
+        Device as AarambhDevice, DsaConfig, GatedDeltaNetConfig, HybridAttentionSchedule,
+        MoeConfig, TokenizerLike,
+    };
     use aarambh_ai_data::dataset::PlaintextDataset;
     use std::collections::HashMap;
 
@@ -560,6 +646,7 @@ mod tests {
             rope_scaling: None,
             moe: None,
             attention_schedule: None,
+            dsa_config: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -645,6 +732,7 @@ mod tests {
                 every_n_layers: 2,
             }),
             attention_schedule: None,
+            dsa_config: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -684,5 +772,88 @@ mod tests {
         assert_eq!(metrics.expert_utilization.len(), 2);
         let util_sum = metrics.expert_utilization.iter().sum::<f32>();
         assert!((util_sum - 1.0).abs() < 1e-5, "util_sum={util_sum}");
+    }
+
+    #[test]
+    fn dsa_two_step_smoke_alternates_teacher_and_sparse_steps() {
+        let tokenizer = CharTokenizer {
+            ids: HashMap::from([('a', 0), ('b', 1), ('c', 2), ('d', 3)]),
+        };
+        let dataset = PlaintextDataset::from_lines(vec!["abcd".repeat(40)]);
+        let device = AarambhDevice::Cpu;
+        let train_loader = DataLoader::new(&dataset, &tokenizer, 1, 32, false, device.clone());
+        let mut batch_loader = DataLoader::new(&dataset, &tokenizer, 1, 32, false, device.clone());
+        let model_config = ModelConfig {
+            vocab_size: tokenizer.vocab_size(),
+            hidden_dim: 64,
+            ffn_dim: 128,
+            n_layers: 2,
+            n_heads: 1,
+            n_kv_heads: 1,
+            max_seq_len: 32,
+            rope_theta: 10000.0,
+            rope_scaling: None,
+            moe: None,
+            attention_schedule: Some(HybridAttentionSchedule {
+                full_attention_every_n: 2,
+                gated_deltanet: GatedDeltaNetConfig {
+                    n_heads: 1,
+                    key_head_dim: 16,
+                    value_head_dim: 32,
+                    conv_kernel_size: 4,
+                    chunk_size: 16,
+                },
+            }),
+            dsa_config: Some(DsaConfig {
+                block_size: 16,
+                top_k_blocks: 1,
+                min_seq_len_for_sparsity: 16,
+            }),
+            norm_eps: 1e-5,
+            tie_embeddings: true,
+        };
+        let train_config = TrainConfig {
+            lr: 1e-3,
+            batch_size: 1,
+            grad_accum_steps: 1,
+            max_epochs: 1,
+            max_steps: 2,
+            warmup_steps: 0,
+            min_lr_ratio: 1.0,
+            weight_decay: 0.0,
+            beta1: 0.9,
+            beta2: 0.95,
+            epsilon: 1e-8,
+            clip_grad_norm: 1.0,
+            save_every_n_steps: 0,
+            log_every_n_steps: 0,
+            eval_steps: 0,
+            seed: 42,
+            checkpoint_dir: std::env::temp_dir().join("aarambh_dsa_train_smoke"),
+        };
+        let mut trainer = Trainer::new(
+            model_config,
+            train_config,
+            train_loader,
+            None,
+            device.to_candle().unwrap(),
+            DType::F32,
+        )
+        .unwrap();
+        trainer.set_dsa_training_config(DsaTrainingConfig {
+            teacher_every_n_steps: 8,
+            indexer_loss_weight: 1.0,
+        });
+        let first = trainer
+            .train_step(batch_loader.next().unwrap().unwrap())
+            .unwrap();
+        assert!(first.dsa_indexer_loss.is_some());
+        assert!(first.dsa_selected_blocks > 0);
+        batch_loader.reset();
+        let second = trainer
+            .train_step(batch_loader.next().unwrap().unwrap())
+            .unwrap();
+        assert!(second.dsa_indexer_loss.is_none());
+        assert!(second.loss.is_finite());
     }
 }

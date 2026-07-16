@@ -866,6 +866,7 @@ mod tests {
             rope_scaling: None,
             moe: None,
             attention_schedule: None,
+            dsa_config: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };

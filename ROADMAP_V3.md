@@ -29,7 +29,7 @@ mode. Phase 40 is the crates.io publish.
 
 ```
 Phase 29 →  Gated DeltaNet (hybrid linear attention)   (10–14 days)  [Kaggle] ✅
-Phase 30 →  DeepSeek Sparse Attention (DSA)             (10–14 days)  [Kaggle]
+Phase 30 →  DeepSeek Sparse Attention (DSA)             (10–14 days)  [Kaggle] ✅
 Phase 31 →  DeepSeek-style fine-grained MoE + shared    (10–14 days)  [Kaggle]
             expert routing (v3 upgrade of v2 dense MoE)
 Phase 32 →  Multi-Token Prediction (MTP)                (7–10 days)   [Kaggle]
@@ -276,16 +276,17 @@ git tag v3.0.0-alpha.1
 
 ### Goal
 A sparse-attention mechanism for the remaining full-attention layers
-(those not converted to Gated DeltaNet in Phase 29) that reduces KV-cache
-pressure at long context by having each query attend to a learned/scored
-subset of keys rather than the full causal history, cutting memory and
-compute at long sequence lengths without a proportional quality loss.
+(those not converted to Gated DeltaNet in Phase 29) that reduces attention
+compute and K/V memory bandwidth at long context by having each query attend
+to a learned/scored subset of blocks rather than the full causal history.
+Full K/V storage remains O(context); DSA reduces the selected working set,
+not the asymptotic cache capacity.
 
 ### Tasks
 
 **`aarambh-ai-nn`:**
 ```
-[ ] src/sparse_attention.rs
+[x] src/sparse_attention.rs
       DsaConfig — top_k (how many key blocks each query attends to),
       block_size (granularity of key selection, coarser than per-token)
       lightning_indexer() — a small auxiliary scoring path that ranks key
@@ -297,7 +298,7 @@ compute at long sequence lengths without a proportional quality loss.
       below a configurable threshold (sparsity has no payoff on short
       sequences, only adds overhead)
 
-[ ] src/attention.rs
+[x] src/attention.rs
       AttentionKind gains a third variant: Full | GatedDeltaNet | Sparse
       HybridAttentionSchedule extended to place Sparse on the "full
       attention" layer slots from Phase 29's schedule
@@ -305,21 +306,21 @@ compute at long sequence lengths without a proportional quality loss.
 
 **`aarambh-ai-model`:**
 ```
-[ ] Model config gains `dsa_config: Option<DsaConfig>`, applies to
+[x] Model config gains `dsa_config: Option<DsaConfig>`, applies to
     whichever layers HybridAttentionSchedule marks as Sparse
-[ ] New configs layering DSA on top of Phase 29's hybrid schedules
+[x] New configs layering DSA on top of Phase 29's hybrid schedules
       configs/medium_hybrid_dsa.toml
       configs/large_hybrid_dsa.toml
 ```
 
 **`aarambh-ai-train`:**
 ```
-[ ] Indexer training: the lightning indexer needs its own small
+[x] Indexer training: the lightning indexer needs its own small
     supervised signal (distilled from full-attention scores on a subset
     of training steps) so it learns to rank the same key blocks a full
     attention pass would have weighted highly
-[ ] KV-cache memory benchmark harness: measures peak KV-cache memory at
-    4K/16K/32K context with and without DSA, on the same config
+[x] K/V working-set benchmark harness: reports stored cache separately
+    from selected K/V bytes at 4K/16K/32K context with and without DSA
 ```
 
 ### Tests
@@ -339,13 +340,14 @@ fn lightning_indexer_selected_blocks_overlap_full_attention_top_blocks() {
 fn sparse_attention_output_shape_matches_full_attention_output_shape() {}
 
 #[test]
-fn kv_cache_memory_at_32k_context_is_below_full_attention_baseline() {}
+fn selected_kv_working_set_at_32k_is_bounded_by_top_k_blocks() {}
 ```
 
 ### Milestone
 ```
-DSA-enabled configs show measured KV-cache memory reduction at 16K/32K
-context versus the Phase 29 hybrid-only baseline, with eval-harness scores
+DSA-enabled configs show measured attention working-set and bandwidth
+reduction at 16K/32K context versus the Phase 29 hybrid-only baseline, while
+reporting total stored K/V separately, with eval-harness scores
 within documented tolerance. Combined with Phase 29, the attention stack
 for v3.0 is now: mostly Gated DeltaNet, a minority of DSA-sparse layers,
 zero fully-dense full-attention layers by default (dense full attention

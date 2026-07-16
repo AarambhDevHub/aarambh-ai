@@ -19,7 +19,7 @@ pub mod trainer;
 pub mod vision_projector;
 
 pub use checkpoint::{CheckpointManager, TrainState};
-pub use config::{TrainingRunConfig, run_training_from_config};
+pub use config::{DsaTrainingConfig, TrainingRunConfig, run_training_from_config};
 pub use distributed::{
     DistributedBackend, DistributedConfig, DistributedContext, DistributedRuntime,
     ResolvedDistributedConfig,

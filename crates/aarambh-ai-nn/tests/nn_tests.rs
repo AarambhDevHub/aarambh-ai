@@ -67,6 +67,7 @@ fn rope_scaling_none_matches_v1_output_exactly() {
         rope_scaling: None,
         moe: None,
         attention_schedule: None,
+        dsa_config: None,
         norm_eps: 1e-5,
         tie_embeddings: true,
     };

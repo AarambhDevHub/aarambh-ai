@@ -21,15 +21,18 @@ pub mod norm;
 pub mod rope;
 /// RoPE long-context scaling helpers.
 pub mod rope_scaling;
+/// Learned block-sparse attention and DSA indexer training helpers.
+pub mod sparse_attention;
 
 pub use attention::GroupedQueryAttention;
 pub use block::{FeedForwardLayer, TokenMixer, TransformerBlock};
 pub use dispatch::dense_weighted_dispatch;
 pub use ffn::SwiGluFfn;
 pub use gated_deltanet::{DeltaNetForm, DeltaNetState, GatedDeltaNetLayer};
-pub use kvcache::{HybridKvCache, KVCache};
+pub use kvcache::{DsaKvCache, HybridKvCache, KVCache};
 pub use moe::{
     GatingOutput, MoeFfn, MoeForwardStats, load_balancing_loss_from_stats, top_k_gating,
 };
 pub use norm::RMSNorm;
 pub use rope::RopeCache;
+pub use sparse_attention::{DsaAttention, DsaForwardStats, DsaTeacherOutput};

@@ -36,6 +36,11 @@ fn main() {
             "gated_delta_recurrent",
             "kernels/gated_delta_recurrent.cu",
         ),
+        (
+            "AARAMBH_CUDA_DSA_PTX",
+            "deepseek_sparse_attention",
+            "kernels/deepseek_sparse_attention.cu",
+        ),
     ];
     for (_, _, kernel) in kernels {
         println!("cargo:rerun-if-changed={kernel}");

@@ -193,47 +193,42 @@ impl AttentionRowContext<'_> {
         let batch_idx = row_idx / (self.shape.heads * self.shape.q_seq);
         let q_offset = ((batch_idx * self.shape.heads + head_idx) * self.shape.q_seq + q_idx)
             * self.shape.head_dim;
-        let mut scores = vec![0f32; self.shape.kv_seq];
-
-        for (kv_idx, score) in scores.iter_mut().enumerate() {
+        out_row.fill(0.0);
+        let mut running_max = f32::NEG_INFINITY;
+        let mut running_sum = 0.0f32;
+        for kv_idx in 0..self.shape.kv_seq {
+            let mask_value = self
+                .mask
+                .map(|mask| mask.value(batch_idx, head_idx, q_idx, kv_idx))
+                .unwrap_or(0.0);
+            let causal_masked = self.causal && {
+                let shift = self.shape.kv_seq.saturating_sub(self.shape.q_seq);
+                kv_idx > shift + q_idx
+            };
+            if causal_masked || mask_value == f32::NEG_INFINITY {
+                continue;
+            }
             let k_offset = ((batch_idx * self.shape.heads + head_idx) * self.shape.kv_seq + kv_idx)
                 * self.shape.head_dim;
             let mut dot = 0f32;
             for dim_idx in 0..self.shape.head_dim {
                 dot += self.q_data[q_offset + dim_idx] * self.k_data[k_offset + dim_idx];
             }
-            let mask_value = self
-                .mask
-                .map(|mask| mask.value(batch_idx, head_idx, q_idx, kv_idx))
-                .unwrap_or(0.0);
-            let causal_value = if self.causal {
-                let shift = self.shape.kv_seq.saturating_sub(self.shape.q_seq);
-                if kv_idx <= shift + q_idx {
-                    0.0
-                } else {
-                    f32::NEG_INFINITY
-                }
-            } else {
-                0.0
-            };
-            *score = dot * self.scale + mask_value + causal_value;
-        }
-
-        let max_score = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-        let mut sum_exp = 0f32;
-        for score in &mut scores {
-            *score = (*score - max_score).exp();
-            sum_exp += *score;
-        }
-        let inv_sum = sum_exp.recip();
-        out_row.fill(0.0);
-        for (kv_idx, score) in scores.iter().enumerate() {
-            let weight = *score * inv_sum;
+            let score = dot * self.scale + mask_value;
+            let next_max = running_max.max(score);
+            let old_scale = (running_max - next_max).exp();
+            let new_scale = (score - next_max).exp();
             let v_offset = ((batch_idx * self.shape.heads + head_idx) * self.shape.kv_seq + kv_idx)
                 * self.shape.head_dim;
             for (dim_idx, out_value) in out_row.iter_mut().enumerate() {
-                *out_value += weight * self.v_data[v_offset + dim_idx];
+                *out_value = *out_value * old_scale + new_scale * self.v_data[v_offset + dim_idx];
             }
+            running_sum = running_sum * old_scale + new_scale;
+            running_max = next_max;
+        }
+        if running_sum > 0.0 {
+            let inv_sum = running_sum.recip();
+            out_row.iter_mut().for_each(|value| *value *= inv_sum);
         }
     }
 }

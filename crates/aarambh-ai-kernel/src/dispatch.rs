@@ -120,6 +120,27 @@ pub fn attention_forward(
     attention_forward_candle(q, k, v, mask, scale)
 }
 
+/// Run general additive-mask inference attention without treating the mask as
+/// a boolean causal marker. CPU F32 uses the Rayon online-softmax kernel.
+pub fn attention_forward_additive(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    mask: &Tensor,
+    scale: f64,
+) -> Result<Tensor> {
+    if q.device().is_cpu()
+        && q.dtype() == DType::F32
+        && k.dtype() == DType::F32
+        && v.dtype() == DType::F32
+        && mask.dtype() == DType::F32
+        && let Ok(out) = cpu_parallel_attn(q, k, v, Some(mask), scale)
+    {
+        return Ok(out);
+    }
+    attention_forward_candle(q, k, v, Some(mask), scale)
+}
+
 /// Run causal inference attention with the fastest available kernel.
 pub fn attention_forward_causal(q: &Tensor, k: &Tensor, v: &Tensor, scale: f64) -> Result<Tensor> {
     match attention_path(q, k, v, None) {

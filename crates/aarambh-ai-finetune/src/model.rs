@@ -702,6 +702,7 @@ mod tests {
             rope_scaling: None,
             moe: None,
             attention_schedule: None,
+            dsa_config: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -736,6 +737,7 @@ mod tests {
             rope_scaling: None,
             moe: None,
             attention_schedule: None,
+            dsa_config: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -785,6 +787,7 @@ mod tests {
                     chunk_size: 16,
                 },
             }),
+            dsa_config: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -844,6 +847,7 @@ mod tests {
                 every_n_layers: 2,
             }),
             attention_schedule: None,
+            dsa_config: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
