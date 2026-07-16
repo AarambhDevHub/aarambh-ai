@@ -543,10 +543,10 @@ unrun benchmark values for those artifacts.
 ## 41. Multi-Token Prediction (MTP)
 
 v1/v2 train on a single objective at every position: predict the next
-token. MTP adds `num_future_tokens` lightweight auxiliary heads, each
-predicting one additional token further into the future, from the same
-shared trunk hidden state — this mirrors the MTP-3-style setups (3
-future-token heads) seen in GLM-4.7/MiniMax-M2.1-derived architectures.
+token. MTP interprets `num_future_tokens` as the complete prediction horizon:
+the existing main head predicts `t+1`, and `num_future_tokens - 1` auxiliary
+heads predict `t+2` onward from the same shared trunk state. Thus MTP-2 adds
+one head and MTP-3 adds two; the name never hides an extra head.
 
 ### 41.1 Head structure
 
@@ -565,11 +565,16 @@ pub struct MtpConfig {
 }
 
 pub struct MtpHead {
-    /// A lightweight additional transformer block (not a full stack —
-    /// one block is sufficient since it only needs to refine, not
-    /// recompute, the trunk's representation) plus a tied-or-separate
-    /// LM head.
+    /// Future offset represented by this head, starting at two.
+    offset: usize,
+    /// Separate norms prevent the auxiliary objective from changing trunk
+    /// normalization behavior.
+    trunk_norm: RMSNorm,
+    token_norm: RMSNorm,
+    /// One dense GQA/SwiGLU block refines the short local sequence.
     refine_block: TransformerBlock,
+    output_norm: RMSNorm,
+    /// Shares the main LM-head weight tensor; no vocabulary matrix is copied.
     lm_head: Linear,
 }
 
@@ -579,21 +584,31 @@ impl MtpHead {
     /// previously-predicted, during MTP-based speculative decoding)
     /// token embeddings for positions between t and t + offset.
     pub fn forward(&self, trunk_hidden: &Tensor, intervening_embeds: &Tensor) -> Result<Tensor> {
-        let combined = concat_along_hidden_dim(trunk_hidden, intervening_embeds)?;
-        let refined = self.refine_block.forward(&combined)?;
-        self.lm_head.forward(&refined)
+        let local_sequence = stack_as_local_causal_sequence(
+            self.trunk_norm.forward(trunk_hidden)?,
+            self.token_norm.forward(intervening_embeds)?,
+        )?;
+        let refined = self.refine_block.forward(&local_sequence)?;
+        self.lm_head.forward(&self.output_norm.forward(last_token(refined)?)?)
     }
 }
 ```
+
+The local sequence has length `offset`: one final trunk state followed by the
+real intervening token embeddings during training, or accepted/proposed token
+embeddings during speculative decoding. Heads are independent and always use a
+dense refinement block even when the trunk combines DSA, Gated DeltaNet, or
+MoE. They execute sequentially and consume each prediction into its scalar loss
+before constructing the next head's output.
 
 ### 41.2 Training loss
 
 ```
 main_loss  = cross_entropy(main_lm_head_logits, next_token_targets)
 mtp_loss_k = cross_entropy(mtp_head_k_logits, token_at_offset_k_targets)
-              for k in 1..=num_future_tokens
+              for k in 2..=num_future_tokens
 
-total_loss = main_loss + aux_loss_weight × mean(mtp_loss_1, ..., mtp_loss_K)
+total_loss = main_loss + aux_loss_weight × mean(mtp_loss_2, ..., mtp_loss_K)
 ```
 
 The training scorecard (extending `ARCHITECTURE.md`'s existing loss
@@ -618,7 +633,8 @@ Without MTP (v2 Phase 25 path):
   Requires: --draft-model, --draft-config (two checkpoints in memory)
 
 With MTP enabled (v3 addition):
-  Large model's own MTP heads propose K = num_future_tokens tokens
+  Main head proposes token 1; MTP heads propose tokens 2..K
+  K defaults to num_future_tokens and may be reduced at runtime
   Large model's main head verifies all K in the same forward pass
   Requires: one checkpoint only
 ```
@@ -631,6 +647,27 @@ proposal tokens, not a change to how proposals get accepted or rejected.
 training and inference — MTP heads, when configured, are present but
 simply unused (not removed from the checkpoint) at plain
 non-speculative inference time.
+
+### 41.4 Phase 32 implementation contract
+
+The checkpoint namespace is `mtp.heads.N.*`. Each head stores its input/output
+norms plus `refine.{norm1,attn,norm2,ffn}` tensors. SafeTensors and GGUF retain
+the complete set. Dense-to-MTP retrofit may fresh-initialize all MTP tensors,
+but a partially present set is rejected because silently mixing trained and
+fresh parts of a head is not a valid continuation.
+
+Training reports main loss, mean auxiliary loss, and each offset loss. Adapter
+workflows preserve MTP tensors but freeze them: Phase 32 is a base pretraining
+objective, not an implicit LoRA/DoRA target.
+
+At inference, `--speculative` without draft paths selects one-checkpoint MTP.
+The first proposal comes from the target main distribution and later proposals
+come from the offset heads. One target trunk pass verifies the group. Accepted
+tokens are committed in order; a rejection samples from the exact positive
+residual `max(p - q, 0)`, restores the hybrid-cache snapshot, and replays only
+the accepted prefix plus replacement. Thinking, tool grammar, callbacks, and
+streaming safety observe committed tokens only. Supplying `--draft-model` and
+`--draft-config` retains the v2 two-checkpoint path.
 
 ---
 
@@ -1357,7 +1394,7 @@ is accounted for separately from the load-balancing loss (§40).
 
 | Component | Params | Notes |
 |---|---|---|
-| Each MTP head | One additional lightweight transformer block + LM head per `num_future_tokens` offset | Training-time only by default; reusable as speculative-decode draft (§41) |
+| Each MTP head | One additional lightweight transformer block per auxiliary offset; vocabulary projection is shared with the main LM head | Training-time only by default; reusable as speculative-decode draft (§41) |
 
 ### QAT
 

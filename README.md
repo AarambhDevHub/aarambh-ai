@@ -12,8 +12,8 @@ construction, training, inference, quantization, adapter tuning, alignment,
 evaluation, multimodal input, safety, and an OpenAI-compatible server.
 
 The production source release is **v2.0.0**. Current mainline development is
-**v3.0.0-alpha.3**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention, and
-fine-grained MoE with shared experts.
+**v3.0.0-alpha.4**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
+fine-grained MoE with shared experts, and Multi-Token Prediction (MTP).
 
 > [!IMPORTANT]
 > This is a source and engineering project. It does not publish crates to
@@ -25,10 +25,10 @@ fine-grained MoE with shared experts.
 | Area | Capabilities |
 |---|---|
 | Model | RMSNorm, RoPE, GQA, SwiGLU, KV cache, tied embeddings, Tiny to Large configs |
-| Efficient architecture | YaRN/NTK/linear RoPE scaling, Gated DeltaNet, learned block-sparse DSA, coarse and fine-grained MoE |
+| Efficient architecture | YaRN/NTK/linear RoPE scaling, Gated DeltaNet, learned block-sparse DSA, fine-grained MoE, MTP |
 | Training | BPE data pipeline, AdamW, cosine schedule, gradient accumulation/clipping, checkpoint resume, BF16 CUDA, single-node multi-GPU |
 | Fine-tuning | SFT, LoRA, QLoRA, DoRA, QDoRA, VLM adapters, GRPO, DPO, QDPO, tool-call tuning |
-| Inference | Greedy and sampled decoding, streaming, thinking budgets, speculative decoding, grammar-constrained tool calls |
+| Inference | Greedy/sampled decoding, streaming, thinking budgets, external or one-checkpoint MTP speculation, tool grammar |
 | Model formats | SafeTensors, INT8, GPTQ/AWQ INT4, GGUF, Hugging Face conversion, quantized KV cache |
 | Evaluation | Perplexity, MMLU-lite, HellaSwag, GSM8K, HumanEval-lite, preference, recall, vision, and tool scorecards |
 | Vision | Frozen CLIP-style encoder, projector pretraining, image fusion, VQA instruction tuning |
@@ -125,6 +125,9 @@ Representative training recipes:
 | `configs/medium_16k.toml` | Medium YaRN long-context continuation |
 | `configs/medium_hybrid_dsa.toml` | Medium hybrid DSA continuation |
 | `configs/medium_finegrained_moe.toml` | Medium fine-grained MoE retrofit |
+| `configs/mtp_smoke.toml` | Two-step CPU MTP training check |
+| `configs/medium_mtp.toml` | Medium Phase 31-to-MTP continuation |
+| `configs/large_mtp.toml` | Large Phase 31-to-MTP continuation |
 
 For two GPUs, launch one process per rank with matching run IDs:
 
@@ -165,7 +168,8 @@ Useful inference options include:
 - `--stats` for throughput, cache, sparse-attention, and MoE diagnostics
 - `--safety strict|permissive|research|none` for policy selection
 - `--image <path>` for vision-language inference
-- `--speculative` plus draft-model options for exact speculative decoding
+- `--speculative` for one-checkpoint MTP, or add draft-model options for the
+  external path
 - `--tools <schema.json>` for grammar-constrained function calls
 
 Tool calls are emitted and validated but never executed by aarambh-ai.
@@ -329,6 +333,20 @@ target/release/aarambh-ai train --config configs/dsa_smoke.toml
 
 # DSA + DeltaNet + fine-grained routed MoE + shared expert
 target/release/aarambh-ai train --config configs/moe_finegrained_smoke.toml
+
+# Multi-token auxiliary loss and checkpoint save
+target/release/aarambh-ai train --config configs/mtp_smoke.toml
+```
+
+For an MTP-trained checkpoint, `--speculative` needs no draft checkpoint:
+
+```sh
+target/release/aarambh-ai infer \
+  --config configs/mtp_smoke.toml \
+  --model checkpoints/mtp_smoke/step_000002/model.safetensors \
+  --tokenizer checkpoints/mtp_smoke/tokenizer.json \
+  --prompt "To be, or not to be" \
+  --max-tokens 64 --greedy --speculative --stats
 ```
 
 Checkpoint retrofit and comparison tooling:
@@ -338,10 +356,14 @@ Checkpoint retrofit and comparison tooling:
 - `scripts/phase30_prepare_dsa_retrofit.sh`
 - `scripts/phase30_benchmark_dsa.sh`
 - `scripts/phase31_sweep_moe.sh`
+- `scripts/phase32_compare_training.sh`
+- `scripts/phase32_benchmark_mtp.sh`
 
 The Phase 31 method and result contract are documented in
 [docs/phase31_moe_sweep.md](docs/phase31_moe_sweep.md). Hardware benchmark
 results are not claimed until the scripts have produced scorecards.
+The MTP training, retrofit, and one-checkpoint speculation contract is in
+[docs/phase32_mtp.md](docs/phase32_mtp.md).
 
 ## Model Scales
 
@@ -365,13 +387,13 @@ aarambh-ai-core        Shared config, device, dtype, errors, and traits
 aarambh-ai-tokenizer   BPE tokenizer and reserved special tokens
 aarambh-ai-data        Datasets, preprocessing, sharding, and loaders
 aarambh-ai-kernel      CPU SIMD and optional CUDA kernels
-aarambh-ai-nn          Neural layers, attention, DeltaNet, DSA, and MoE
+aarambh-ai-nn          Neural layers, attention, DeltaNet, DSA, MoE, and MTP
 aarambh-ai-model       Full decoder model and cache integration
 aarambh-ai-weights     SafeTensors, GGUF, conversion, and retrofit loading
 aarambh-ai-quant       INT8/INT4, GPTQ, AWQ, QAT, and KV quantization
-aarambh-ai-train       Optimizer, schedules, checkpointing, and distributed train
+aarambh-ai-train       Optimizer, schedules, MTP loss, checkpoints, distributed train
 aarambh-ai-finetune    Adapters, SFT, GRPO, DPO, VLM, and tool tuning
-aarambh-ai-inference   Sampling, caching, thinking, speculative, and tool grammar
+aarambh-ai-inference   Sampling, caching, thinking, MTP/external speculation, tools
 aarambh-ai-safety      Input, output, streaming, PII, and audit policies
 aarambh-ai-selflearn   Critique, replay, verifiers, and persistent update state
 aarambh-ai-eval        Evaluation tasks, scorecards, and comparisons
@@ -405,7 +427,7 @@ CUDA checks require a CUDA-capable environment and are intentionally opt-in.
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | v1 model, training, inference, safety, and self-learning design |
 | [ARCHITECTURE_V2.md](ARCHITECTURE_V2.md) | v2 long context, vision, MoE, distributed, tools, and serving additions |
-| [ARCHITECTURE_V3.md](ARCHITECTURE_V3.md) | v3 hybrid attention, DSA, fine-grained MoE, and planned architecture |
+| [ARCHITECTURE_V3.md](ARCHITECTURE_V3.md) | v3 hybrid attention, DSA, fine-grained MoE, MTP, and planned architecture |
 | [ROADMAP.md](ROADMAP.md) | Completed v1 phases |
 | [ROADMAP_V2.md](ROADMAP_V2.md) | Completed v2 phases through the v2.0.0 release |
 | [ROADMAP_V3.md](ROADMAP_V3.md) | Current v3 delivery plan and status |
@@ -416,6 +438,7 @@ CUDA checks require a CUDA-capable environment and are intentionally opt-in.
 | [docs/aarambh-ai-complete-guide.md](docs/aarambh-ai-complete-guide.md) | Beginner-oriented project walkthrough |
 | [docs/aarambh-ai-math-formulas-guide.md](docs/aarambh-ai-math-formulas-guide.md) | Mathematical foundations and worked examples |
 | [docs/inference-server.md](docs/inference-server.md) | Server endpoints, SDK usage, auth, safety, and limits |
+| [docs/phase32_mtp.md](docs/phase32_mtp.md) | MTP training, retrofit, exact speculation, and benchmark method |
 | [RELEASE.md](RELEASE.md) | Source-release process and artifact policy |
 | [CHANGELOG.md](CHANGELOG.md) | Versioned implementation history |
 

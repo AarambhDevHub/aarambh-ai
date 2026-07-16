@@ -19,6 +19,7 @@ pub struct LoraAarambhModel {
     rope_cache: RopeCache,
     adapter_param_count: usize,
     base_param_count: usize,
+    frozen_auxiliary_tensors: HashMap<String, Tensor>,
     hybrid: Option<HybridLoraModel>,
 }
 
@@ -61,6 +62,7 @@ impl LoraAarambhModel {
                     rope_cache: RopeCache::from_config(config, DType::F32, device)?,
                     adapter_param_count,
                     base_param_count,
+                    frozen_auxiliary_tensors: HashMap::new(),
                     hybrid: Some(hybrid),
                 },
                 varmap,
@@ -97,6 +99,11 @@ impl LoraAarambhModel {
         let rope_cache = RopeCache::from_config(config, dtype, device)?;
         let adapter_param_count = adapter_param_count(&blocks, lm_head.as_ref());
         let base_param_count = tensors.values().map(tensor_elem_count).sum();
+        let frozen_auxiliary_tensors = tensors
+            .iter()
+            .filter(|(name, _)| name.starts_with("mtp."))
+            .map(|(name, tensor)| (name.clone(), tensor.detach()))
+            .collect();
 
         let model = Self {
             config: config.clone(),
@@ -107,6 +114,7 @@ impl LoraAarambhModel {
             rope_cache,
             adapter_param_count,
             base_param_count,
+            frozen_auxiliary_tensors,
             hybrid: None,
         };
         Ok((model, varmap))
@@ -220,6 +228,7 @@ impl LoraAarambhModel {
         if let Some(lm_head) = &self.lm_head {
             tensors.insert("lm_head.weight".to_string(), lm_head.merged_weight()?);
         }
+        tensors.extend(self.frozen_auxiliary_tensors.clone());
         Ok(tensors)
     }
 
@@ -380,7 +389,8 @@ impl HybridLoraModel {
 }
 
 fn is_projection_weight(name: &str, tensor: &Tensor) -> bool {
-    tensor.rank() == 2
+    !name.starts_with("mtp.")
+        && tensor.rank() == 2
         && (name.contains(".attn.")
             || name.contains(".ffn.")
             || (name.contains(".deltanet.") && name.ends_with("_proj.weight"))
@@ -683,7 +693,7 @@ fn tensor_elem_count(tensor: &Tensor) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aarambh_ai_core::{GatedDeltaNetConfig, HybridAttentionSchedule, MoeConfig};
+    use aarambh_ai_core::{GatedDeltaNetConfig, HybridAttentionSchedule, MoeConfig, MtpConfig};
     use candle_core::{DType, Device};
     use candle_nn::{VarBuilder, VarMap};
 
@@ -703,6 +713,7 @@ mod tests {
             moe: None,
             attention_schedule: None,
             dsa_config: None,
+            mtp: Some(MtpConfig::default()),
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -720,6 +731,12 @@ mod tests {
                 .unwrap();
         assert!(model.adapter_param_count() > 0);
         assert!(model.trainable_ratio() < 0.2);
+        assert!(
+            model
+                .merged_tensors()
+                .unwrap()
+                .contains_key("mtp.heads.0.refine.attn.wq.weight")
+        );
     }
 
     #[test]
@@ -738,6 +755,7 @@ mod tests {
             moe: None,
             attention_schedule: None,
             dsa_config: None,
+            mtp: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -788,6 +806,7 @@ mod tests {
                 },
             }),
             dsa_config: None,
+            mtp: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -849,6 +868,7 @@ mod tests {
             }),
             attention_schedule: None,
             dsa_config: None,
+            mtp: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };

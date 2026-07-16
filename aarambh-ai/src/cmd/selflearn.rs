@@ -159,7 +159,7 @@ fn run_start(args: StartArgs) -> anyhow::Result<()> {
         draft_model: None,
         draft_config: None,
         draft_tokenizer: None,
-        draft_tokens: 4,
+        draft_tokens: None,
         stats: false,
         tools: None,
         tool_choice: "auto".into(),

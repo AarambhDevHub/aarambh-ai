@@ -1124,6 +1124,7 @@ mod tests {
             moe: None,
             attention_schedule: None,
             dsa_config: None,
+            mtp: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -1205,6 +1206,7 @@ mod tests {
             moe: None,
             attention_schedule: None,
             dsa_config: None,
+            mtp: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };

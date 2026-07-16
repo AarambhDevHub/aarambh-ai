@@ -269,6 +269,61 @@ impl DsaConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
+/// Multi-token prediction auxiliary-head settings.
+pub struct MtpConfig {
+    /// Total prediction horizon including the main next-token head.
+    ///
+    /// A value of two means the main head predicts `t+1` and one auxiliary
+    /// head predicts `t+2`. A value of three adds a second auxiliary head for
+    /// `t+3`.
+    pub num_future_tokens: usize,
+    /// Weight applied to the mean auxiliary-head loss.
+    pub aux_loss_weight: f64,
+}
+
+impl Default for MtpConfig {
+    fn default() -> Self {
+        Self {
+            num_future_tokens: 2,
+            aux_loss_weight: 0.3,
+        }
+    }
+}
+
+impl MtpConfig {
+    /// Return the number of auxiliary heads implied by the total horizon.
+    pub fn auxiliary_head_count(&self) -> usize {
+        self.num_future_tokens.saturating_sub(1)
+    }
+
+    /// Validate the prediction horizon and auxiliary-loss scale.
+    pub fn validate(&self, max_seq_len: usize) -> Result<()> {
+        if self.num_future_tokens < 2 {
+            return Err(AarambhError::Config(
+                "mtp.num_future_tokens must be at least 2 (main t+1 plus one auxiliary head)"
+                    .into(),
+            ));
+        }
+        if self.num_future_tokens > max_seq_len {
+            return Err(AarambhError::Config(format!(
+                "mtp.num_future_tokens {} exceeds max_seq_len {max_seq_len}",
+                self.num_future_tokens
+            )));
+        }
+        if !(0.0..=1.0).contains(&self.aux_loss_weight)
+            || self.aux_loss_weight == 0.0
+            || !self.aux_loss_weight.is_finite()
+        {
+            return Err(AarambhError::Config(
+                "mtp.aux_loss_weight must be finite and in (0, 1]".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 /// Shape and execution settings for Gated DeltaNet layers.
 pub struct GatedDeltaNetConfig {
     /// Number of recurrent state heads, or zero to derive half the GQA head count.
@@ -433,6 +488,9 @@ pub struct ModelConfig {
     /// slots in `attention_schedule` become DSA slots when this is present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dsa_config: Option<DsaConfig>,
+    /// Optional multi-token prediction auxiliary heads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mtp: Option<MtpConfig>,
     /// RMSNorm epsilon.
     pub norm_eps: f64,
     /// Whether the output head shares weights with token embeddings.
@@ -455,6 +513,7 @@ impl ModelConfig {
             moe: None,
             attention_schedule: None,
             dsa_config: None,
+            mtp: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -475,6 +534,7 @@ impl ModelConfig {
             moe: None,
             attention_schedule: None,
             dsa_config: None,
+            mtp: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -495,6 +555,7 @@ impl ModelConfig {
             moe: None,
             attention_schedule: None,
             dsa_config: None,
+            mtp: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -515,6 +576,7 @@ impl ModelConfig {
             moe: None,
             attention_schedule: None,
             dsa_config: None,
+            mtp: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -571,6 +633,34 @@ mod tests {
         assert!(cfg.rope_scaling.is_none());
         assert!(cfg.moe.is_none());
         assert!(cfg.dsa_config.is_none());
+        assert!(cfg.mtp.is_none());
+    }
+
+    #[test]
+    fn mtp_two_means_main_plus_one_auxiliary_head() {
+        let cfg = MtpConfig::default();
+        assert_eq!(cfg.num_future_tokens, 2);
+        assert_eq!(cfg.auxiliary_head_count(), 1);
+        cfg.validate(16).unwrap();
+    }
+
+    #[test]
+    fn mtp_config_rejects_invalid_horizon_and_weight() {
+        let too_short = MtpConfig {
+            num_future_tokens: 1,
+            ..MtpConfig::default()
+        };
+        assert!(too_short.validate(16).is_err());
+        let too_long = MtpConfig {
+            num_future_tokens: 17,
+            ..MtpConfig::default()
+        };
+        assert!(too_long.validate(16).is_err());
+        let bad_weight = MtpConfig {
+            aux_loss_weight: 0.0,
+            ..MtpConfig::default()
+        };
+        assert!(bad_weight.validate(16).is_err());
     }
 
     #[test]

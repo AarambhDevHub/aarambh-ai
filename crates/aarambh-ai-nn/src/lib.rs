@@ -15,6 +15,8 @@ pub mod gated_deltanet;
 pub mod kvcache;
 /// Mixture-of-Experts feed-forward layer.
 pub mod moe;
+/// Multi-token prediction auxiliary head.
+pub mod mtp;
 /// RMSNorm layer.
 pub mod norm;
 /// Rotary-position embedding cache.
@@ -34,6 +36,7 @@ pub use moe::{
     GatingOutput, MoeFfn, MoeForwardStats, SharedExpertPath, load_balancing_loss_from_stats,
     top_k_gating,
 };
+pub use mtp::MtpHead;
 pub use norm::RMSNorm;
 pub use rope::RopeCache;
 pub use sparse_attention::{DsaAttention, DsaForwardStats, DsaTeacherOutput};

@@ -2,6 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use aarambh_ai_core::{
     Configurable, DsaConfig, GatedDeltaNetConfig, HybridAttentionSchedule, ModelConfig, MoeConfig,
+    MtpConfig,
 };
 use aarambh_ai_model::AarambhModel;
 use aarambh_ai_weights::{
@@ -25,6 +26,7 @@ fn mini_config() -> ModelConfig {
         moe: None,
         attention_schedule: None,
         dsa_config: None,
+        mtp: None,
         norm_eps: 1e-5,
         tie_embeddings: true,
     }
@@ -84,6 +86,16 @@ fn dsa_mini_config() -> ModelConfig {
             min_seq_len_for_sparsity: 16,
         }),
         ..hybrid_mini_config()
+    }
+}
+
+fn mtp_mini_config() -> ModelConfig {
+    ModelConfig {
+        mtp: Some(MtpConfig {
+            num_future_tokens: 3,
+            aux_loss_weight: 0.3,
+        }),
+        ..mini_config()
     }
 }
 
@@ -149,6 +161,31 @@ fn safetensors_roundtrip_preserves_weights_and_logits() {
 }
 
 #[test]
+fn mtp_safetensors_roundtrip_preserves_all_auxiliary_heads() {
+    let device = Device::Cpu;
+    let cfg = mtp_mini_config();
+    let vars = VarMap::new();
+    let model =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&vars, DType::F32, &device)).unwrap();
+    let path = temp_safetensors_path();
+    save_model(&model, &path).unwrap();
+    let loaded = load_model(&path, &cfg, &device).unwrap();
+    let _ = std::fs::remove_file(path);
+
+    assert_eq!(loaded.mtp_heads().len(), 2);
+    let name = "mtp.heads.1.refine.ffn.w_down.weight";
+    let diff = (model.get_weight(name).unwrap() - loaded.get_weight(name).unwrap())
+        .unwrap()
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    assert!(diff < 1e-6, "MTP SafeTensors weight diff: {diff}");
+}
+
+#[test]
 fn gguf_save_load_roundtrip_produces_logits() {
     let device = Device::Cpu;
     let cfg = mini_config();
@@ -172,6 +209,95 @@ fn gguf_save_load_roundtrip_produces_logits() {
         .to_scalar::<f32>()
         .unwrap();
     assert!(max.is_finite());
+}
+
+#[test]
+fn mtp_gguf_roundtrip_preserves_config_and_heads() {
+    let device = Device::Cpu;
+    let cfg = mtp_mini_config();
+    let vars = VarMap::new();
+    let model =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&vars, DType::F32, &device)).unwrap();
+    let path = temp_gguf_path();
+    save_gguf(&model, GgufFormat::Q4KM, &path).unwrap();
+    let loaded = load_gguf(&path, &device).unwrap();
+    let _ = std::fs::remove_file(path);
+
+    assert_eq!(loaded.config().mtp, cfg.mtp);
+    assert_eq!(loaded.mtp_heads().len(), 2);
+    assert!(
+        loaded
+            .get_weight("mtp.heads.0.refine.attn.wq.weight")
+            .is_some()
+    );
+}
+
+#[test]
+fn dense_retrofit_initializes_complete_mtp_heads_without_changing_main_logits() {
+    let device = Device::Cpu;
+    let dense_cfg = mini_config();
+    let dense_vars = VarMap::new();
+    let dense = AarambhModel::new(
+        &dense_cfg,
+        VarBuilder::from_varmap(&dense_vars, DType::F32, &device),
+    )
+    .unwrap();
+    let path = temp_safetensors_path();
+    save_model(&dense, &path).unwrap();
+
+    let mtp_cfg = mtp_mini_config();
+    let mut mtp_vars = VarMap::new();
+    let mtp_model = AarambhModel::new(
+        &mtp_cfg,
+        VarBuilder::from_varmap(&mtp_vars, DType::F32, &device),
+    )
+    .unwrap();
+    let expected_mtp_tensors = mtp_model
+        .named_tensors()
+        .keys()
+        .filter(|name| name.starts_with("mtp."))
+        .count();
+    let report =
+        load_retrofit_into_varmap(&path, &mtp_cfg, &mut mtp_vars, &device, DType::F32).unwrap();
+    let _ = std::fs::remove_file(path);
+    assert_eq!(report.initialized_mtp_tensors, expected_mtp_tensors);
+
+    let ids = Tensor::from_vec(vec![1u32, 2, 3, 4], (1, 4), &device).unwrap();
+    let diff = (dense.forward(&ids).unwrap() - mtp_model.forward(&ids).unwrap())
+        .unwrap()
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    assert!(diff < 1e-6, "MTP retrofit changed trunk logits by {diff}");
+}
+
+#[test]
+fn retrofit_rejects_partial_mtp_tensor_sets() {
+    let device = Device::Cpu;
+    let cfg = mtp_mini_config();
+    let source_vars = VarMap::new();
+    let source = AarambhModel::new(
+        &cfg,
+        VarBuilder::from_varmap(&source_vars, DType::F32, &device),
+    )
+    .unwrap();
+    let path = temp_safetensors_path();
+    let mut tensors = source.named_tensors();
+    tensors.remove("mtp.heads.0.trunk_norm.weight");
+    candle_core::safetensors::save(&tensors, &path).unwrap();
+
+    let mut target_vars = VarMap::new();
+    let _target = AarambhModel::new(
+        &cfg,
+        VarBuilder::from_varmap(&target_vars, DType::F32, &device),
+    )
+    .unwrap();
+    let result = load_retrofit_into_varmap(&path, &cfg, &mut target_vars, &device, DType::F32);
+    let _ = std::fs::remove_file(path);
+    assert!(result.is_err());
 }
 
 #[test]

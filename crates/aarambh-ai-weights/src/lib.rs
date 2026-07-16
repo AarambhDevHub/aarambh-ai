@@ -32,6 +32,8 @@ pub struct RetrofitLoadReport {
     pub sharded_moe_expert_tensors: usize,
     /// Number of new shared-expert tensors initialized by the retrofit.
     pub initialized_shared_expert_tensors: usize,
+    /// Number of new MTP tensors initialized by the retrofit.
+    pub initialized_mtp_tensors: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,8 +75,8 @@ pub fn load_model_with_dtype(
 /// Copy a dense SafeTensors checkpoint into an initialized hybrid-model variable map.
 ///
 /// All embedding, normalization, FFN/MoE, output-head, and scheduled full-attention
-/// parameters must exist and match shape. Only new `deltanet` and `dsa`
-/// parameters may be absent.
+/// parameters must exist and match shape. New `deltanet`, `dsa`, and complete
+/// `mtp` parameter sets may be absent.
 pub fn load_retrofit_into_varmap(
     path: impl AsRef<Path>,
     cfg: &ModelConfig,
@@ -94,9 +96,10 @@ pub fn load_retrofit_into_varmap_with_moe(
     dtype: DType,
     moe_options: Option<MoeRetrofitOptions>,
 ) -> Result<RetrofitLoadReport> {
-    if cfg.attention_schedule.is_none() && moe_options.is_none() {
+    if cfg.attention_schedule.is_none() && cfg.mtp.is_none() && moe_options.is_none() {
         return Err(aarambh_ai_core::AarambhError::Config(
-            "retrofit loading requires model.attention_schedule or moe_retrofit options".into(),
+            "retrofit loading requires model.attention_schedule, model.mtp, or moe_retrofit options"
+                .into(),
         ));
     }
     if let Some(options) = moe_options {
@@ -109,7 +112,23 @@ pub fn load_retrofit_into_varmap_with_moe(
     let mut expanded_moe_router_tensors = 0usize;
     let mut sharded_moe_expert_tensors = 0usize;
     let mut initialized_shared_expert_tensors = 0usize;
+    let mut initialized_mtp_tensors = 0usize;
     let variables = varmap.data().lock().unwrap();
+    let target_mtp_names = variables
+        .keys()
+        .filter(|name| name.starts_with("mtp."))
+        .collect::<Vec<_>>();
+    let present_mtp_tensors = target_mtp_names
+        .iter()
+        .filter(|name| source.contains_key(name.as_str()))
+        .count();
+    if present_mtp_tensors > 0 && present_mtp_tensors != target_mtp_names.len() {
+        return Err(aarambh_ai_core::AarambhError::Checkpoint(format!(
+            "retrofit source contains a partial MTP tensor set: found {present_mtp_tensors} of {} required tensors",
+            target_mtp_names.len()
+        )));
+    }
+    let initialize_mtp = !target_mtp_names.is_empty() && present_mtp_tensors == 0;
     for (name, variable) in variables.iter() {
         if moe_options.is_some() {
             if name.ends_with(".ffn.router.weight") {
@@ -176,6 +195,9 @@ pub fn load_retrofit_into_varmap_with_moe(
             None if name.contains(".dsa.") => {
                 initialized_dsa_tensors += 1;
             }
+            None if name.starts_with("mtp.") && initialize_mtp => {
+                initialized_mtp_tensors += 1;
+            }
             None => {
                 return Err(aarambh_ai_core::AarambhError::Checkpoint(format!(
                     "retrofit source is missing required tensor {name}"
@@ -191,6 +213,7 @@ pub fn load_retrofit_into_varmap_with_moe(
         expanded_moe_router_tensors,
         sharded_moe_expert_tensors,
         initialized_shared_expert_tensors,
+        initialized_mtp_tensors,
     })
 }
 

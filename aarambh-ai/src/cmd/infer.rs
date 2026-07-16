@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 use aarambh_ai_core::{AarambhError, TokenizerLike};
 use aarambh_ai_finetune::{Verifier, VerifierKind};
 use aarambh_ai_inference::{
-    GenerationConfig, GenerationOutput, GenerationPhase, GenerationStep, InferenceEngine, Sampler,
-    SpeculativeConfig, SpeculativeEngine, ThinkingMode, ToolCallingConfig, ToolChoice,
-    ToolDefinition,
+    GenerationConfig, GenerationOutput, GenerationPhase, GenerationStep, InferenceEngine,
+    MtpSpeculativeEngine, Sampler, SpeculativeConfig, SpeculativeEngine, ThinkingMode,
+    ToolCallingConfig, ToolChoice, ToolDefinition,
 };
 use aarambh_ai_safety::{
     SafeResponse, SafeStreamEvent, SafetyGenerator, SafetyGuard, SafetyMode, SafetyPolicy,
@@ -73,8 +73,8 @@ pub struct InferArgs {
     pub draft_config: Option<PathBuf>,
     #[arg(long)]
     pub draft_tokenizer: Option<PathBuf>,
-    #[arg(long, default_value_t = 4)]
-    pub draft_tokens: usize,
+    #[arg(long)]
+    pub draft_tokens: Option<usize>,
     #[arg(long)]
     pub stats: bool,
     #[arg(long)]
@@ -129,7 +129,7 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
     let thinking_mode = parse_thinking_mode(&args.thinking)?;
     let safety_mode = parse_safety_mode(&args.safety)?;
     let self_learn_mode = parse_self_learn_mode(&args.self_learn)?;
-    validate_speculative_args(&args, self_learn_mode)?;
+    validate_speculative_args(&args, self_learn_mode, &run_config.model)?;
     let tool_calling = load_tool_calling_config(&args, self_learn_mode)?;
     let config = GenerationConfig {
         max_new_tokens: args.max_tokens,
@@ -299,31 +299,77 @@ fn run_speculative_infer(
     safety_mode: SafetyMode,
     thinking_mode: ThinkingMode,
 ) -> anyhow::Result<()> {
-    let draft_model = args
-        .draft_model
+    if let Some(draft_model) = args.draft_model.clone() {
+        let draft_config_path = args.draft_config.as_ref().expect("validated draft config");
+        let draft_config = TrainingRunConfig::from_toml(draft_config_path)?;
+        let draft_tokenizer = args
+            .draft_tokenizer
+            .clone()
+            .unwrap_or_else(|| target_tokenizer.clone());
+        let speculative_config = SpeculativeConfig::new(args.draft_tokens.unwrap_or(4))?;
+        let engine = SpeculativeEngine::from_paths_with_dtype(
+            target_model,
+            &target_config.model,
+            &target_tokenizer,
+            draft_model,
+            &draft_config.model,
+            draft_tokenizer,
+            device,
+            dtype,
+            speculative_config,
+        )?;
+        let tokenizer_for_view = engine.tokenizer().clone();
+        return run_speculative_engine(
+            args,
+            target_config,
+            engine,
+            tokenizer_for_view,
+            generation_config,
+            prompt,
+            safety_mode,
+            thinking_mode,
+        );
+    }
+
+    let mtp = target_config
+        .model
+        .mtp
         .as_ref()
-        .expect("validated draft model")
-        .clone();
-    let draft_config_path = args.draft_config.as_ref().expect("validated draft config");
-    let draft_config = TrainingRunConfig::from_toml(draft_config_path)?;
-    let draft_tokenizer = args
-        .draft_tokenizer
-        .clone()
-        .unwrap_or_else(|| target_tokenizer.clone());
-    let speculative_config = SpeculativeConfig::new(args.draft_tokens)?;
-    let mut engine = SpeculativeEngine::from_paths_with_dtype(
+        .expect("validated MTP configuration");
+    let speculative_config =
+        SpeculativeConfig::new(args.draft_tokens.unwrap_or(mtp.num_future_tokens))?;
+    let engine = MtpSpeculativeEngine::from_paths_with_dtype(
         target_model,
         &target_config.model,
         &target_tokenizer,
-        draft_model,
-        &draft_config.model,
-        draft_tokenizer,
         device,
         dtype,
         speculative_config,
     )?;
     let tokenizer_for_view = engine.tokenizer().clone();
+    run_speculative_engine(
+        args,
+        target_config,
+        engine,
+        tokenizer_for_view,
+        generation_config,
+        prompt,
+        safety_mode,
+        thinking_mode,
+    )
+}
 
+#[allow(clippy::too_many_arguments)]
+fn run_speculative_engine<G: SafetyGenerator>(
+    args: &InferArgs,
+    target_config: &TrainingRunConfig,
+    mut engine: G,
+    tokenizer_for_view: BpeTokenizer,
+    generation_config: GenerationConfig,
+    prompt: String,
+    safety_mode: SafetyMode,
+    thinking_mode: ThinkingMode,
+) -> anyhow::Result<()> {
     if let Some(policy) = SafetyPolicy::for_mode(safety_mode)
         .map(|policy| policy.with_audit_path(&args.safety_audit_log))
     {
@@ -411,11 +457,13 @@ fn render_text_step(
 fn validate_speculative_args(
     args: &InferArgs,
     self_learn_mode: SelfLearnMode,
+    model_config: &aarambh_ai_core::ModelConfig,
 ) -> anyhow::Result<()> {
     if !args.speculative {
         if args.draft_model.is_some()
             || args.draft_config.is_some()
             || args.draft_tokenizer.is_some()
+            || args.draft_tokens.is_some()
         {
             return Err(
                 AarambhError::Config("draft model options require --speculative".into()).into(),
@@ -423,30 +471,51 @@ fn validate_speculative_args(
         }
         return Ok(());
     }
-    if args.draft_model.is_none() {
-        return Err(
-            AarambhError::Config("--draft-model is required with --speculative".into()).into(),
-        );
-    }
-    if args.draft_config.is_none() {
-        return Err(
-            AarambhError::Config("--draft-config is required with --speculative".into()).into(),
-        );
-    }
     if args.image.is_some() {
         return Err(AarambhError::Unsupported(
-            "Phase 25 speculative decoding supports text inference only; --image is not supported"
-                .into(),
+            "speculative decoding supports text inference only; --image is not supported".into(),
         )
         .into());
     }
     if self_learn_mode.is_enabled() {
         return Err(AarambhError::Unsupported(
-            "Phase 25 speculative decoding cannot be combined with --self-learn".into(),
+            "speculative decoding cannot be combined with --self-learn".into(),
         )
         .into());
     }
-    SpeculativeConfig::new(args.draft_tokens)?;
+    let external_draft =
+        args.draft_model.is_some() || args.draft_config.is_some() || args.draft_tokenizer.is_some();
+    if external_draft {
+        if args.draft_model.is_none() {
+            return Err(AarambhError::Config(
+                "--draft-model is required when external draft options are used".into(),
+            )
+            .into());
+        }
+        if args.draft_config.is_none() {
+            return Err(AarambhError::Config(
+                "--draft-config is required when --draft-model is used".into(),
+            )
+            .into());
+        }
+        SpeculativeConfig::new(args.draft_tokens.unwrap_or(4))?;
+        return Ok(());
+    }
+
+    let mtp = model_config.mtp.as_ref().ok_or_else(|| {
+        AarambhError::Config(
+            "--speculative without --draft-model requires an MTP-enabled checkpoint config".into(),
+        )
+    })?;
+    let proposal_width = args.draft_tokens.unwrap_or(mtp.num_future_tokens);
+    SpeculativeConfig::new(proposal_width)?;
+    if proposal_width < 2 || proposal_width > mtp.num_future_tokens {
+        return Err(AarambhError::Config(format!(
+            "MTP --draft-tokens must be in 2..={}, got {proposal_width}",
+            mtp.num_future_tokens
+        ))
+        .into());
+    }
     Ok(())
 }
 
@@ -536,10 +605,12 @@ fn print_generation_stats(
     };
     if let Some(stats) = &output.speculative_stats {
         eprintln!(
-            "generation_stats mode={mode} tokens={} elapsed_ms={elapsed_ms:.3} tok_s={tokens_per_second:.3} target_decode_forwards={} draft_decode_forwards={} proposed={} accepted={} rejected={} acceptance_rate={:.4} accepted_per_target_forward={:.3}",
+            "generation_stats mode={mode} source={:?} tokens={} elapsed_ms={elapsed_ms:.3} tok_s={tokens_per_second:.3} target_decode_forwards={} draft_decode_forwards={} mtp_head_forwards={} proposed={} accepted={} rejected={} acceptance_rate={:.4} accepted_per_target_forward={:.3}",
+            stats.proposal_source,
             output.token_ids.len(),
             stats.target_decode_forwards,
             stats.draft_decode_forwards,
+            stats.mtp_head_forwards,
             stats.draft_tokens_proposed,
             stats.draft_tokens_accepted,
             stats.draft_tokens_rejected,
@@ -1385,7 +1456,7 @@ mod tests {
             draft_model: Some("draft.safetensors".into()),
             draft_config: Some("draft.toml".into()),
             draft_tokenizer: None,
-            draft_tokens: 4,
+            draft_tokens: Some(4),
             stats: false,
             tools: None,
             tool_choice: "auto".into(),
@@ -1404,29 +1475,51 @@ mod tests {
     #[test]
     fn speculative_cli_requires_draft_model_and_config() {
         let mut args = args();
+        let model = aarambh_ai_core::ModelConfig::tiny();
         args.draft_model = None;
-        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled).is_err());
+        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled, &model).is_err());
         args.draft_model = Some("draft.safetensors".into());
         args.draft_config = None;
-        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled).is_err());
+        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled, &model).is_err());
     }
 
     #[test]
     fn speculative_cli_rejects_unsupported_modes() {
         let mut args = args();
+        let model = aarambh_ai_core::ModelConfig::tiny();
         args.image = Some("image.png".into());
-        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled).is_err());
+        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled, &model).is_err());
         args.image = None;
-        assert!(validate_speculative_args(&args, SelfLearnMode::Cpu).is_err());
+        assert!(validate_speculative_args(&args, SelfLearnMode::Cpu, &model).is_err());
     }
 
     #[test]
     fn draft_options_require_speculative_flag() {
         let mut args = args();
+        let model = aarambh_ai_core::ModelConfig::tiny();
         args.speculative = false;
-        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled).is_err());
+        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled, &model).is_err());
         args.draft_model = None;
         args.draft_config = None;
-        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled).is_ok());
+        args.draft_tokens = None;
+        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled, &model).is_ok());
+    }
+
+    #[test]
+    fn internal_speculation_requires_mtp_and_valid_width() {
+        let mut args = args();
+        args.draft_model = None;
+        args.draft_config = None;
+        args.draft_tokens = None;
+        let mut model = aarambh_ai_core::ModelConfig::tiny();
+        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled, &model).is_err());
+
+        model.mtp = Some(aarambh_ai_core::MtpConfig {
+            num_future_tokens: 3,
+            aux_loss_weight: 0.3,
+        });
+        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled, &model).is_ok());
+        args.draft_tokens = Some(4);
+        assert!(validate_speculative_args(&args, SelfLearnMode::Disabled, &model).is_err());
     }
 }

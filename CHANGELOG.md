@@ -1,5 +1,42 @@
 # Changelog
 
+## [3.0.0-alpha.4] - 2026-07-16
+
+### Added
+
+- **Phase 32 Multi-Token Prediction (MTP)**
+  - Added optional MTP-2/MTP-3 future-token heads with independent
+    normalization, one dense causal refinement block per offset, and a shared
+    main LM-head projection.
+  - Added offset-aligned auxiliary cross-entropy, mean auxiliary weighting,
+    per-head training metrics, finite-loss checks, and two-step optimizer
+    coverage.
+  - Added one-checkpoint exact speculative decoding. Bare `--speculative` uses
+    MTP heads; supplying draft model/config paths retains external speculation.
+  - Added SafeTensors/GGUF head persistence and dense-checkpoint retrofit with
+    complete-set initialization and partial-set rejection.
+  - Added CPU smoke, Medium/Large continuation configs, matched training
+    comparison, throughput benchmark, and Phase 32 implementation guide.
+
+### Changed
+
+- Cached model forwards can return final hidden states with logits, allowing
+  MTP proposal heads to reuse one trunk prefill without an auxiliary KV cache.
+- Fine-tuning projection selection freezes MTP tensors while preserving them
+  through adapter merge workflows.
+- Speculative statistics now identify external-draft versus MTP proposals and
+  report auxiliary-head forward counts.
+- Workspace version is now `3.0.0-alpha.4`.
+
+### Verified
+
+- MTP-disabled model and loss compatibility, output shapes, offset alignment,
+  finite gradients, and auxiliary parameter updates.
+- Exact greedy equivalence between ordinary and MTP speculative generation,
+  committed-token callback behavior, safety integration, and context limits.
+- SafeTensors/GGUF round trips, dense-to-MTP retrofit fidelity, and rejection
+  of incomplete MTP checkpoint tensor sets.
+
 ## [3.0.0-alpha.3] - 2026-07-16
 
 ### Added
