@@ -1,5 +1,45 @@
 # Changelog
 
+## [3.0.0-alpha.6] - 2026-07-18
+
+### Added
+
+- **Phase 34 Native Quantization-Aware Training**
+  - Added device-native INT4/INT8 fake quantization with an identity
+    straight-through estimator and no host tensor round-trip.
+  - Added exporter-aligned Q4_K_M 256-value blocks with f16 scale/min storage,
+    global Q8 absmax simulation, per-tensor and per-output-channel policies,
+    and forced Q8 DSA indexers under the export-aligned policy.
+  - Added `QatLinear` coverage for attention, dense/routed/shared FFNs, MoE
+    routers, Gated DeltaNet, DSA indexers, MTP heads, and the optional LM head.
+  - Added one fake-quantized weight cache per projection and optimizer
+    generation, exact SafeTensors initialization, QAT-policy checkpoint
+    persistence, strict resume matching, and QAT coverage/cache metrics.
+  - Added `eval --qat-compare` for matched baseline-FP, baseline-quantized,
+    QAT-FP, and QAT-quantized scorecards with normalized robustness recovery.
+  - Added CPU smoke and Tiny continuation configs, smoke/comparison scripts,
+    Criterion benchmarks, and a Phase 34 implementation guide.
+
+### Changed
+
+- Calibration dataset/model iteration now lives in the CLI, leaving
+  `aarambh-ai-quant` below model assembly and preventing a quant/model
+  dependency cycle.
+- Normal `AarambhModel::new` construction remains full precision even when a
+  config records QAT history; only `new_for_training` activates fake
+  quantization.
+- The workspace version is now `3.0.0-alpha.6`.
+
+### Verified
+
+- Q4_K_M and Q8 fake-quantized values match the existing GGUF exporters,
+  including padded Q4 tails.
+- STE gradients are identity-valued, QAT caches refresh exactly once per
+  optimizer generation, and a two-step trainer smoke produces finite losses
+  and projection updates.
+- Non-QAT configs preserve the existing construction path; old model JSON
+  defaults `qat` to disabled.
+
 ## [3.0.0-alpha.5] - 2026-07-18
 
 ### Added

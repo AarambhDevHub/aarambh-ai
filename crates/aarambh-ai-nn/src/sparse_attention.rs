@@ -2,8 +2,8 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use aarambh_ai_core::DsaConfig;
-use candle_core::{DType, Module, Result, Tensor};
-use candle_nn::Linear;
+use aarambh_ai_quant::QatLinear;
+use candle_core::{DType, Result, Tensor};
 
 use crate::attention::GroupedQueryAttention;
 use crate::kvcache::DsaKvCache;
@@ -45,8 +45,8 @@ pub struct DsaTeacherOutput {
 /// Learned block-sparse GQA layer with a compact query/key indexer.
 pub struct DsaAttention {
     attention: GroupedQueryAttention,
-    index_q: Linear,
-    index_k: Linear,
+    index_q: QatLinear,
+    index_k: QatLinear,
     config: DsaConfig,
     index_dim: usize,
 }
@@ -61,15 +61,15 @@ impl DsaAttention {
     /// Create a DSA wrapper around an existing grouped-query attention layer.
     pub fn new(
         attention: GroupedQueryAttention,
-        index_q: Linear,
-        index_k: Linear,
+        index_q: impl Into<QatLinear>,
+        index_k: impl Into<QatLinear>,
         config: DsaConfig,
         index_dim: usize,
     ) -> Self {
         Self {
             attention,
-            index_q,
-            index_k,
+            index_q: index_q.into(),
+            index_k: index_k.into(),
             config,
             index_dim,
         }

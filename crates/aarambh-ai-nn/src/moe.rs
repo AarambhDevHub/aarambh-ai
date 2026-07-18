@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use aarambh_ai_core::MoeConfig;
+use aarambh_ai_quant::QatLinear;
 use candle_core::{D, DType, Result, Tensor};
-use candle_nn::{Linear, Module};
 
 use crate::ffn::SwiGluFfn;
 
@@ -153,27 +153,27 @@ impl SharedExpertPath {
 /// Router followed by fine-grained routed experts and optional shared experts.
 pub struct MoeFfn {
     config: MoeConfig,
-    router: Linear,
+    router: QatLinear,
     experts: Vec<SwiGluFfn>,
     shared_experts: SharedExpertPath,
 }
 
 impl MoeFfn {
     /// Create a Phase 22-compatible MoE layer without shared experts.
-    pub fn new(config: MoeConfig, router: Linear, experts: Vec<SwiGluFfn>) -> Self {
+    pub fn new(config: MoeConfig, router: impl Into<QatLinear>, experts: Vec<SwiGluFfn>) -> Self {
         Self::new_with_shared(config, router, experts, SharedExpertPath::empty())
     }
 
     /// Create a fine-grained MoE layer with an explicit shared expert path.
     pub fn new_with_shared(
         config: MoeConfig,
-        router: Linear,
+        router: impl Into<QatLinear>,
         experts: Vec<SwiGluFfn>,
         shared_experts: SharedExpertPath,
     ) -> Self {
         Self {
             config,
-            router,
+            router: router.into(),
             experts,
             shared_experts,
         }

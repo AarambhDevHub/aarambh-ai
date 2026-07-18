@@ -2,11 +2,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use aarambh_ai_core::TokenizerLike;
-use aarambh_ai_data::dataset::PlaintextDataset;
-use aarambh_ai_quant::{GgufFormat, QuantMethod, run_calibration};
+use aarambh_ai_data::dataset::{PlaintextDataset, TextDataset};
+use aarambh_ai_model::AarambhModel;
+use aarambh_ai_quant::{CalibrationStats, GgufFormat, QuantMethod};
 use aarambh_ai_tokenizer::BpeTokenizer;
 use aarambh_ai_train::TrainingRunConfig;
 use aarambh_ai_weights::{load_any_model, save_gguf};
+use candle_core::{Device, Tensor};
 use clap::Args;
 
 #[derive(Debug, Args)]
@@ -117,4 +119,41 @@ fn write_parent_dir(path: &Path) -> anyhow::Result<()> {
         fs::create_dir_all(parent)?;
     }
     Ok(())
+}
+
+fn run_calibration(
+    model: &AarambhModel,
+    tokenizer: &dyn TokenizerLike,
+    dataset: &dyn TextDataset,
+    n_samples: usize,
+    max_seq_len: usize,
+    device: &Device,
+    with_hessian: bool,
+) -> anyhow::Result<CalibrationStats> {
+    if n_samples == 0 {
+        return Err(anyhow::anyhow!("calibration sample count must be non-zero"));
+    }
+    let mut stats = CalibrationStats::default();
+    let mut seen = 0usize;
+    for index in 0..dataset.len() {
+        if seen >= n_samples {
+            break;
+        }
+        let mut ids = tokenizer.encode(dataset.get(index))?;
+        if ids.len() < 2 {
+            continue;
+        }
+        ids.truncate(max_seq_len.max(1));
+        let input = Tensor::from_vec(ids.clone(), (1, ids.len()), device)?;
+        for (name, activations) in model.linear_inputs(&input)? {
+            stats.observe(&name, &activations, with_hessian)?;
+        }
+        seen += 1;
+    }
+    if seen == 0 {
+        return Err(anyhow::anyhow!(
+            "calibration dataset produced no usable samples"
+        ));
+    }
+    Ok(stats)
 }

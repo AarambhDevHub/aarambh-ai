@@ -12,9 +12,9 @@ construction, training, inference, quantization, adapter tuning, alignment,
 evaluation, multimodal input, safety, and an OpenAI-compatible server.
 
 The production source release is **v2.0.0**. Current mainline development is
-**v3.0.0-alpha.5**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
+**v3.0.0-alpha.6**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
 fine-grained MoE with shared experts, Multi-Token Prediction (MTP), and
-on-policy distillation.
+on-policy distillation and native quantization-aware training.
 
 > [!IMPORTANT]
 > This is a source and engineering project. It does not publish crates to
@@ -27,7 +27,7 @@ on-policy distillation.
 |---|---|
 | Model | RMSNorm, RoPE, GQA, SwiGLU, KV cache, tied embeddings, Tiny to Large configs |
 | Efficient architecture | YaRN/NTK/linear RoPE scaling, Gated DeltaNet, learned block-sparse DSA, fine-grained MoE, MTP |
-| Training | BPE data pipeline, AdamW, cosine schedule, gradient accumulation/clipping, checkpoint resume, BF16 CUDA, single-node multi-GPU, on-policy distillation |
+| Training | BPE data pipeline, AdamW, cosine schedule, gradient accumulation/clipping, checkpoint resume, BF16 CUDA, single-node multi-GPU, on-policy distillation, native INT4/INT8 QAT |
 | Fine-tuning | SFT, LoRA, QLoRA, DoRA, QDoRA, VLM adapters, GRPO, DPO, QDPO, tool-call tuning |
 | Inference | Greedy/sampled decoding, streaming, thinking budgets, external or one-checkpoint MTP speculation, tool grammar |
 | Model formats | SafeTensors, INT8, GPTQ/AWQ INT4, GGUF, Hugging Face conversion, quantized KV cache |
@@ -133,6 +133,8 @@ Representative training recipes:
 | `configs/distill_smoke.toml` | Phase 33 local CPU execution check |
 | `configs/medium_distill.toml` | Medium on-policy distillation recipe |
 | `configs/large_distill.toml` | Large on-policy distillation recipe |
+| `configs/qat_smoke.toml` | Two-step CPU native-QAT execution check |
+| `configs/qat_tiny.toml` | Tiny INT4 QAT continuation from an exact checkpoint |
 
 For two GPUs, launch one process per rank with matching run IDs:
 
@@ -251,6 +253,35 @@ The same `infer --model` option accepts Aarambh SafeTensors and GGUF files.
 Use `aarambh-ai convert --help` for Hugging Face conversion and direct format
 conversion options.
 
+### Train With Native QAT
+
+Run the checked-in CPU smoke or continue an exact floating-point checkpoint:
+
+```sh
+target/release/aarambh-ai train --config configs/qat_smoke.toml
+target/release/aarambh-ai train --config configs/qat_tiny.toml
+```
+
+`[model.qat]` supports `int4`/`int8`, `export_aligned`, `per_tensor`, or
+`per_output_channel` scaling, and explicit projection target classes. Norms,
+embeddings, convolution kernels, and scalar recurrent parameters remain full
+precision. QAT is active only in the training constructor; saved SafeTensors
+remain full-precision master weights and use the existing GGUF exporter.
+
+Compare post-training quantization against QAT under identical eval settings:
+
+```sh
+scripts/phase34_compare_qat.sh \
+  configs/qat_tiny.toml \
+  checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  checkpoints/qat_tiny/best/model.safetensors \
+  data/eval \
+  reports/qat_tiny
+```
+
+The report contains four scorecards and direction-normalized quantization
+drop/recovery. A positive QAT result is measured from that report, not assumed.
+
 ### Fine-Tune And Merge
 
 SFT input is JSONL with `instruction`, optional `thinking`, and `response`
@@ -344,6 +375,9 @@ target/release/aarambh-ai train --config configs/mtp_smoke.toml
 
 # Local teacher, scored-reference teacher, offline control, eval, and resume
 scripts/phase33_smoke.sh
+
+# Native INT4 fake quantization, STE backward, checkpoints, and cache metrics
+scripts/phase34_smoke.sh
 ```
 
 For an MTP-trained checkpoint, `--speculative` needs no draft checkpoint:
@@ -368,6 +402,8 @@ Checkpoint retrofit and comparison tooling:
 - `scripts/phase32_benchmark_mtp.sh`
 - `scripts/phase33_prepare_prompts.py`
 - `scripts/phase33_compare_distillation.sh`
+- `scripts/phase34_smoke.sh`
+- `scripts/phase34_compare_qat.sh`
 
 The Phase 31 method and result contract are documented in
 [docs/phase31_moe_sweep.md](docs/phase31_moe_sweep.md). Hardware benchmark
@@ -377,6 +413,8 @@ The MTP training, retrofit, and one-checkpoint speculation contract is in
 The on-policy teacher, replay objective, offline control, and matched comparison
 protocol are in
 [docs/phase33_distillation_results.md](docs/phase33_distillation_results.md).
+The native QAT policy, exact continuation contract, and four-way robustness
+gate are in [docs/phase34_qat.md](docs/phase34_qat.md).
 
 ## Model Scales
 
@@ -454,6 +492,7 @@ CUDA checks require a CUDA-capable environment and are intentionally opt-in.
 | [docs/inference-server.md](docs/inference-server.md) | Server endpoints, SDK usage, auth, safety, and limits |
 | [docs/phase32_mtp.md](docs/phase32_mtp.md) | MTP training, retrofit, exact speculation, and benchmark method |
 | [docs/phase33_distillation_results.md](docs/phase33_distillation_results.md) | On-policy distillation design, smoke proof, and comparison method |
+| [docs/phase34_qat.md](docs/phase34_qat.md) | Native QAT configuration, continuation, export, and robustness validation |
 | [RELEASE.md](RELEASE.md) | Source-release process and artifact policy |
 | [CHANGELOG.md](CHANGELOG.md) | Versioned implementation history |
 
@@ -463,6 +502,8 @@ CUDA checks require a CUDA-capable environment and are intentionally opt-in.
   training data, update count, and tuning.
 - GGUF tensors are dequantized when loaded by the current universal model path;
   smaller files do not yet imply fully quantized compute.
+- QAT robustness improvements require a trained checkpoint and a positive
+  four-way eval report; the source release does not claim unexecuted gains.
 - MoE dispatch computes every routed expert and applies dense weights. Fine
   granularity changes capacity and routing but is not sparse grouped dispatch.
 - Multi-GPU support is single-node data parallel training.

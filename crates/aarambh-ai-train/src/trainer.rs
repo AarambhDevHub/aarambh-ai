@@ -141,7 +141,7 @@ impl Trainer {
 
         let varmap = VarMap::new();
         let vb = VarBuilder::from_varmap(&varmap, dtype, &device);
-        let model = AarambhModel::new(&model_config, vb)?;
+        let model = AarambhModel::new_for_training(&model_config, vb)?;
         let optimizer = AdamW::from_varmap(&varmap, AdamWConfig::from(&train_config))?;
         let schedule = CosineScheduleWithWarmup::from_train_config(&train_config);
         let checkpoint = CheckpointManager::new(train_config.checkpoint_dir.clone());
@@ -158,7 +158,10 @@ impl Trainer {
             train_config,
             dsa_training_config: DsaTrainingConfig::default(),
             device,
-            state: TrainState::default(),
+            state: TrainState {
+                qat: model_config.qat.clone(),
+                ..TrainState::default()
+            },
             pending_grads: GradMap::new(),
             last_loss: None,
             last_ce_loss: None,
@@ -213,7 +216,15 @@ impl Trainer {
             .load_latest(&mut self.varmap, &mut self.optimizer, &self.device)?
         {
             Some(state) => {
+                if state.qat != self.model.config().qat {
+                    return Err(AarambhError::Checkpoint(format!(
+                        "QAT resume policy mismatch: checkpoint={:?} configured={:?}",
+                        state.qat,
+                        self.model.config().qat
+                    )));
+                }
                 self.state = state;
+                self.model.advance_qat_generation();
                 Ok(true)
             }
             None => Ok(false),
@@ -245,7 +256,25 @@ impl Trainer {
             moe_options,
         )?;
         self.optimizer = AdamW::from_varmap(&self.varmap, AdamWConfig::from(&self.train_config))?;
+        self.model.advance_qat_generation();
         Ok(report)
+    }
+
+    /// Load a model-only SafeTensors checkpoint with exact names and shapes.
+    pub fn load_exact_model_checkpoint(
+        &mut self,
+        path: impl AsRef<Path>,
+        dtype: DType,
+    ) -> Result<usize> {
+        let loaded = aarambh_ai_weights::load_exact_into_varmap(
+            path,
+            &mut self.varmap,
+            &self.device,
+            dtype,
+        )?;
+        self.optimizer = AdamW::from_varmap(&self.varmap, AdamWConfig::from(&self.train_config))?;
+        self.model.advance_qat_generation();
+        Ok(loaded)
     }
 
     /// Replace train/validation loaders while preserving model, optimizer, and schedule state.
@@ -531,6 +560,7 @@ impl Trainer {
         self.optimizer.step(&self.pending_grads, lr)?;
         self.pending_grads.clear();
         self.state.step += 1;
+        self.model.advance_qat_generation();
         Ok((lr, grad_norm))
     }
 
@@ -642,6 +672,24 @@ impl Trainer {
                     format_mtp_losses(&metrics.mtp_head_losses),
                 );
             }
+            if let Some(qat) = self.model.qat_stats() {
+                let config = self
+                    .model
+                    .config()
+                    .qat
+                    .as_ref()
+                    .expect("active QAT has a model policy");
+                println!(
+                    "qat step={} bits={} granularity={:?} tensors={} parameters={} generation={} cache_refreshes={}",
+                    metrics.step,
+                    config.bits.bits(),
+                    config.granularity,
+                    qat.wrapped_tensors,
+                    qat.wrapped_parameters,
+                    qat.generation,
+                    qat.cache_refreshes,
+                );
+            }
         }
 
         if self.train_config.eval_steps > 0
@@ -717,7 +765,7 @@ mod tests {
     use super::*;
     use aarambh_ai_core::{
         Device as AarambhDevice, DsaConfig, GatedDeltaNetConfig, HybridAttentionSchedule,
-        MoeConfig, MtpConfig, TokenizerLike,
+        MoeConfig, MtpConfig, QatConfig, QuantBits, TokenizerLike,
     };
     use aarambh_ai_data::dataset::PlaintextDataset;
     use std::collections::HashMap;
@@ -779,6 +827,7 @@ mod tests {
             attention_schedule: None,
             dsa_config: None,
             mtp: None,
+            qat: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -868,6 +917,7 @@ mod tests {
             attention_schedule: None,
             dsa_config: None,
             mtp: None,
+            qat: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -938,6 +988,7 @@ mod tests {
                 num_future_tokens: 3,
                 aux_loss_weight: 0.3,
             }),
+            qat: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -1044,6 +1095,7 @@ mod tests {
                 min_seq_len_for_sparsity: 16,
             }),
             mtp: None,
+            qat: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
@@ -1090,5 +1142,139 @@ mod tests {
             .unwrap();
         assert!(second.dsa_indexer_loss.is_none());
         assert!(second.loss.is_finite());
+    }
+
+    #[test]
+    fn qat_two_step_smoke_updates_weights_and_cache_generation() {
+        let tokenizer = CharTokenizer {
+            ids: HashMap::from([('a', 0), ('b', 1), ('c', 2), ('d', 3)]),
+        };
+        let dataset = PlaintextDataset::from_lines(vec!["abcdabcdabcdabcdabcdabcd".into()]);
+        let device = AarambhDevice::Cpu;
+        let train_loader = DataLoader::new(&dataset, &tokenizer, 1, 4, false, device.clone());
+        let mut batches = DataLoader::new(&dataset, &tokenizer, 1, 4, false, device.clone());
+        let model_config = ModelConfig {
+            vocab_size: tokenizer.vocab_size(),
+            hidden_dim: 64,
+            ffn_dim: 128,
+            n_layers: 1,
+            n_heads: 1,
+            n_kv_heads: 1,
+            max_seq_len: 4,
+            rope_theta: 10000.0,
+            rope_scaling: None,
+            moe: None,
+            attention_schedule: None,
+            dsa_config: None,
+            mtp: None,
+            qat: Some(QatConfig::default()),
+            norm_eps: 1e-5,
+            tie_embeddings: true,
+        };
+        let checkpoint_dir =
+            std::env::temp_dir().join(format!("aarambh_qat_smoke_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&checkpoint_dir);
+        let train_config = TrainConfig {
+            lr: 1e-3,
+            batch_size: 1,
+            grad_accum_steps: 2,
+            max_epochs: 1,
+            max_steps: 2,
+            warmup_steps: 0,
+            min_lr_ratio: 1.0,
+            weight_decay: 0.0,
+            beta1: 0.9,
+            beta2: 0.95,
+            epsilon: 1e-8,
+            clip_grad_norm: 1.0,
+            save_every_n_steps: 0,
+            log_every_n_steps: 0,
+            eval_steps: 0,
+            seed: 42,
+            checkpoint_dir: checkpoint_dir.clone(),
+        };
+        let mut mismatch_model_config = model_config.clone();
+        let mismatch_train_config = train_config.clone();
+        let mut trainer = Trainer::new(
+            model_config,
+            train_config,
+            train_loader,
+            None,
+            device.to_candle().unwrap(),
+            DType::F32,
+        )
+        .unwrap();
+        let before = trainer
+            .model()
+            .named_tensors()
+            .into_iter()
+            .filter(|(name, _)| name.contains(".attn.") || name.contains(".ffn."))
+            .map(|(name, tensor)| {
+                (
+                    name,
+                    tensor.flatten_all().unwrap().to_vec1::<f32>().unwrap(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        for expected_step in 1..=2 {
+            let accumulated = trainer
+                .train_step(batches.next().unwrap().unwrap())
+                .unwrap();
+            assert!(!accumulated.did_optimizer_step);
+            assert_eq!(accumulated.step, expected_step - 1);
+            assert!(accumulated.loss.is_finite());
+            assert_eq!(
+                trainer.model().qat_stats().unwrap().cache_refreshes,
+                expected_step * 7
+            );
+
+            let stepped = trainer
+                .train_step(batches.next().unwrap().unwrap())
+                .unwrap();
+            assert!(stepped.did_optimizer_step);
+            assert_eq!(stepped.step, expected_step);
+            assert!(stepped.loss.is_finite());
+            assert_eq!(
+                trainer.model().qat_stats().unwrap().cache_refreshes,
+                expected_step * 7
+            );
+        }
+        let stats = trainer.model().qat_stats().unwrap();
+        assert_eq!(stats.generation, 2);
+        assert_eq!(stats.wrapped_tensors, 7);
+        assert_eq!(stats.cache_refreshes, 14);
+        let changed = trainer
+            .model()
+            .named_tensors()
+            .into_iter()
+            .filter(|(name, _)| before.contains_key(name))
+            .any(|(name, tensor)| {
+                let after = tensor.flatten_all().unwrap().to_vec1::<f32>().unwrap();
+                before[&name]
+                    .iter()
+                    .zip(after)
+                    .any(|(before, after)| (before - after).abs() > 0.0)
+            });
+        assert!(
+            changed,
+            "no QAT-covered attention or FFN projection updated"
+        );
+
+        trainer.save_checkpoint().unwrap();
+        mismatch_model_config.qat.as_mut().unwrap().bits = QuantBits::Int8;
+        let mismatch_loader = DataLoader::new(&dataset, &tokenizer, 1, 4, false, device.clone());
+        let mut mismatch = Trainer::new(
+            mismatch_model_config,
+            mismatch_train_config,
+            mismatch_loader,
+            None,
+            device.to_candle().unwrap(),
+            DType::F32,
+        )
+        .unwrap();
+        let error = mismatch.load_latest_checkpoint().unwrap_err().to_string();
+        assert!(error.contains("QAT resume policy mismatch"), "{error}");
+        let _ = std::fs::remove_dir_all(checkpoint_dir);
     }
 }

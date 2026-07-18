@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use aarambh_ai_core::GatedDeltaNetConfig;
-use candle_core::{DType, Module, Result, Tensor};
-use candle_nn::Linear;
+use aarambh_ai_quant::QatLinear;
+use candle_core::{DType, Result, Tensor};
 
 const NORM_EPS: f64 = 1e-6;
 
@@ -65,13 +65,13 @@ impl DeltaNetState {
 #[derive(Debug, Clone)]
 /// Gated DeltaNet linear-attention token mixer.
 pub struct GatedDeltaNetLayer {
-    q_proj: Linear,
-    k_proj: Linear,
-    v_proj: Linear,
-    beta_proj: Linear,
-    alpha_proj: Linear,
-    gate_proj: Linear,
-    out_proj: Linear,
+    q_proj: QatLinear,
+    k_proj: QatLinear,
+    v_proj: QatLinear,
+    beta_proj: QatLinear,
+    alpha_proj: QatLinear,
+    gate_proj: QatLinear,
+    out_proj: QatLinear,
     q_conv: Tensor,
     k_conv: Tensor,
     v_conv: Tensor,
@@ -85,13 +85,13 @@ impl GatedDeltaNetLayer {
     /// Construct a Gated DeltaNet layer from projections and recurrent parameters.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        q_proj: Linear,
-        k_proj: Linear,
-        v_proj: Linear,
-        beta_proj: Linear,
-        alpha_proj: Linear,
-        gate_proj: Linear,
-        out_proj: Linear,
+        q_proj: impl Into<QatLinear>,
+        k_proj: impl Into<QatLinear>,
+        v_proj: impl Into<QatLinear>,
+        beta_proj: impl Into<QatLinear>,
+        alpha_proj: impl Into<QatLinear>,
+        gate_proj: impl Into<QatLinear>,
+        out_proj: impl Into<QatLinear>,
         q_conv: Tensor,
         k_conv: Tensor,
         v_conv: Tensor,
@@ -101,13 +101,13 @@ impl GatedDeltaNetLayer {
         config: GatedDeltaNetConfig,
     ) -> Self {
         Self {
-            q_proj,
-            k_proj,
-            v_proj,
-            beta_proj,
-            alpha_proj,
-            gate_proj,
-            out_proj,
+            q_proj: q_proj.into(),
+            k_proj: k_proj.into(),
+            v_proj: v_proj.into(),
+            beta_proj: beta_proj.into(),
+            alpha_proj: alpha_proj.into(),
+            gate_proj: gate_proj.into(),
+            out_proj: out_proj.into(),
             q_conv,
             k_conv,
             v_conv,

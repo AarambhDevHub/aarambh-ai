@@ -281,6 +281,116 @@ pub struct MtpConfig {
     pub aux_loss_weight: f64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+/// Integer precision simulated during quantization-aware training.
+pub enum QuantBits {
+    /// Four-bit weight quantization.
+    Int4,
+    /// Eight-bit weight quantization.
+    Int8,
+}
+
+impl QuantBits {
+    /// Return the number of bits represented by this variant.
+    pub const fn bits(self) -> u8 {
+        match self {
+            Self::Int4 => 4,
+            Self::Int8 => 8,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+/// Scale granularity used by fake weight quantization.
+pub enum QuantGranularity {
+    /// Match the existing GGUF exporter: Q4_K_M blocks or global Q8 absmax.
+    #[default]
+    ExportAligned,
+    /// Use one scale for the complete weight tensor.
+    PerTensor,
+    /// Use one independent scale for each output row of a linear weight.
+    PerOutputChannel,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+/// Class of linear projection eligible for quantization-aware training.
+pub enum QatTarget {
+    /// Query, key, value, and output attention projections.
+    Attention,
+    /// Dense, routed-expert, and shared-expert feed-forward projections.
+    Ffn,
+    /// Mixture-of-Experts router projections.
+    MoeRouter,
+    /// Gated DeltaNet projection matrices.
+    DeltaNet,
+    /// DeepSeek Sparse Attention indexer projections.
+    DsaIndexer,
+    /// Multi-token prediction refinement projections.
+    Mtp,
+    /// The language-model output projection.
+    LmHead,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+/// Weight-only quantization-aware training settings.
+pub struct QatConfig {
+    /// Target integer precision.
+    pub bits: QuantBits,
+    /// Scale granularity used by fake quantization.
+    pub granularity: QuantGranularity,
+    /// Projection classes wrapped by fake quantization.
+    pub targets: std::collections::BTreeSet<QatTarget>,
+}
+
+impl Default for QatConfig {
+    fn default() -> Self {
+        Self {
+            bits: QuantBits::Int4,
+            granularity: QuantGranularity::ExportAligned,
+            targets: [
+                QatTarget::Attention,
+                QatTarget::Ffn,
+                QatTarget::MoeRouter,
+                QatTarget::DeltaNet,
+                QatTarget::DsaIndexer,
+                QatTarget::Mtp,
+            ]
+            .into_iter()
+            .collect(),
+        }
+    }
+}
+
+impl QatConfig {
+    /// Validate that at least one trainable projection class is selected.
+    pub fn validate(&self) -> Result<()> {
+        if self.targets.is_empty() {
+            return Err(AarambhError::Config(
+                "model.qat.targets must contain at least one projection class".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Return whether a projection class should use fake quantization.
+    pub fn applies_to(&self, target: QatTarget) -> bool {
+        self.targets.contains(&target)
+    }
+
+    /// Return the effective precision for a target under the GGUF-aligned policy.
+    pub fn effective_bits(&self, target: QatTarget) -> QuantBits {
+        if self.granularity == QuantGranularity::ExportAligned && target == QatTarget::DsaIndexer {
+            QuantBits::Int8
+        } else {
+            self.bits
+        }
+    }
+}
+
 impl Default for MtpConfig {
     fn default() -> Self {
         Self {
@@ -491,6 +601,9 @@ pub struct ModelConfig {
     /// Optional multi-token prediction auxiliary heads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mtp: Option<MtpConfig>,
+    /// Optional weight-only quantization-aware training configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qat: Option<QatConfig>,
     /// RMSNorm epsilon.
     pub norm_eps: f64,
     /// Whether the output head shares weights with token embeddings.
@@ -514,6 +627,7 @@ impl ModelConfig {
             attention_schedule: None,
             dsa_config: None,
             mtp: None,
+            qat: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -535,6 +649,7 @@ impl ModelConfig {
             attention_schedule: None,
             dsa_config: None,
             mtp: None,
+            qat: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -556,6 +671,7 @@ impl ModelConfig {
             attention_schedule: None,
             dsa_config: None,
             mtp: None,
+            qat: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -577,6 +693,7 @@ impl ModelConfig {
             attention_schedule: None,
             dsa_config: None,
             mtp: None,
+            qat: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         }
@@ -634,6 +751,19 @@ mod tests {
         assert!(cfg.moe.is_none());
         assert!(cfg.dsa_config.is_none());
         assert!(cfg.mtp.is_none());
+        assert!(cfg.qat.is_none());
+    }
+
+    #[test]
+    fn qat_defaults_match_export_and_exclude_lm_head() {
+        let qat = QatConfig::default();
+        qat.validate().unwrap();
+        assert_eq!(qat.bits, QuantBits::Int4);
+        assert_eq!(qat.granularity, QuantGranularity::ExportAligned);
+        assert!(qat.applies_to(QatTarget::Attention));
+        assert!(qat.applies_to(QatTarget::DsaIndexer));
+        assert!(!qat.applies_to(QatTarget::LmHead));
+        assert_eq!(qat.effective_bits(QatTarget::DsaIndexer), QuantBits::Int8);
     }
 
     #[test]

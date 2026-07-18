@@ -116,16 +116,16 @@ aarambh-ai/
 | Crate | v3.0 additions |
 |---|---|
 | `aarambh-ai-nn` | `gated_deltanet.rs` (§38), `sparse_attention.rs` (§39), `moe.rs`/`dispatch.rs` extended (§40), `mtp.rs` (§41) |
-| `aarambh-ai-model` | `attention_schedule: Option<HybridAttentionSchedule>`, `dsa_config: Option<DsaConfig>`, extended `MoeConfig`, `mtp: Option<MtpConfig>` on model config |
-| `aarambh-ai-train` | Hybrid-attention retrofit recipe, indexer training (DSA), router warm-start (MoE), `mtp_loss.rs`, reusable optimizer/schedule/loss primitives, QAT recipe, Max-mode GRPO re-run on High-insufficient problems |
+| `aarambh-ai-model` | Hybrid/DSA/MoE/MTP config plus `qat: Option<QatConfig>`; training-only QAT construction and projection coverage |
+| `aarambh-ai-train` | Hybrid retrofit, DSA/MoE/MTP objectives, native QAT recipe/cache lifecycle/exact resume, Max-mode GRPO re-run |
 | `aarambh-ai-distill` | Student rollout replay, local/scored teacher backends, soft-KL/reward objectives, MTP/MoE/DSA auxiliary blending, exact resume, offline control, and fresh-rollout evaluation |
-| `aarambh-ai-weights` | Partial-checkpoint loading (load some layers, fresh-init others) for attention retrofit |
-| `aarambh-ai-quant` | `qat.rs` — `FakeQuantize`, `QatConfig`, straight-through estimator |
+| `aarambh-ai-weights` | Architecture retrofit plus strict exact model-only SafeTensors loading for QAT |
+| `aarambh-ai-quant` | Device-native `FakeQuantize`, `QatLinear`, exporter-parity policies, and shared generation cache |
 | `aarambh-ai-vision` | `video_sample.rs`, `temporal_fusion.rs` (§44), `document_sample.rs`, `layout_projector.rs` (§45) |
 | `aarambh-ai-tokenizer` | `<video>`/`<video_end>`/`<frame_sep>` and `<document>`/`<document_end>`/`<page_sep>` reserved tokens |
 | `aarambh-ai-finetune` | Multi-frame/multi-page VLM tuning (extends v2's `vlm_dora.rs`), multi-step tool-use SFT loss masking |
 | `aarambh-ai-inference` | MTP heads reusable as speculative-decode draft source; `thinking.rs` gains the `Max(16384)` `ThinkingMode` variant (§48) |
-| `aarambh-ai-eval` | `forgetting.rs` (§47), new video/document/multi-step-tool-use task subsets |
+| `aarambh-ai-eval` | Four-way QAT robustness reports, `forgetting.rs` (§47), and new modality/tool tasks |
 | `aarambh-ai-selflearn` | Forgetting-diagnostics wiring, shared export format for Manas — see `SELF_LEARNING_V3.md` |
 
 ### Updated Crate Count
@@ -795,86 +795,91 @@ offline checkpoints under identical sampling seeds.
 
 ## 43. Native QAT
 
-v1's quantization (`ARCHITECTURE.md` §16) is entirely post-hoc: train in
-full precision end to end, then convert to INT4/GGUF afterward. This
-means the model's weights are never trained with any awareness that
-they'll eventually be rounded — quantization noise is something the
-model only encounters at inference time, on weights that were never
-optimised to tolerate it.
+v1's quantization (`ARCHITECTURE.md` §16) remains the deployment format and
+post-training baseline. Phase 34 adds weight-only fake quantization to the
+ordinary full-weight trainer. Master parameters, optimizer moments,
+embeddings, normalization weights, short-convolution kernels, and recurrent
+scalars remain floating point.
 
 ### 43.1 Fake quantization
 
-```rust
-pub struct FakeQuantize {
-    pub bits: QuantBits,       // Int4 | Int8, reuses v1's existing enum
-    pub granularity: QuantGranularity, // per-tensor | per-channel, reuses
-                                        // v1's existing scale/zero-point
-                                        // calculation from ARCHITECTURE.md §16
-}
+```text
+q = detach(dequantize(quantize(detach(W))))
+W_effective = W + detach(q - detach(W))
 
-impl FakeQuantize {
-    /// Forward: quantize then immediately dequantize, so the numerics
-    /// the rest of the forward pass sees match exactly what a truly
-    /// quantized model would produce.
-    pub fn forward(&self, weight: &Tensor) -> Result<Tensor> {
-        let (scale, zero_point) = compute_scale_zero_point(weight, self.granularity)?; // v1's existing fn, unchanged
-        let quantized = round_to_grid(weight, scale, zero_point, self.bits)?;
-        dequantize(&quantized, scale, zero_point)
-    }
-
-    /// Backward: straight-through estimator. The true gradient of the
-    /// round() operation is zero almost everywhere, which would kill
-    /// learning entirely — STE instead passes the incoming gradient
-    /// through unmodified, as if forward() had been the identity
-    /// function, clipped to the representable range.
-    pub fn backward(&self, grad_output: &Tensor, weight: &Tensor) -> Result<Tensor> {
-        let (min_val, max_val) = representable_range(self.bits);
-        clip_gradient_outside_range(grad_output, weight, min_val, max_val)
-    }
-}
+forward(W_effective) = q
+dW_effective/dW = 1
 ```
 
-No new quantization math is introduced — `compute_scale_zero_point()`
-and the quantize/dequantize routines are v1's existing functions
-(`ARCHITECTURE.md` §16), simply invoked earlier, inside the forward
-pass, and made differentiable via the straight-through estimator rather
-than applied once as a final, non-differentiable conversion step.
+All operations execute on the weight's Candle device. `simulate()` is detached
+and suitable for parity tests; `forward()` applies the identity STE. No
+training tensor is converted through a host `Vec`.
 
-### 43.2 Retrofit recipe
+`QuantGranularity::ExportAligned` reproduces the existing exporter:
+
+- INT4 uses 256-value Q4_K_M blocks. Tail blocks are zero padded, codes are
+  derived from the f32 min/range, and reconstruction uses f16-stored scale and
+  minimum exactly like the GGUF payload.
+- INT8 uses one global absolute-maximum scale and signed `[-127, 127]` codes.
+- DSA index projections remain INT8 even when the main target is INT4, matching
+  their existing GGUF export policy.
+
+`PerTensor` and `PerOutputChannel` are explicit alternatives. The latter
+requires rank-two linear weights.
+
+### 43.2 Projection integration and cache
+
+`QatLinear` wraps `candle_nn::Linear` and preserves Candle's optimized
+contiguous 2D/3D/4D matmul forms. One effective fake-quantized weight is cached
+per projection for the current optimizer generation. Gradient accumulation
+therefore does not repeat quantization work; every optimizer update advances
+the shared `QatContext` generation and invalidates caches lazily.
+
+`QatTarget` independently selects attention, FFN and expert, MoE router,
+Gated DeltaNet, DSA indexer, MTP, and LM-head projections. The default includes
+all projection families except the LM head. Coverage counters deduplicate tied
+weights by Candle tensor identity.
+
+The dependency direction is deliberate: reusable activation statistics remain
+in `aarambh-ai-quant`, while dataset/model calibration iteration lives in the
+CLI. This lets `aarambh-ai-nn` and `aarambh-ai-model` depend on quant without a
+quant-to-model cycle.
+
+### 43.3 Training and continuation
 
 ```
 1. Start from an existing full-precision checkpoint (any scale, any
    attention/MoE configuration from §38–40)
-2. Wrap the configured layers' weights (by default: linear/FFN weights
-   only — norms and embeddings stay unwrapped, matching v1's existing
-   INT4 scope in §16) in FakeQuantize
-3. Continue training for a short, documented number of steps (default:
-   ~2% of original pretraining token budget) — a retrofit recipe, not a
-   from-scratch requirement, following the same pattern §38 established
-4. After training, export via v1's existing GGUF conversion path
-   completely unchanged — QAT changes what the weights ARE (now robust
-   to quantization noise), not how the export step works
+2. Set [model.qat] and retrofit_from in the run TOML
+3. Exact-load SafeTensors names and shapes into floating-point masters
+4. Continue training through AarambhModel::new_for_training
+5. Export the resulting master checkpoint through the unchanged GGUF path
 ```
 
-### 43.3 Validation
+Normal `AarambhModel::new` never enables fake quantization, even when the model
+config records QAT history. This keeps inference and conversion deterministic.
+`TrainState` stores the complete `QatConfig`; resume rejects bit-width,
+granularity, target-set, or enabled/disabled mismatches. Model-only QAT
+initialization rejects missing, unexpected, and shape-mismatched tensors.
+
+### 43.4 Validation
 
 ```
-Compare, at the same target bit-width:
-  (a) post-hoc quantized: full-precision checkpoint → v1's existing
-      one-shot INT4 conversion
-  (b) QAT: full-precision checkpoint → §43.2's retrofit recipe →
-      the SAME one-shot INT4 conversion path
-
-Eval-harness score drop (full-precision baseline → quantized) is
-measured for both (a) and (b) on the same holdout. QAT is considered
-validated only if (b)'s score drop is measurably smaller than (a)'s —
-the actual point of the phase, not assumed from the mechanism alone.
+aarambh-ai eval --qat-compare evaluates under identical task settings:
+  1. baseline floating-point master
+  2. baseline exported at the configured Q4/Q8 width
+  3. QAT floating-point master
+  4. QAT exported through the same Q4/Q8 path
 ```
 
-`qat: None` on the model config trains exactly as v1 always has — full
-precision throughout, with v1's existing post-hoc path remaining
-available and unremoved for configs that don't need QAT's extra
-retrofit step.
+For every metric, degradation is normalized so positive means worse regardless
+of whether larger (accuracy) or smaller (perplexity) is preferred.
+`robustness_recovery = baseline_drop - qat_drop`; a positive checkpoint claim
+requires positive measured recovery on the acceptance set. Source tests prove
+parity and report arithmetic but do not substitute for training evidence.
+
+`qat: None` remains on the pre-Phase-34 construction and training path, and
+post-hoc quantization remains available.
 
 ---
 
@@ -1438,11 +1443,10 @@ is accounted for separately from the load-balancing loss (§40).
 ### QAT
 
 QAT changes *when* quantization happens, not the final quantized memory
-footprint — INT4/INT8 memory numbers are unchanged from v1's existing
-post-hoc quantization table (`ARCHITECTURE.md` §16). The cost QAT adds is
-training-time only: `FakeQuantize`'s forward/backward pass adds a modest
-compute overhead during the short continued-training recipe, not a
-standing memory cost.
+footprint. INT4/INT8 deployment numbers remain those of v1's post-hoc table.
+Training retains floating-point master weights and optimizer moments plus one
+cached fake-quantized tensor for each covered projection. Cache materialization
+occurs once per optimizer generation, not once per accumulated micro-batch.
 
 ### Video/Document Vision Addition (on top of v2's per-image table, §33)
 

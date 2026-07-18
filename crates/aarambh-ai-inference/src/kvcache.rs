@@ -129,6 +129,7 @@ mod tests {
             }),
             dsa_config: None,
             mtp: None,
+            qat: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };

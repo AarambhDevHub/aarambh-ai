@@ -1,6 +1,6 @@
 use aarambh_ai_core::{
     DsaConfig, GatedDeltaNetConfig, HybridAttentionSchedule, ModelConfig, MoeConfig, MtpConfig,
-    RopeScalingConfig, RopeScalingMethod,
+    QatConfig, RopeScalingConfig, RopeScalingMethod,
 };
 use aarambh_ai_model::AarambhModel;
 use candle_core::{DType, Device, Tensor};
@@ -21,6 +21,7 @@ fn mini_config() -> ModelConfig {
         attention_schedule: None,
         dsa_config: None,
         mtp: None,
+        qat: None,
         norm_eps: 1e-5,
         tie_embeddings: true,
     }
@@ -572,6 +573,50 @@ fn invalid_config_is_rejected() {
     cfg.n_heads = 2;
     let err = AarambhModel::validate_config(&cfg).unwrap_err();
     assert!(err.to_string().contains("head_dim must be 64"));
+}
+
+#[test]
+fn qat_is_enabled_only_for_training_construction() {
+    let device = Device::Cpu;
+    let mut cfg = mini_config();
+    cfg.qat = Some(QatConfig::default());
+
+    let varmap = VarMap::new();
+    let inference =
+        AarambhModel::new(&cfg, VarBuilder::from_varmap(&varmap, DType::F32, &device)).unwrap();
+    assert!(!inference.qat_active());
+    assert!(inference.qat_stats().is_none());
+    let mut no_qat_cfg = cfg.clone();
+    no_qat_cfg.qat = None;
+    let no_qat = AarambhModel::new(
+        &no_qat_cfg,
+        VarBuilder::from_varmap(&varmap, DType::F32, &device),
+    )
+    .unwrap();
+    let ids = Tensor::from_vec(vec![1u32, 2, 3], (1, 3), &device).unwrap();
+    let max_diff = (inference.forward(&ids).unwrap() - no_qat.forward(&ids).unwrap())
+        .unwrap()
+        .abs()
+        .unwrap()
+        .max_all()
+        .unwrap()
+        .to_scalar::<f32>()
+        .unwrap();
+    assert_eq!(max_diff, 0.0);
+
+    let training =
+        AarambhModel::new_for_training(&cfg, VarBuilder::zeros(DType::F32, &device)).unwrap();
+    let stats = training.qat_stats().unwrap();
+    assert!(training.qat_active());
+    assert_eq!(stats.wrapped_tensors, cfg.n_layers * 7);
+    assert!(stats.wrapped_parameters > 0);
+    assert_eq!(stats.cache_refreshes, 0);
+
+    training.forward_train(&ids).unwrap();
+    assert_eq!(
+        training.qat_stats().unwrap().cache_refreshes,
+        stats.wrapped_tensors
+    );
 }
 
 #[test]

@@ -9,14 +9,19 @@ rust-version.workspace = true
 default = []
 cuda = [
     "aarambh-ai-core/cuda",
-    "aarambh-ai-data/cuda",
-    "aarambh-ai-model/cuda",
     "candle-core/cuda",
+    "candle-nn/cuda",
 ]
 
 [dependencies]
 aarambh-ai-core      = { path = "../aarambh-ai-core" }
-aarambh-ai-data      = { path = "../aarambh-ai-data" }
-aarambh-ai-model     = { path = "../aarambh-ai-model" }
 candle-core          = { workspace = true }
+candle-nn            = { workspace = true }
 serde                = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "qat_bench"
+harness = false

@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
-use candle_core::Module;
+use aarambh_ai_quant::QatLinear;
 use candle_core::{Result, Tensor};
-use candle_nn::Linear;
 
 use crate::kvcache::KVCache;
 use crate::rope::RopeCache;
@@ -10,10 +9,10 @@ use crate::rope::RopeCache;
 #[derive(Debug, Clone)]
 /// Grouped-query self-attention layer.
 pub struct GroupedQueryAttention {
-    wq: Linear,
-    wk: Linear,
-    wv: Linear,
-    wo: Linear,
+    wq: QatLinear,
+    wk: QatLinear,
+    wv: QatLinear,
+    wo: QatLinear,
     n_heads: usize,
     n_kv_heads: usize,
     head_dim: usize,
@@ -23,20 +22,20 @@ pub struct GroupedQueryAttention {
 impl GroupedQueryAttention {
     /// Create an attention layer from projection layers and head counts.
     pub fn new(
-        wq: Linear,
-        wk: Linear,
-        wv: Linear,
-        wo: Linear,
+        wq: impl Into<QatLinear>,
+        wk: impl Into<QatLinear>,
+        wv: impl Into<QatLinear>,
+        wo: impl Into<QatLinear>,
         n_heads: usize,
         n_kv_heads: usize,
         head_dim: usize,
     ) -> Self {
         let scale = 1.0 / (head_dim as f64).sqrt();
         Self {
-            wq,
-            wk,
-            wv,
-            wo,
+            wq: wq.into(),
+            wk: wk.into(),
+            wv: wv.into(),
+            wo: wo.into(),
             n_heads,
             n_kv_heads,
             head_dim,
