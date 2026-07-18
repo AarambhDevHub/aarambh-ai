@@ -12,8 +12,9 @@ construction, training, inference, quantization, adapter tuning, alignment,
 evaluation, multimodal input, safety, and an OpenAI-compatible server.
 
 The production source release is **v2.0.0**. Current mainline development is
-**v3.0.0-alpha.4**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
-fine-grained MoE with shared experts, and Multi-Token Prediction (MTP).
+**v3.0.0-alpha.5**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
+fine-grained MoE with shared experts, Multi-Token Prediction (MTP), and
+on-policy distillation.
 
 > [!IMPORTANT]
 > This is a source and engineering project. It does not publish crates to
@@ -26,7 +27,7 @@ fine-grained MoE with shared experts, and Multi-Token Prediction (MTP).
 |---|---|
 | Model | RMSNorm, RoPE, GQA, SwiGLU, KV cache, tied embeddings, Tiny to Large configs |
 | Efficient architecture | YaRN/NTK/linear RoPE scaling, Gated DeltaNet, learned block-sparse DSA, fine-grained MoE, MTP |
-| Training | BPE data pipeline, AdamW, cosine schedule, gradient accumulation/clipping, checkpoint resume, BF16 CUDA, single-node multi-GPU |
+| Training | BPE data pipeline, AdamW, cosine schedule, gradient accumulation/clipping, checkpoint resume, BF16 CUDA, single-node multi-GPU, on-policy distillation |
 | Fine-tuning | SFT, LoRA, QLoRA, DoRA, QDoRA, VLM adapters, GRPO, DPO, QDPO, tool-call tuning |
 | Inference | Greedy/sampled decoding, streaming, thinking budgets, external or one-checkpoint MTP speculation, tool grammar |
 | Model formats | SafeTensors, INT8, GPTQ/AWQ INT4, GGUF, Hugging Face conversion, quantized KV cache |
@@ -92,6 +93,7 @@ aarambh-ai eval        Run evaluation tasks and compare scorecards
 aarambh-ai quantise    Calibrate and export INT8/INT4 GGUF checkpoints
 aarambh-ai convert     Convert SafeTensors, GGUF, or Hugging Face layouts
 aarambh-ai finetune    Run SFT, adapters, GRPO, DPO, VLM, or merge workflows
+aarambh-ai distill     Train/evaluate on-policy or offline teacher distillation
 aarambh-ai selflearn   Manage replay and persistent self-learning state
 aarambh-ai serve       Start the OpenAI-compatible HTTP/SSE server
 ```
@@ -128,6 +130,9 @@ Representative training recipes:
 | `configs/mtp_smoke.toml` | Two-step CPU MTP training check |
 | `configs/medium_mtp.toml` | Medium Phase 31-to-MTP continuation |
 | `configs/large_mtp.toml` | Large Phase 31-to-MTP continuation |
+| `configs/distill_smoke.toml` | Phase 33 local CPU execution check |
+| `configs/medium_distill.toml` | Medium on-policy distillation recipe |
+| `configs/large_distill.toml` | Large on-policy distillation recipe |
 
 For two GPUs, launch one process per rank with matching run IDs:
 
@@ -336,6 +341,9 @@ target/release/aarambh-ai train --config configs/moe_finegrained_smoke.toml
 
 # Multi-token auxiliary loss and checkpoint save
 target/release/aarambh-ai train --config configs/mtp_smoke.toml
+
+# Local teacher, scored-reference teacher, offline control, eval, and resume
+scripts/phase33_smoke.sh
 ```
 
 For an MTP-trained checkpoint, `--speculative` needs no draft checkpoint:
@@ -358,12 +366,17 @@ Checkpoint retrofit and comparison tooling:
 - `scripts/phase31_sweep_moe.sh`
 - `scripts/phase32_compare_training.sh`
 - `scripts/phase32_benchmark_mtp.sh`
+- `scripts/phase33_prepare_prompts.py`
+- `scripts/phase33_compare_distillation.sh`
 
 The Phase 31 method and result contract are documented in
 [docs/phase31_moe_sweep.md](docs/phase31_moe_sweep.md). Hardware benchmark
 results are not claimed until the scripts have produced scorecards.
 The MTP training, retrofit, and one-checkpoint speculation contract is in
 [docs/phase32_mtp.md](docs/phase32_mtp.md).
+The on-policy teacher, replay objective, offline control, and matched comparison
+protocol are in
+[docs/phase33_distillation_results.md](docs/phase33_distillation_results.md).
 
 ## Model Scales
 
@@ -380,7 +393,7 @@ through TOML without changing the base scale definitions.
 
 ## Workspace
 
-The workspace contains 16 internal library crates and one CLI package:
+The workspace contains 17 internal library crates and one CLI package:
 
 ```text
 aarambh-ai-core        Shared config, device, dtype, errors, and traits
@@ -398,6 +411,7 @@ aarambh-ai-safety      Input, output, streaming, PII, and audit policies
 aarambh-ai-selflearn   Critique, replay, verifiers, and persistent update state
 aarambh-ai-eval        Evaluation tasks, scorecards, and comparisons
 aarambh-ai-vision      Image preprocessing, encoder, projector, and fusion
+aarambh-ai-distill     On-policy rollouts, teacher scoring, losses, and resume
 aarambh-ai-serve       Axum HTTP/SSE serving and continuous batching
 aarambh-ai             Command-line application
 ```
@@ -439,6 +453,7 @@ CUDA checks require a CUDA-capable environment and are intentionally opt-in.
 | [docs/aarambh-ai-math-formulas-guide.md](docs/aarambh-ai-math-formulas-guide.md) | Mathematical foundations and worked examples |
 | [docs/inference-server.md](docs/inference-server.md) | Server endpoints, SDK usage, auth, safety, and limits |
 | [docs/phase32_mtp.md](docs/phase32_mtp.md) | MTP training, retrofit, exact speculation, and benchmark method |
+| [docs/phase33_distillation_results.md](docs/phase33_distillation_results.md) | On-policy distillation design, smoke proof, and comparison method |
 | [RELEASE.md](RELEASE.md) | Source-release process and artifact policy |
 | [CHANGELOG.md](CHANGELOG.md) | Versioned implementation history |
 

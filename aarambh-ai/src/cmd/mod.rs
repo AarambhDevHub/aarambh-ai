@@ -1,4 +1,5 @@
 pub mod convert;
+pub mod distill;
 pub mod eval;
 pub mod finetune;
 pub mod infer;

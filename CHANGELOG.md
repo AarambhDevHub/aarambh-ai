@@ -1,5 +1,43 @@
 # Changelog
 
+## [3.0.0-alpha.5] - 2026-07-18
+
+### Added
+
+- **Phase 33 On-Policy Distillation**
+  - Added `aarambh-ai-distill` with student-owned rollout collection, packed
+    completion replay, local-checkpoint and scored-reference teacher backends,
+    token-level forward KL, and group-normalized reward-policy objectives.
+  - Added full-student AdamW training with MTP, MoE, and periodic DSA auxiliary
+    loss blending, gradient accumulation/clipping, deterministic prompt order,
+    exact model/optimizer/cursor resume, finite metrics, and final checkpoints.
+  - Added static teacher-completion preparation and completion-only offline
+    distillation as a matched control, plus fresh-rollout JSON/Markdown
+    evaluation reports.
+  - Added the `distill train`, `distill prepare-offline`, `distill
+    train-offline`, and `distill evaluate` CLI workflows.
+  - Added CPU smoke fixtures, Medium/Large CUDA recipes, corpus prompt
+    preparation, a complete release smoke, and a matched on-policy/offline
+    comparison harness.
+
+### Changed
+
+- Inference sessions can expose canonical prompt tokenization and fork an
+  untouched prefilled cache into independent bounded samplers, avoiding one
+  prompt prefill per rollout while retaining the existing decode path.
+- The workspace version is now `3.0.0-alpha.5`.
+
+### Verified
+
+- Teacher logits are detached and gradients flow only through student logits;
+  prompt, forced-token, and padding positions are excluded from replay loss.
+- Local and dataset teachers, deterministic grouped rollout generation,
+  forward KL, reward advantages, checkpoint manifest validation, and exact
+  prefill-fork equivalence pass focused tests.
+- The release binary completes local soft-KL training, scored-reference reward
+  training, offline preparation/training, fresh-rollout evaluation, and exact
+  resume on the checked-in Phase 33 smoke fixture.
+
 ## [3.0.0-alpha.4] - 2026-07-16
 
 ### Added

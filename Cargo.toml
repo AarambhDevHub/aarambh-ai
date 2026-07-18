@@ -15,13 +15,14 @@ members = [
     "crates/aarambh-ai-selflearn",
     "crates/aarambh-ai-eval",
     "crates/aarambh-ai-vision",
+    "crates/aarambh-ai-distill",
     "crates/aarambh-ai-serve",
     "aarambh-ai",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 edition = "2024"
 rust-version = "1.89"
 

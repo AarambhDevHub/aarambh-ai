@@ -1,0 +1,4 @@
+{"id":"rust","prompt":"Rust is","references":[{"completion":" safe","score":1.0},{"completion":" fast","score":0.8}]}
+{"id":"math","prompt":"Two plus two is","references":[{"completion":" four","score":1.0},{"completion":" 4","score":1.0}]}
+{"id":"color","prompt":"A common color is","references":[{"completion":" blue","score":1.0},{"completion":" red","score":1.0}]}
+{"id":"greeting","prompt":"A short greeting is","references":[{"completion":" hello","score":1.0},{"completion":" hi","score":0.8}]}

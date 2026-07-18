@@ -10,6 +10,7 @@ default = []
 cuda = [
     "aarambh-ai-core/cuda",
     "aarambh-ai-data/cuda",
+    "aarambh-ai-distill/cuda",
     "aarambh-ai-eval/cuda",
     "aarambh-ai-finetune/cuda",
     "aarambh-ai-inference/cuda",
@@ -26,6 +27,7 @@ cuda = [
 [dependencies]
 aarambh-ai-core      = { path = "../crates/aarambh-ai-core" }
 aarambh-ai-data      = { path = "../crates/aarambh-ai-data" }
+aarambh-ai-distill   = { path = "../crates/aarambh-ai-distill" }
 aarambh-ai-eval      = { path = "../crates/aarambh-ai-eval" }
 aarambh-ai-finetune  = { path = "../crates/aarambh-ai-finetune" }
 aarambh-ai-inference = { path = "../crates/aarambh-ai-inference" }

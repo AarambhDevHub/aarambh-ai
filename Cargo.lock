@@ -4,10 +4,11 @@ version = 4
 
 [[package]]
 name = "aarambh-ai"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-data",
+ "aarambh-ai-distill",
  "aarambh-ai-eval",
  "aarambh-ai-finetune",
  "aarambh-ai-inference",
@@ -31,7 +32,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-core"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "candle-core",
  "serde",
@@ -41,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-data"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "candle-core",
@@ -51,8 +52,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "aarambh-ai-distill"
+version = "3.0.0-alpha.5"
+dependencies = [
+ "aarambh-ai-core",
+ "aarambh-ai-inference",
+ "aarambh-ai-model",
+ "aarambh-ai-tokenizer",
+ "aarambh-ai-train",
+ "aarambh-ai-weights",
+ "candle-core",
+ "candle-nn",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "aarambh-ai-eval"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-finetune",
@@ -70,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-finetune"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-kernel",
@@ -90,7 +108,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-inference"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-model",
@@ -106,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-kernel"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "candle-core",
@@ -120,7 +138,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-model"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-nn",
@@ -130,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-nn"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-kernel",
@@ -140,7 +158,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-quant"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-data",
@@ -151,7 +169,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-safety"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-inference",
@@ -162,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-selflearn"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-finetune",
@@ -182,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-serve"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-inference",
@@ -206,7 +224,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-tokenizer"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "serde",
@@ -216,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-train"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-data",
@@ -233,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-vision"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "candle-core",
@@ -245,7 +263,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-weights"
-version = "3.0.0-alpha.4"
+version = "3.0.0-alpha.5"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-model",

@@ -88,9 +88,15 @@ aarambh-ai/
 │   ├── aarambh-ai-distill/           ← NEW, LAYER 5: On-policy distillation
 │   │   └── src/
 │   │       ├── lib.rs
+│   │       ├── config.rs             ← validated rollout/objective settings
+│   │       ├── dataset.rs            ← prompt/reference/offline/replay schemas
 │   │       ├── rollout.rs            ← student on-policy generation
 │   │       ├── teacher_score.rs      ← TeacherScorer trait, local/dataset backends
-│   │       └── distill_loss.rs       ← on-policy distillation objective
+│   │       ├── distill_loss.rs       ← on-policy distillation objective
+│   │       ├── trainer.rs            ← full-weight update loop
+│   │       ├── checkpoint.rs         ← exact model/optimizer/cursor resume
+│   │       ├── offline.rs            ← matched static-teacher control
+│   │       └── evaluate.rs           ← fresh-rollout alignment reports
 │   │
 │   └── aarambh-ai-agent/             ← NEW, LAYER 5: Multi-step tool-use chains
 │       └── src/
@@ -111,7 +117,8 @@ aarambh-ai/
 |---|---|
 | `aarambh-ai-nn` | `gated_deltanet.rs` (§38), `sparse_attention.rs` (§39), `moe.rs`/`dispatch.rs` extended (§40), `mtp.rs` (§41) |
 | `aarambh-ai-model` | `attention_schedule: Option<HybridAttentionSchedule>`, `dsa_config: Option<DsaConfig>`, extended `MoeConfig`, `mtp: Option<MtpConfig>` on model config |
-| `aarambh-ai-train` | Hybrid-attention retrofit recipe, indexer training (DSA), router warm-start (MoE), `mtp_loss.rs`, distillation training loop, QAT recipe, Max-mode GRPO re-run on High-insufficient problems |
+| `aarambh-ai-train` | Hybrid-attention retrofit recipe, indexer training (DSA), router warm-start (MoE), `mtp_loss.rs`, reusable optimizer/schedule/loss primitives, QAT recipe, Max-mode GRPO re-run on High-insufficient problems |
+| `aarambh-ai-distill` | Student rollout replay, local/scored teacher backends, soft-KL/reward objectives, MTP/MoE/DSA auxiliary blending, exact resume, offline control, and fresh-rollout evaluation |
 | `aarambh-ai-weights` | Partial-checkpoint loading (load some layers, fresh-init others) for attention retrofit |
 | `aarambh-ai-quant` | `qat.rs` — `FakeQuantize`, `QatConfig`, straight-through estimator |
 | `aarambh-ai-vision` | `video_sample.rs`, `temporal_fusion.rs` (§44), `document_sample.rs`, `layout_projector.rs` (§45) |
@@ -751,6 +758,38 @@ Structurally, this alternates inference-mode and training-mode passes in
 exactly the same rhythm as v1's Online GRPO loop
 (`SELF_LEARNING.md` §5) — the crate is deliberately built to reuse that
 existing rhythm rather than invent a new training-loop shape.
+
+### 42.4 Phase 33 implementation contract
+
+Phase 33 trains the complete student checkpoint; it is not an adapter method.
+The CLI requires an explicit `aarambh-ai distill train` invocation and accepts
+only SafeTensors for the trainable student. The frozen teacher is either a
+local Aarambh checkpoint or a scored-reference JSONL dataset. Local teachers
+support token-level forward KL and scalar sequence rewards; scored-reference
+teachers use weighted token-F1 rewards and never pretend to supply logits.
+
+Student generation is the existing inference path. One prompt prefill is
+snapshotted into independent generation sessions, rollout groups decode in a
+batch, and deterministic seeds derive from run seed, optimizer step, prompt
+ID, and rollout index. Replay tensors contain prompt plus completion context,
+but packed row indices and masks restrict policy, KL, and MTP supervision to
+unforced completion targets. Teacher logits are detached before transfer to
+the student device, so gradients can only enter student variables.
+
+The objective is either teacher-to-student forward KL with temperature-squared
+scaling or a group-normalized, clipped reward-policy loss. Existing MTP, MoE
+balance, and periodic DSA indexer objectives are added in the same backward
+pass when configured. AdamW, cosine warmup, gradient accumulation, global-norm
+clipping, and optimizer state reuse `aarambh-ai-train` primitives.
+
+Numbered checkpoints persist full model weights, optimizer moments, optimizer
+and micro-step counters, epoch, deterministic prompt permutation and cursor,
+latest loss, rollout-token count, and an exact run manifest. Resume rejects a
+different student, teacher, dataset, objective, or training configuration.
+The offline control freezes one teacher completion per prompt and trains with
+completion-only NLL. Fresh-rollout evaluation reports teacher reward, local
+teacher KL, completion length, and throughput for the initial, online, and
+offline checkpoints under identical sampling seeds.
 
 ---
 

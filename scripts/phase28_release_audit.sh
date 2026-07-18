@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 EXPECTED_VERSION="${AARAMBH_EXPECTED_VERSION:-}"
-EXPECTED_PACKAGES=17
+EXPECTED_PACKAGES=18
 
 command -v jq >/dev/null 2>&1 || {
   echo "release audit requires jq" >&2

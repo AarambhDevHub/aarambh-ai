@@ -284,7 +284,7 @@ impl InferenceEngine {
             Some(tools) => tools.render_prompt(prompt)?,
             None => prompt.to_string(),
         };
-        let prompt_ids = self.prompt_token_ids(&effective_prompt)?;
+        let prompt_ids = self.encode_prompt(&effective_prompt)?;
         let max_seq_len = self.model.config().max_seq_len;
         if prompt_ids.len() >= max_seq_len {
             return Err(AarambhError::Shape(format!(
@@ -374,7 +374,7 @@ impl InferenceEngine {
             Some(tools) => tools.render_prompt(prompt)?,
             None => prompt.to_string(),
         };
-        let prompt_ids = self.prompt_token_ids(&effective_prompt)?;
+        let prompt_ids = self.encode_prompt(&effective_prompt)?;
         self.generate_from_token_ids_with_callback(prompt_ids, config, on_step)
     }
 
@@ -405,7 +405,8 @@ impl InferenceEngine {
         self.generate_from_embeddings_with_callback(prompt_embeddings, prompt_len, config, on_step)
     }
 
-    fn prompt_token_ids(&self, prompt: &str) -> Result<Vec<u32>> {
+    /// Encode a prompt exactly as the generation path does.
+    pub fn encode_prompt(&self, prompt: &str) -> Result<Vec<u32>> {
         let mut prompt_ids = self.tokenizer.encode(prompt)?;
         if prompt_ids.is_empty() {
             if let Some(bos) = self.tokenizer.bos_token_id() {
@@ -761,6 +762,48 @@ impl GenerationSession {
             finish_reason: (max_new_tokens == 0).then_some(FinishReason::ContextLimit),
             pending_token: None,
         })
+    }
+
+    /// Fork an untouched prefilled session with a new sampling configuration.
+    ///
+    /// This reuses the prompt KV/recurrent state while giving the fork an
+    /// independent sampler. The new token budget cannot exceed the capacity
+    /// reserved by the original prefill.
+    pub fn fork_with_config(
+        &self,
+        config: GenerationConfig,
+        tokenizer: &BpeTokenizer,
+    ) -> Result<Self> {
+        if !self.generated_ids.is_empty() || self.pending_token.is_some() {
+            return Err(AarambhError::Config(
+                "only an untouched prefilled session can be forked".into(),
+            ));
+        }
+        if self.cache.seqlen() != self.prompt_len {
+            return Err(AarambhError::Config(
+                "prefilled session cache length does not match its prompt".into(),
+            ));
+        }
+        if config.max_new_tokens > self.max_new_tokens {
+            return Err(AarambhError::Config(format!(
+                "fork token budget {} exceeds reserved capacity {}",
+                config.max_new_tokens, self.max_new_tokens
+            )));
+        }
+        if config.tool_calling.is_some() || self.config.tool_calling.is_some() {
+            return Err(AarambhError::Config(
+                "prefilled session forking does not support tool-calling prompts".into(),
+            ));
+        }
+        GenerationSession::new(
+            self.cache.snapshot(),
+            self.next_logits.clone(),
+            self.prompt_len,
+            config.max_new_tokens.min(self.available),
+            self.available,
+            config,
+            tokenizer,
+        )
     }
 
     /// Sample and commit the next token from this session's current logits.
@@ -1262,6 +1305,56 @@ mod tests {
         assert_eq!(batched_second.token_ids, independent_second.token_ids);
         assert_eq!(batched_first.text, independent_first.text);
         assert_eq!(batched_second.text, independent_second.text);
+    }
+
+    #[test]
+    fn forked_prefill_matches_independent_generation() {
+        let engine = test_engine();
+        let base = engine
+            .prepare_session("Hello", GenerationConfig::greedy(4))
+            .unwrap();
+        assert_eq!(
+            base.prompt_tokens(),
+            engine.encode_prompt("Hello").unwrap().len()
+        );
+        let mut first = base
+            .fork_with_config(GenerationConfig::greedy(4), engine.tokenizer())
+            .unwrap();
+        let mut second = base
+            .fork_with_config(GenerationConfig::greedy(4), engine.tokenizer())
+            .unwrap();
+
+        while !first.is_finished() || !second.is_finished() {
+            let mut pending = Vec::new();
+            for session in [&mut first, &mut second] {
+                if !session.is_finished() {
+                    session.advance(engine.tokenizer()).unwrap();
+                    if !session.is_finished() {
+                        pending.push(session);
+                    }
+                }
+            }
+            engine.decode_sessions(&mut pending).unwrap();
+        }
+
+        let expected = test_engine()
+            .generate("Hello", GenerationConfig::greedy(4))
+            .unwrap();
+        assert_eq!(first.into_output().unwrap().token_ids, expected.token_ids);
+        assert_eq!(second.into_output().unwrap().token_ids, expected.token_ids);
+        assert_eq!(base.completion_tokens(), 0);
+    }
+
+    #[test]
+    fn fork_rejects_more_tokens_than_prefill_reserved() {
+        let engine = test_engine();
+        let base = engine
+            .prepare_session("Hello", GenerationConfig::greedy(2))
+            .unwrap();
+        assert!(
+            base.fork_with_config(GenerationConfig::greedy(3), engine.tokenizer())
+                .is_err()
+        );
     }
 
     #[test]
