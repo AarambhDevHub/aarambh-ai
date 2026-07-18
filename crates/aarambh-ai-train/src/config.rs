@@ -761,6 +761,25 @@ mod tests {
     }
 
     #[test]
+    fn phase33_distill_configs_parse_and_validate() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for name in [
+            "distill_smoke.toml",
+            "medium_distill.toml",
+            "large_distill.toml",
+        ] {
+            let config = TrainingRunConfig::from_toml(workspace.join("configs").join(name))
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            config
+                .validate()
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            AarambhModel::validate_config(&config.model)
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            assert!(config.model.mtp.is_some(), "{name}");
+        }
+    }
+
+    #[test]
     fn moe_retrofit_requires_scaled_active_expert_count() {
         let mut config = TrainingRunConfig {
             dataset_path: "data.txt".into(),
