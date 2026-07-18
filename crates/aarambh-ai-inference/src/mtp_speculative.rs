@@ -410,6 +410,7 @@ mod tests {
                 num_future_tokens: 3,
                 aux_loss_weight: 0.3,
             }),
+            qat: None,
             norm_eps: 1e-5,
             tie_embeddings: true,
         };

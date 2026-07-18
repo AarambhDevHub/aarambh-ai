@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use aarambh_ai_core::{AarambhError, Result, TokenizerLike};
-use aarambh_ai_data::dataset::TextDataset;
-use aarambh_ai_model::AarambhModel;
+use aarambh_ai_core::{AarambhError, Result};
 use candle_core::{Device, Tensor};
 
 use crate::gptq::compute_hessian;
@@ -102,46 +100,4 @@ impl CalibrationStats {
         names.sort();
         names
     }
-}
-
-/// Run model calibration over dataset samples.
-pub fn run_calibration(
-    model: &AarambhModel,
-    tokenizer: &dyn TokenizerLike,
-    dataset: &dyn TextDataset,
-    n_samples: usize,
-    max_seq_len: usize,
-    device: &Device,
-    with_hessian: bool,
-) -> Result<CalibrationStats> {
-    if n_samples == 0 {
-        return Err(AarambhError::Config(
-            "calibration n_samples must be non-zero".into(),
-        ));
-    }
-    let mut stats = CalibrationStats::default();
-    let mut seen = 0usize;
-    for idx in 0..dataset.len() {
-        if seen >= n_samples {
-            break;
-        }
-        let mut ids = tokenizer.encode(dataset.get(idx))?;
-        if ids.len() < 2 {
-            continue;
-        }
-        ids.truncate(max_seq_len.max(1));
-        let seq_len = ids.len();
-        let input = Tensor::from_vec(ids, (1, seq_len), device)?;
-        let captures = model.linear_inputs(&input)?;
-        for (name, activations) in captures {
-            stats.observe(&name, &activations, with_hessian)?;
-        }
-        seen += 1;
-    }
-    if seen == 0 {
-        return Err(AarambhError::Config(
-            "calibration dataset produced no usable samples".into(),
-        ));
-    }
-    Ok(stats)
 }

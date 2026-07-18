@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use aarambh_ai_core::{AarambhError, Result};
+use aarambh_ai_core::{AarambhError, QatConfig, Result};
 use candle_nn::VarMap;
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +22,9 @@ pub struct TrainState {
     pub val_loss: Option<f64>,
     /// Best validation loss observed so far.
     pub best_val_loss: Option<f64>,
+    /// Exact QAT policy used by this optimizer state, when enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qat: Option<QatConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +180,7 @@ mod tests {
             train_loss: Some(2.0),
             val_loss: Some(1.5),
             best_val_loss: Some(1.5),
+            qat: None,
         };
         let manager = CheckpointManager::new(&dir);
         manager.save(&varmap, &optimizer, &state).unwrap();

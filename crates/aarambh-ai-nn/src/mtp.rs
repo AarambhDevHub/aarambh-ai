@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
-use aarambh_ai_core::{AarambhError, ModelConfig, Result};
+use aarambh_ai_core::{AarambhError, ModelConfig, QatTarget, Result};
+use aarambh_ai_quant::{QatContext, QatLinear};
 use candle_core::Tensor;
-use candle_nn::{Init, Linear, Module, VarBuilder, linear_no_bias};
+use candle_nn::{Init, Linear, VarBuilder, linear_no_bias};
 
 use crate::{GroupedQueryAttention, RMSNorm, RopeCache, SwiGluFfn, TransformerBlock};
 
@@ -18,7 +19,7 @@ pub struct MtpHead {
     token_norm: RMSNorm,
     refine_block: TransformerBlock,
     output_norm: RMSNorm,
-    lm_head: Linear,
+    lm_head: QatLinear,
 }
 
 impl MtpHead {
@@ -28,6 +29,17 @@ impl MtpHead {
         cfg: &ModelConfig,
         lm_head_weight: &Tensor,
         vb: VarBuilder<'_>,
+    ) -> Result<Self> {
+        Self::new_with_qat(offset, cfg, lm_head_weight, vb, None)
+    }
+
+    /// Build an auxiliary head with optional QAT projection coverage.
+    pub fn new_with_qat(
+        offset: usize,
+        cfg: &ModelConfig,
+        lm_head_weight: &Tensor,
+        vb: VarBuilder<'_>,
+        qat: Option<QatContext>,
     ) -> Result<Self> {
         if offset < 2 {
             return Err(AarambhError::Config(
@@ -46,9 +58,9 @@ impl MtpHead {
         let refine_vb = vb.pp("refine");
         let refine_block = TransformerBlock::new(
             build_norm(cfg, refine_vb.pp("norm1"))?,
-            build_attention(cfg, refine_vb.pp("attn"))?,
+            build_attention(cfg, refine_vb.pp("attn"), qat.clone())?,
             build_norm(cfg, refine_vb.pp("norm2"))?,
-            build_swiglu(cfg, refine_vb.pp("ffn"))?,
+            build_swiglu(cfg, refine_vb.pp("ffn"), qat.clone())?,
         );
         let output_norm = build_norm(cfg, vb.pp("output_norm"))?;
 
@@ -58,7 +70,11 @@ impl MtpHead {
             token_norm,
             refine_block,
             output_norm,
-            lm_head: Linear::new(lm_head_weight.clone(), None),
+            lm_head: QatLinear::new(
+                Linear::new(lm_head_weight.clone(), None),
+                QatTarget::Mtp,
+                qat,
+            ),
         })
     }
 
@@ -303,23 +319,59 @@ fn build_norm(cfg: &ModelConfig, vb: VarBuilder<'_>) -> Result<RMSNorm> {
     ))
 }
 
-fn build_attention(cfg: &ModelConfig, vb: VarBuilder<'_>) -> Result<GroupedQueryAttention> {
+fn build_attention(
+    cfg: &ModelConfig,
+    vb: VarBuilder<'_>,
+    qat: Option<QatContext>,
+) -> Result<GroupedQueryAttention> {
     let head_dim = cfg.head_dim();
     Ok(GroupedQueryAttention::new(
-        linear_no_bias(cfg.hidden_dim, cfg.n_heads * head_dim, vb.pp("wq"))?,
-        linear_no_bias(cfg.hidden_dim, cfg.n_kv_heads * head_dim, vb.pp("wk"))?,
-        linear_no_bias(cfg.hidden_dim, cfg.n_kv_heads * head_dim, vb.pp("wv"))?,
-        linear_no_bias(cfg.n_heads * head_dim, cfg.hidden_dim, vb.pp("wo"))?,
+        QatLinear::new(
+            linear_no_bias(cfg.hidden_dim, cfg.n_heads * head_dim, vb.pp("wq"))?,
+            QatTarget::Mtp,
+            qat.clone(),
+        ),
+        QatLinear::new(
+            linear_no_bias(cfg.hidden_dim, cfg.n_kv_heads * head_dim, vb.pp("wk"))?,
+            QatTarget::Mtp,
+            qat.clone(),
+        ),
+        QatLinear::new(
+            linear_no_bias(cfg.hidden_dim, cfg.n_kv_heads * head_dim, vb.pp("wv"))?,
+            QatTarget::Mtp,
+            qat.clone(),
+        ),
+        QatLinear::new(
+            linear_no_bias(cfg.n_heads * head_dim, cfg.hidden_dim, vb.pp("wo"))?,
+            QatTarget::Mtp,
+            qat,
+        ),
         cfg.n_heads,
         cfg.n_kv_heads,
         head_dim,
     ))
 }
 
-fn build_swiglu(cfg: &ModelConfig, vb: VarBuilder<'_>) -> Result<SwiGluFfn> {
+fn build_swiglu(
+    cfg: &ModelConfig,
+    vb: VarBuilder<'_>,
+    qat: Option<QatContext>,
+) -> Result<SwiGluFfn> {
     Ok(SwiGluFfn::new(
-        linear_no_bias(cfg.hidden_dim, cfg.ffn_dim, vb.pp("w_gate"))?,
-        linear_no_bias(cfg.hidden_dim, cfg.ffn_dim, vb.pp("w_up"))?,
-        linear_no_bias(cfg.ffn_dim, cfg.hidden_dim, vb.pp("w_down"))?,
+        QatLinear::new(
+            linear_no_bias(cfg.hidden_dim, cfg.ffn_dim, vb.pp("w_gate"))?,
+            QatTarget::Mtp,
+            qat.clone(),
+        ),
+        QatLinear::new(
+            linear_no_bias(cfg.hidden_dim, cfg.ffn_dim, vb.pp("w_up"))?,
+            QatTarget::Mtp,
+            qat.clone(),
+        ),
+        QatLinear::new(
+            linear_no_bias(cfg.ffn_dim, cfg.hidden_dim, vb.pp("w_down"))?,
+            QatTarget::Mtp,
+            qat,
+        ),
     ))
 }

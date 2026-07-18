@@ -183,6 +183,136 @@ pub struct ScorecardComparison {
     pub deltas: Vec<ScoreDelta>,
 }
 
+/// Per-task robustness measurements from a four-way QAT comparison.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QatTaskRobustness {
+    /// Task name.
+    pub name: String,
+    /// Metric name.
+    pub metric: String,
+    /// Full-precision baseline value.
+    pub baseline_fp: f64,
+    /// Quantized baseline value.
+    pub baseline_quantized: f64,
+    /// Full-precision QAT-master value.
+    pub qat_fp: f64,
+    /// Quantized QAT value.
+    pub qat_quantized: f64,
+    /// Direction-normalized degradation caused by baseline quantization.
+    pub baseline_quantization_drop: f64,
+    /// Direction-normalized degradation caused by quantizing the QAT model.
+    pub qat_quantization_drop: f64,
+    /// Reduction in quantization degradation achieved by QAT.
+    pub robustness_recovery: f64,
+}
+
+/// Four scorecards and normalized robustness deltas for QAT validation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QatRobustnessReport {
+    /// Scorecard for the full-precision baseline checkpoint.
+    pub baseline_fp: Scorecard,
+    /// Scorecard for the exported quantized baseline checkpoint.
+    pub baseline_quantized: Scorecard,
+    /// Scorecard for the full-precision QAT master checkpoint.
+    pub qat_fp: Scorecard,
+    /// Scorecard for the exported quantized QAT checkpoint.
+    pub qat_quantized: Scorecard,
+    /// Per-task robustness summary.
+    pub tasks: Vec<QatTaskRobustness>,
+}
+
+impl QatRobustnessReport {
+    /// Compare four scorecards by task name and metric direction.
+    pub fn compare(
+        baseline_fp: Scorecard,
+        baseline_quantized: Scorecard,
+        qat_fp: Scorecard,
+        qat_quantized: Scorecard,
+    ) -> Self {
+        let baseline_quantized_by_name = score_map(&baseline_quantized);
+        let qat_fp_by_name = score_map(&qat_fp);
+        let qat_quantized_by_name = score_map(&qat_quantized);
+        let tasks = baseline_fp
+            .tasks
+            .iter()
+            .filter_map(|baseline| {
+                let baseline_quantized = baseline_quantized_by_name.get(&baseline.name)?;
+                let qat_fp = qat_fp_by_name.get(&baseline.name)?;
+                let qat_quantized = qat_quantized_by_name.get(&baseline.name)?;
+                let direction = if baseline.higher_is_better { 1.0 } else { -1.0 };
+                let baseline_drop = (baseline.value - baseline_quantized.value) * direction;
+                let qat_drop = (qat_fp.value - qat_quantized.value) * direction;
+                Some(QatTaskRobustness {
+                    name: baseline.name.clone(),
+                    metric: baseline.metric.clone(),
+                    baseline_fp: baseline.value,
+                    baseline_quantized: baseline_quantized.value,
+                    qat_fp: qat_fp.value,
+                    qat_quantized: qat_quantized.value,
+                    baseline_quantization_drop: baseline_drop,
+                    qat_quantization_drop: qat_drop,
+                    robustness_recovery: baseline_drop - qat_drop,
+                })
+            })
+            .collect();
+        Self {
+            baseline_fp,
+            baseline_quantized,
+            qat_fp,
+            qat_quantized,
+            tasks,
+        }
+    }
+
+    /// Serialize the complete robustness report to pretty JSON.
+    pub fn to_json(&self) -> Result<String> {
+        serde_json::to_string_pretty(self).map_err(AarambhError::Json)
+    }
+
+    /// Render all four scorecards and robustness deltas as Markdown.
+    pub fn to_markdown(&self) -> String {
+        let mut output = String::new();
+        for (name, scorecard) in [
+            ("Baseline FP", &self.baseline_fp),
+            ("Baseline Quantized", &self.baseline_quantized),
+            ("QAT FP Master", &self.qat_fp),
+            ("QAT Quantized", &self.qat_quantized),
+        ] {
+            output.push_str(&format!("## {name}\n\n"));
+            output.push_str(&scorecard.to_markdown());
+            output.push_str("\n\n");
+        }
+        output.push_str("## Quantization Robustness\n\n");
+        output.push_str(
+            "| Task | Metric | Base FP | Base Quant | QAT FP | QAT Quant | Base Drop | QAT Drop | Recovery |\n",
+        );
+        output.push_str("|---|---|---:|---:|---:|---:|---:|---:|---:|\n");
+        for task in &self.tasks {
+            output.push_str(&format!(
+                "| {} | {} | {:.4} | {:.4} | {:.4} | {:.4} | {:+.4} | {:+.4} | {:+.4} |\n",
+                task.name,
+                task.metric,
+                task.baseline_fp,
+                task.baseline_quantized,
+                task.qat_fp,
+                task.qat_quantized,
+                task.baseline_quantization_drop,
+                task.qat_quantization_drop,
+                task.robustness_recovery,
+            ));
+        }
+        output
+    }
+}
+
+fn score_map(scorecard: &Scorecard) -> BTreeMap<String, &TaskScore> {
+    scorecard
+        .tasks
+        .iter()
+        .map(|task| (task.name.clone(), task))
+        .collect()
+}
+
 impl ScorecardComparison {
     /// Compare two scorecards by matching task names.
     pub fn compare(before: &Scorecard, after: &Scorecard) -> Self {
@@ -273,5 +403,28 @@ mod tests {
         let comparison = ScorecardComparison::compare(&before, &after);
         assert_eq!(comparison.deltas[0].status, "better");
         assert_eq!(comparison.deltas[0].delta, 0.5);
+    }
+
+    #[test]
+    fn qat_report_normalizes_lower_is_better_metrics() {
+        let scorecard = |ppl: f64| {
+            Scorecard::new(
+                vec![TaskScore::perplexity(ppl.ln(), ppl, 10)],
+                4,
+                0,
+                None,
+                None,
+                None,
+            )
+        };
+        let report = QatRobustnessReport::compare(
+            scorecard(10.0),
+            scorecard(14.0),
+            scorecard(9.5),
+            scorecard(11.0),
+        );
+        assert_eq!(report.tasks[0].baseline_quantization_drop, 4.0);
+        assert_eq!(report.tasks[0].qat_quantization_drop, 1.5);
+        assert_eq!(report.tasks[0].robustness_recovery, 2.5);
     }
 }

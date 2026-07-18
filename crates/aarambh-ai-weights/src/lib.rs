@@ -72,6 +72,58 @@ pub fn load_model_with_dtype(
     AarambhModel::new(cfg, vb)
 }
 
+/// Copy an exact SafeTensors model into an initialized training variable map.
+///
+/// Source and target tensor names and shapes must match exactly. This is used
+/// when QAT starts from a floating-point checkpoint without changing model
+/// architecture.
+pub fn load_exact_into_varmap(
+    path: impl AsRef<Path>,
+    varmap: &mut VarMap,
+    device: &Device,
+    dtype: DType,
+) -> Result<usize> {
+    let source = candle_core::safetensors::load(path.as_ref(), device)?;
+    let variables = varmap.data().lock().map_err(|_| {
+        aarambh_ai_core::AarambhError::Checkpoint("training variable map lock poisoned".into())
+    })?;
+    let missing = variables
+        .keys()
+        .filter(|name| !source.contains_key(name.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let unexpected = source
+        .keys()
+        .filter(|name| !variables.contains_key(name.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() || !unexpected.is_empty() {
+        return Err(aarambh_ai_core::AarambhError::Checkpoint(format!(
+            "exact checkpoint tensor mismatch: missing={missing:?} unexpected={unexpected:?}"
+        )));
+    }
+
+    for (name, variable) in variables.iter() {
+        let value = source
+            .get(name)
+            .expect("exact tensor name sets were validated");
+        if value.dims() != variable.dims() {
+            return Err(aarambh_ai_core::AarambhError::Checkpoint(format!(
+                "exact checkpoint tensor {name} shape {:?} does not match {:?}",
+                value.dims(),
+                variable.dims()
+            )));
+        }
+        let target_dtype = if name.ends_with(".A_log") || name.ends_with(".dt_bias") {
+            DType::F32
+        } else {
+            dtype
+        };
+        variable.set(&value.to_dtype(target_dtype)?)?;
+    }
+    Ok(variables.len())
+}
+
 /// Copy a dense SafeTensors checkpoint into an initialized hybrid-model variable map.
 ///
 /// All embedding, normalization, FFN/MoE, output-head, and scheduled full-attention

@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 
-use aarambh_ai_core::{AarambhError, AttentionKind, Configurable, Forward, ModelConfig, Result};
+use aarambh_ai_core::{
+    AarambhError, AttentionKind, Configurable, Forward, ModelConfig, QatTarget, Result,
+};
 use aarambh_ai_nn::{
     DeltaNetState, DsaAttention, DsaForwardStats, DsaKvCache, DsaTeacherOutput, FeedForwardLayer,
     GatedDeltaNetLayer, GroupedQueryAttention, HybridKvCache, KVCache, MoeFfn, MoeForwardStats,
     MtpHead, RMSNorm, RopeCache, SharedExpertPath, SwiGluFfn, TokenMixer, TransformerBlock,
 };
+use aarambh_ai_quant::{QatContext, QatLinear, QatStats};
 use candle_core::{DType, Tensor};
 use candle_nn::{Init, VarBuilder, linear_no_bias};
 
@@ -22,6 +25,7 @@ pub struct AarambhModel {
     lm_head: LmHead,
     mtp_heads: Vec<MtpHead>,
     rope_cache: RopeCache,
+    qat_context: Option<QatContext>,
 }
 
 #[derive(Debug)]
@@ -64,7 +68,21 @@ pub struct MtpPrediction {
 impl AarambhModel {
     /// Build a model from configuration and a Candle variable builder.
     pub fn new(cfg: &ModelConfig, vb: VarBuilder<'_>) -> Result<Self> {
+        Self::build(cfg, vb, false)
+    }
+
+    /// Build a training model with QAT enabled when configured.
+    pub fn new_for_training(cfg: &ModelConfig, vb: VarBuilder<'_>) -> Result<Self> {
+        Self::build(cfg, vb, true)
+    }
+
+    fn build(cfg: &ModelConfig, vb: VarBuilder<'_>, enable_qat: bool) -> Result<Self> {
         Self::validate_config(cfg)?;
+        let qat_context = if enable_qat {
+            cfg.qat.clone().map(QatContext::new).transpose()?
+        } else {
+            None
+        };
 
         let embedding = TokenEmbedding::new(cfg.vocab_size, cfg.hidden_dim, vb.pp("embedding"))?;
         let mut blocks = Vec::with_capacity(cfg.n_layers);
@@ -91,16 +109,26 @@ impl AarambhModel {
 
             let attention_kind = cfg.attention_kind_for_layer(layer_idx);
             let mixer = match attention_kind {
-                AttentionKind::Full => {
-                    TokenMixer::Attention(build_attention(cfg, block_vb.clone())?)
-                }
+                AttentionKind::Full => TokenMixer::Attention(build_attention(
+                    cfg,
+                    block_vb.clone(),
+                    qat_context.clone(),
+                )?),
                 AttentionKind::Sparse => {
                     let index_dim = cfg.head_dim();
                     let dsa_vb = block_vb.pp("dsa");
                     TokenMixer::Sparse(DsaAttention::new(
-                        build_attention(cfg, block_vb.clone())?,
-                        linear_no_bias(cfg.hidden_dim, index_dim, dsa_vb.pp("index_q"))?,
-                        linear_no_bias(cfg.hidden_dim, index_dim, dsa_vb.pp("index_k"))?,
+                        build_attention(cfg, block_vb.clone(), qat_context.clone())?,
+                        qat_linear(
+                            linear_no_bias(cfg.hidden_dim, index_dim, dsa_vb.pp("index_q"))?,
+                            QatTarget::DsaIndexer,
+                            &qat_context,
+                        ),
+                        qat_linear(
+                            linear_no_bias(cfg.hidden_dim, index_dim, dsa_vb.pp("index_k"))?,
+                            QatTarget::DsaIndexer,
+                            &qat_context,
+                        ),
                         cfg.dsa_config
                             .as_ref()
                             .expect("validated DSA config is present")
@@ -115,6 +143,7 @@ impl AarambhModel {
                         .as_ref()
                         .expect("validated hybrid config has Gated DeltaNet settings"),
                     block_vb.pp("deltanet"),
+                    qat_context.clone(),
                 )?),
             };
 
@@ -130,7 +159,7 @@ impl AarambhModel {
                     let experts = (0..routed_expert_count)
                         .map(|expert_idx| {
                             let expert_vb = ffn_vb.pp("experts").pp(expert_idx);
-                            build_swiglu(cfg.hidden_dim, expert_dim, expert_vb)
+                            build_swiglu(cfg.hidden_dim, expert_dim, expert_vb, qat_context.clone())
                         })
                         .collect::<Result<Vec<_>>>()?;
                     let shared_experts = (0..moe.num_shared_experts)
@@ -139,20 +168,41 @@ impl AarambhModel {
                                 cfg.hidden_dim,
                                 expert_dim,
                                 ffn_vb.pp("shared_experts").pp(expert_idx),
+                                qat_context.clone(),
                             )
                         })
                         .collect::<Result<Vec<_>>>()?;
                     FeedForwardLayer::Moe(MoeFfn::new_with_shared(
                         moe.clone(),
-                        linear_no_bias(cfg.hidden_dim, routed_expert_count, ffn_vb.pp("router"))?,
+                        qat_linear(
+                            linear_no_bias(
+                                cfg.hidden_dim,
+                                routed_expert_count,
+                                ffn_vb.pp("router"),
+                            )?,
+                            QatTarget::MoeRouter,
+                            &qat_context,
+                        ),
                         experts,
                         SharedExpertPath::new(shared_experts),
                     ))
                 }
                 None => FeedForwardLayer::Dense(SwiGluFfn::new(
-                    linear_no_bias(cfg.hidden_dim, cfg.ffn_dim, ffn_vb.pp("w_gate"))?,
-                    linear_no_bias(cfg.hidden_dim, cfg.ffn_dim, ffn_vb.pp("w_up"))?,
-                    linear_no_bias(cfg.ffn_dim, cfg.hidden_dim, ffn_vb.pp("w_down"))?,
+                    qat_linear(
+                        linear_no_bias(cfg.hidden_dim, cfg.ffn_dim, ffn_vb.pp("w_gate"))?,
+                        QatTarget::Ffn,
+                        &qat_context,
+                    ),
+                    qat_linear(
+                        linear_no_bias(cfg.hidden_dim, cfg.ffn_dim, ffn_vb.pp("w_up"))?,
+                        QatTarget::Ffn,
+                        &qat_context,
+                    ),
+                    qat_linear(
+                        linear_no_bias(cfg.ffn_dim, cfg.hidden_dim, ffn_vb.pp("w_down"))?,
+                        QatTarget::Ffn,
+                        &qat_context,
+                    ),
                 )),
             };
 
@@ -165,20 +215,26 @@ impl AarambhModel {
             cfg.norm_eps as f32,
         );
         let lm_head = if cfg.tie_embeddings {
-            LmHead::tied(embedding.weight())
+            LmHead::tied_with_qat(embedding.weight(), qat_context.clone())
         } else {
-            LmHead::untied(cfg.hidden_dim, cfg.vocab_size, vb.pp("lm_head"))?
+            LmHead::untied_with_qat(
+                cfg.hidden_dim,
+                cfg.vocab_size,
+                vb.pp("lm_head"),
+                qat_context.clone(),
+            )?
         };
 
         let mtp_heads = match &cfg.mtp {
             Some(mtp) => (2..=mtp.num_future_tokens)
                 .enumerate()
                 .map(|(head_index, offset)| {
-                    MtpHead::new(
+                    MtpHead::new_with_qat(
                         offset,
                         cfg,
                         lm_head.weight(),
                         vb.pp("mtp").pp("heads").pp(head_index),
+                        qat_context.clone(),
                     )
                 })
                 .collect::<Result<Vec<_>>>()?,
@@ -196,6 +252,7 @@ impl AarambhModel {
             lm_head,
             mtp_heads,
             rope_cache,
+            qat_context,
         })
     }
 
@@ -260,7 +317,27 @@ impl AarambhModel {
         if let Some(mtp) = &cfg.mtp {
             mtp.validate(cfg.max_seq_len)?;
         }
+        if let Some(qat) = &cfg.qat {
+            qat.validate()?;
+        }
         Ok(())
+    }
+
+    /// Return whether fake quantization is active for this model instance.
+    pub fn qat_active(&self) -> bool {
+        self.qat_context.is_some()
+    }
+
+    /// Return QAT coverage and cache statistics when active.
+    pub fn qat_stats(&self) -> Option<QatStats> {
+        self.qat_context.as_ref().map(QatContext::stats)
+    }
+
+    /// Invalidate effective-weight caches after an optimizer update.
+    pub fn advance_qat_generation(&self) -> Option<u64> {
+        self.qat_context
+            .as_ref()
+            .map(QatContext::advance_generation)
     }
 
     /// Run a full causal forward pass over token ids.
@@ -940,25 +1017,62 @@ fn insert_mixer_tensors(
     }
 }
 
-fn build_attention(cfg: &ModelConfig, block_vb: VarBuilder<'_>) -> Result<GroupedQueryAttention> {
+fn build_attention(
+    cfg: &ModelConfig,
+    block_vb: VarBuilder<'_>,
+    qat: Option<QatContext>,
+) -> Result<GroupedQueryAttention> {
     let attn_vb = block_vb.pp("attn");
     let head_dim = cfg.head_dim();
     Ok(GroupedQueryAttention::new(
-        linear_no_bias(cfg.hidden_dim, cfg.n_heads * head_dim, attn_vb.pp("wq"))?,
-        linear_no_bias(cfg.hidden_dim, cfg.n_kv_heads * head_dim, attn_vb.pp("wk"))?,
-        linear_no_bias(cfg.hidden_dim, cfg.n_kv_heads * head_dim, attn_vb.pp("wv"))?,
-        linear_no_bias(cfg.n_heads * head_dim, cfg.hidden_dim, attn_vb.pp("wo"))?,
+        QatLinear::new(
+            linear_no_bias(cfg.hidden_dim, cfg.n_heads * head_dim, attn_vb.pp("wq"))?,
+            QatTarget::Attention,
+            qat.clone(),
+        ),
+        QatLinear::new(
+            linear_no_bias(cfg.hidden_dim, cfg.n_kv_heads * head_dim, attn_vb.pp("wk"))?,
+            QatTarget::Attention,
+            qat.clone(),
+        ),
+        QatLinear::new(
+            linear_no_bias(cfg.hidden_dim, cfg.n_kv_heads * head_dim, attn_vb.pp("wv"))?,
+            QatTarget::Attention,
+            qat.clone(),
+        ),
+        QatLinear::new(
+            linear_no_bias(cfg.n_heads * head_dim, cfg.hidden_dim, attn_vb.pp("wo"))?,
+            QatTarget::Attention,
+            qat,
+        ),
         cfg.n_heads,
         cfg.n_kv_heads,
         head_dim,
     ))
 }
 
-fn build_swiglu(hidden_dim: usize, ffn_dim: usize, vb: VarBuilder<'_>) -> Result<SwiGluFfn> {
+fn build_swiglu(
+    hidden_dim: usize,
+    ffn_dim: usize,
+    vb: VarBuilder<'_>,
+    qat: Option<QatContext>,
+) -> Result<SwiGluFfn> {
     Ok(SwiGluFfn::new(
-        linear_no_bias(hidden_dim, ffn_dim, vb.pp("w_gate"))?,
-        linear_no_bias(hidden_dim, ffn_dim, vb.pp("w_up"))?,
-        linear_no_bias(ffn_dim, hidden_dim, vb.pp("w_down"))?,
+        QatLinear::new(
+            linear_no_bias(hidden_dim, ffn_dim, vb.pp("w_gate"))?,
+            QatTarget::Ffn,
+            qat.clone(),
+        ),
+        QatLinear::new(
+            linear_no_bias(hidden_dim, ffn_dim, vb.pp("w_up"))?,
+            QatTarget::Ffn,
+            qat.clone(),
+        ),
+        QatLinear::new(
+            linear_no_bias(ffn_dim, hidden_dim, vb.pp("w_down"))?,
+            QatTarget::Ffn,
+            qat,
+        ),
     ))
 }
 
@@ -978,6 +1092,7 @@ fn build_gated_deltanet(
     _norm_eps: f32,
     config: &aarambh_ai_core::GatedDeltaNetConfig,
     vb: VarBuilder<'_>,
+    qat: Option<QatContext>,
 ) -> Result<GatedDeltaNetLayer> {
     let key_dim = config.n_heads * config.key_head_dim;
     let value_dim = config.n_heads * config.value_head_dim;
@@ -986,13 +1101,41 @@ fn build_gated_deltanet(
         up: (1.0 / config.conv_kernel_size as f64).sqrt(),
     };
     Ok(GatedDeltaNetLayer::new(
-        linear_no_bias(hidden_dim, key_dim, vb.pp("q_proj"))?,
-        linear_no_bias(hidden_dim, key_dim, vb.pp("k_proj"))?,
-        linear_no_bias(hidden_dim, value_dim, vb.pp("v_proj"))?,
-        linear_no_bias(hidden_dim, config.n_heads, vb.pp("beta_proj"))?,
-        linear_no_bias(hidden_dim, config.n_heads, vb.pp("alpha_proj"))?,
-        linear_no_bias(hidden_dim, value_dim, vb.pp("gate_proj"))?,
-        linear_no_bias(value_dim, hidden_dim, vb.pp("out_proj"))?,
+        qat_linear(
+            linear_no_bias(hidden_dim, key_dim, vb.pp("q_proj"))?,
+            QatTarget::DeltaNet,
+            &qat,
+        ),
+        qat_linear(
+            linear_no_bias(hidden_dim, key_dim, vb.pp("k_proj"))?,
+            QatTarget::DeltaNet,
+            &qat,
+        ),
+        qat_linear(
+            linear_no_bias(hidden_dim, value_dim, vb.pp("v_proj"))?,
+            QatTarget::DeltaNet,
+            &qat,
+        ),
+        qat_linear(
+            linear_no_bias(hidden_dim, config.n_heads, vb.pp("beta_proj"))?,
+            QatTarget::DeltaNet,
+            &qat,
+        ),
+        qat_linear(
+            linear_no_bias(hidden_dim, config.n_heads, vb.pp("alpha_proj"))?,
+            QatTarget::DeltaNet,
+            &qat,
+        ),
+        qat_linear(
+            linear_no_bias(hidden_dim, value_dim, vb.pp("gate_proj"))?,
+            QatTarget::DeltaNet,
+            &qat,
+        ),
+        qat_linear(
+            linear_no_bias(value_dim, hidden_dim, vb.pp("out_proj"))?,
+            QatTarget::DeltaNet,
+            &qat,
+        ),
         vb.pp("q_conv")
             .get_with_hints((key_dim, config.conv_kernel_size), "weight", conv_init)?,
         vb.pp("k_conv")
@@ -1024,6 +1167,10 @@ fn build_gated_deltanet(
         )?,
         config.clone(),
     ))
+}
+
+fn qat_linear(linear: candle_nn::Linear, target: QatTarget, qat: &Option<QatContext>) -> QatLinear {
+    QatLinear::new(linear, target, qat.clone())
 }
 
 fn get_moe_expert_weight<'a>(ffn: &'a FeedForwardLayer, suffix: &str) -> Option<&'a Tensor> {

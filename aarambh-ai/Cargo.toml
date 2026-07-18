@@ -14,6 +14,7 @@ cuda = [
     "aarambh-ai-eval/cuda",
     "aarambh-ai-finetune/cuda",
     "aarambh-ai-inference/cuda",
+    "aarambh-ai-model/cuda",
     "aarambh-ai-quant/cuda",
     "aarambh-ai-safety/cuda",
     "aarambh-ai-serve/cuda",
@@ -31,6 +32,7 @@ aarambh-ai-distill   = { path = "../crates/aarambh-ai-distill" }
 aarambh-ai-eval      = { path = "../crates/aarambh-ai-eval" }
 aarambh-ai-finetune  = { path = "../crates/aarambh-ai-finetune" }
 aarambh-ai-inference = { path = "../crates/aarambh-ai-inference" }
+aarambh-ai-model     = { path = "../crates/aarambh-ai-model" }
 aarambh-ai-quant     = { path = "../crates/aarambh-ai-quant" }
 aarambh-ai-safety    = { path = "../crates/aarambh-ai-safety" }
 aarambh-ai-serve     = { path = "../crates/aarambh-ai-serve" }

@@ -1,23 +1,27 @@
 use std::collections::HashMap;
 
-use candle_core::{Module, Result, Tensor};
-use candle_nn::Linear;
+use aarambh_ai_quant::QatLinear;
+use candle_core::{Result, Tensor};
 
 #[derive(Debug, Clone)]
 /// SwiGLU feed-forward network layer.
 pub struct SwiGluFfn {
-    w_gate: Linear,
-    w_up: Linear,
-    w_down: Linear,
+    w_gate: QatLinear,
+    w_up: QatLinear,
+    w_down: QatLinear,
 }
 
 impl SwiGluFfn {
     /// Create a feed-forward layer from gate, up, and down projections.
-    pub fn new(w_gate: Linear, w_up: Linear, w_down: Linear) -> Self {
+    pub fn new(
+        w_gate: impl Into<QatLinear>,
+        w_up: impl Into<QatLinear>,
+        w_down: impl Into<QatLinear>,
+    ) -> Self {
         Self {
-            w_gate,
-            w_up,
-            w_down,
+            w_gate: w_gate.into(),
+            w_up: w_up.into(),
+            w_down: w_down.into(),
         }
     }
 

@@ -10,6 +10,7 @@ default = []
 cuda = [
     "aarambh-ai-core/cuda",
     "aarambh-ai-nn/cuda",
+    "aarambh-ai-quant/cuda",
     "candle-core/cuda",
     "candle-nn/cuda",
 ]
@@ -17,5 +18,6 @@ cuda = [
 [dependencies]
 aarambh-ai-core = { path = "../aarambh-ai-core" }
 aarambh-ai-nn   = { path = "../aarambh-ai-nn" }
+aarambh-ai-quant = { path = "../aarambh-ai-quant" }
 candle-core     = { workspace = true }
 candle-nn       = { workspace = true }

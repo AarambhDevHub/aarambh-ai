@@ -218,10 +218,10 @@ impl TrainingRunConfig {
             && self.model.attention_schedule.is_none()
             && self.model.mtp.is_none()
             && self.moe_retrofit.is_none()
+            && self.model.qat.is_none()
         {
             return Err(AarambhError::Config(
-                "retrofit_from requires model.attention_schedule, model.mtp, or moe_retrofit"
-                    .into(),
+                "retrofit_from requires an architecture retrofit or model.qat".into(),
             ));
         }
         if let Some(moe_retrofit) = &self.moe_retrofit {
@@ -414,28 +414,43 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
     )?;
     trainer.set_dsa_training_config(config.dsa_training.clone());
     if let Some(path) = &config.retrofit_from {
-        let report = trainer.load_retrofit_checkpoint_with_moe(
-            path,
-            dtype,
-            config
-                .moe_retrofit
-                .as_ref()
-                .map(|moe| aarambh_ai_weights::MoeRetrofitOptions {
-                    source_top_k: moe.source_top_k,
-                }),
-        )?;
-        if trainer.is_rank0() {
-            println!(
-                "architecture retrofit: loaded={} initialized_deltanet={} initialized_dsa={} initialized_mtp={} expanded_moe_routers={} sharded_moe_experts={} initialized_shared_experts={} lr_scale={:.3}",
-                report.loaded_tensors,
-                report.initialized_deltanet_tensors,
-                report.initialized_dsa_tensors,
-                report.initialized_mtp_tensors,
-                report.expanded_moe_router_tensors,
-                report.sharded_moe_expert_tensors,
-                report.initialized_shared_expert_tensors,
-                config.retrofit_lr_scale
-            );
+        if config.model.qat.is_some()
+            && config.model.attention_schedule.is_none()
+            && config.model.mtp.is_none()
+            && config.moe_retrofit.is_none()
+        {
+            let loaded = trainer.load_exact_model_checkpoint(path, dtype)?;
+            if trainer.is_rank0() {
+                println!(
+                    "QAT initialization: loaded={loaded} exact tensors from {} lr_scale={:.3}",
+                    path.display(),
+                    config.retrofit_lr_scale
+                );
+            }
+        } else {
+            let report = trainer.load_retrofit_checkpoint_with_moe(
+                path,
+                dtype,
+                config
+                    .moe_retrofit
+                    .as_ref()
+                    .map(|moe| aarambh_ai_weights::MoeRetrofitOptions {
+                        source_top_k: moe.source_top_k,
+                    }),
+            )?;
+            if trainer.is_rank0() {
+                println!(
+                    "architecture retrofit: loaded={} initialized_deltanet={} initialized_dsa={} initialized_mtp={} expanded_moe_routers={} sharded_moe_experts={} initialized_shared_experts={} lr_scale={:.3}",
+                    report.loaded_tensors,
+                    report.initialized_deltanet_tensors,
+                    report.initialized_dsa_tensors,
+                    report.initialized_mtp_tensors,
+                    report.expanded_moe_router_tensors,
+                    report.sharded_moe_expert_tensors,
+                    report.initialized_shared_expert_tensors,
+                    config.retrofit_lr_scale
+                );
+            }
         }
     }
     if config.resume && trainer.load_latest_checkpoint()? && trainer.is_rank0() {

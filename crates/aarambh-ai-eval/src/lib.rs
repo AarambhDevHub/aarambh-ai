@@ -17,5 +17,7 @@ pub mod tasks;
 pub use generation::greedy_generate;
 pub use harness::{EvalConfig, EvalContext, EvalTask, run_all};
 pub use ppl::{PplResult, compute_ppl};
-pub use report::{ScoreDelta, Scorecard, ScorecardComparison, TaskScore};
+pub use report::{
+    QatRobustnessReport, QatTaskRobustness, ScoreDelta, Scorecard, ScorecardComparison, TaskScore,
+};
 pub use scoring::{ContinuationScore, ContinuationScorer, ModelLogProbScorer};

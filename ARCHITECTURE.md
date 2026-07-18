@@ -1172,17 +1172,27 @@ Implement this before GPTQ if you want INT4 sooner.
 
 ### 11.5 Quantisation-Aware Training (qat.rs)
 
-QAT inserts **fake quantisation nodes** into the model during fine-tuning.
-Forward pass: simulate INT4 quantisation error. Backward pass: straight-through estimator.
-This teaches the model to be robust to quantisation before the weights are actually quantised.
+Phase 34 promotes the original Phase 8 fake-quant concept into the shared
+full-weight trainer. Covered linear weights are quantized and immediately
+dequantized on their existing Candle device during the forward pass; an
+identity straight-through estimator preserves gradients. Export-aligned INT4
+uses the same 256-value Q4_K_M blocks and f16 scale/min values as GGUF, while
+INT8 uses the same global absmax scale.
 
 ```
-# QAT fine-tune → then export to INT4
-aarambh-ai finetune sft --qat --bits 4 --base checkpoint.safetensors
-aarambh-ai quantise --method gptq --bits 4 --input qat_checkpoint.safetensors
+# QAT continuation, then unchanged GGUF export
+aarambh-ai train --config configs/qat_tiny.toml
+aarambh-ai convert \
+  --config configs/qat_tiny.toml \
+  --input checkpoints/qat_tiny/best/model.safetensors \
+  --output checkpoints/qat_tiny/model-q4.gguf \
+  --gguf --format q4_k_m
 ```
 
-QAT typically recovers 1–2 PPL points vs post-training quantisation alone.
+The model config selects bit width, scaling granularity, and projection target
+classes. Normal model construction and `qat = None` remain full precision.
+Checkpoint acceptance uses `eval --qat-compare`; no recovery is claimed until
+the four matched scorecards measure it. See `ARCHITECTURE_V3.md` §43.
 
 ### 11.6 GGUF Q4_K_M
 

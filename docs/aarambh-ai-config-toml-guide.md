@@ -547,6 +547,38 @@ training and inference. MTP checkpoints can use one-checkpoint speculative
 decoding with `infer --speculative`; `--draft-tokens` cannot exceed the trained
 `num_future_tokens` horizon.
 
+## 16B. Native QAT: `[model.qat]`
+
+This optional section enables weight-only fake quantization in the base
+training loop:
+
+```toml
+[model.qat]
+bits = "int4"
+granularity = "export_aligned"
+targets = ["attention", "ffn"]
+```
+
+`bits` is `int4` or `int8`. `export_aligned` is the recommended granularity
+because its forward values match the existing Q4_K_M or Q8 GGUF exporter.
+`per_tensor` and `per_output_channel` are available for controlled experiments.
+
+`targets` may contain `attention`, `ffn`, `moe_router`, `delta_net`,
+`dsa_indexer`, `mtp`, and `lm_head`. Embeddings, RMSNorm weights, DeltaNet
+convolution weights, and scalar recurrent parameters are never selected. In
+export-aligned INT4 mode, DSA indexers intentionally simulate INT8 to match the
+exporter's precision policy.
+
+Omitting `[model.qat]` keeps the existing full-precision training path. QAT is
+activated only by the training constructor, so loading the same config for
+inference does not fake-quantize weights. For continuation, set
+`retrofit_from` to an exact SafeTensors checkpoint; names and shapes must match.
+Resume also requires the saved and configured QAT policies to be identical.
+
+Use `configs/qat_smoke.toml` for the two-step CPU check and
+`configs/qat_tiny.toml` for an exact Tiny continuation. QAT checkpoints store
+floating-point master weights and use the normal GGUF exporter afterward.
+
 # PART 3 — RoPE Scaling: `[model.rope_scaling]`
 
 This section only appears in the long-context configs (`wikitext103_long_smoke.toml`, `medium_16k.toml`, `large_16k.toml`) — it's the YaRN technique for stretching a model's context length beyond what it was originally trained for.
