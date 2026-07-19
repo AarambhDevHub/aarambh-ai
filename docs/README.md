@@ -11,22 +11,29 @@ These docs aren't API references or code comments. They're written for someone c
 ### 1. `aarambh-ai-complete-guide.md`
 **The full project walkthrough — every phase, explained.**
 
-This covers all 28 completed phases of Aarambh-AI, from v1.0.0 through the
-production v2.0.0 source release:
+This covers the 28 production phases of Aarambh-AI, from v1.0.0 through the
+v2.0.0 source release. v3 implementation runbooks are listed separately below:
 
 - **v1 (Phases 1–13):** Tokenizer, Data Pipeline, Neural Network Primitives, Full Model Forward Pass, Custom Kernels (CPU SIMD + GPU prep), Training Loop, Inference Engine + CLI, Thinking Engine, Quantization Stack, Fine-Tuning (LoRA/QLoRA/SFT), GRPO Reinforcement Learning, Safety Layer, Self-Learning.
 - **v2 (Phases 14–28):** GPU Scale-Up, Flash Attention CUDA Kernels, Long Context (RoPE scaling), Evaluation Harness, DoRA Fine-Tuning, Vision Encoder + Projector, Vision-Language Training, Vision-Aware Self-Learning, Mixture of Experts, Multi-GPU Training, DPO Preference Tuning, Speculative Decoding, Tool Use / Function Calling, Inference Server, and the v2.0.0 production source release.
 
 Each phase includes a plain-English definition, a beginner explanation, why it's needed, a worked example, and a diagram. Read this first — it's the map of the whole project.
 
-### 2. `aarambh-ai-math-formulas-guide.md`
+### 2. `phase35_video.md`
+**The native-video implementation and operating guide.**
+
+This documents the H.264 MP4 boundary, frame sampling, tokenizer/checkpoint
+migration, temporal fusion, video DoRA/QDoRA tuning, inference, NExT-QA
+evaluation, smoke workflow, and memory controls introduced in Phase 35.
+
+### 3. `aarambh-ai-math-formulas-guide.md`
 **The math underneath every phase, explained from zero.**
 
 Once you know *what* each phase does, this file explains the actual formulas doing the work — Dot Product, Matrix Multiplication, Softmax, Scaled Dot-Product Attention, Layer Normalization, GELU Activation, Cross-Entropy Loss, Gradient Descent, Adam Optimizer, RoPE, LoRA Decomposition, Quantization, KL Divergence, and Perplexity.
 
 Every formula comes with a symbol-by-symbol translation (so `Σ`, `∂`, `θ` stop looking scary) and **two fully solved numeric examples** worked by hand, step by step. Read this after the phases guide, whenever you want to understand the actual arithmetic behind a specific phase.
 
-### 3. `ai-ml-dl-dataset-creation-guide.md`
+### 4. `ai-ml-dl-dataset-creation-guide.md`
 **The foundation underneath everything — terminology and where the training data comes from.**
 
 Two parts:
@@ -35,18 +42,20 @@ Two parts:
 
 Read this first if you're completely new to AI in general, or read it alongside the other two whenever data-related phases (like Phase 2, Data Pipeline) come up.
 
-### 4. `aarambh-ai-config-toml-guide.md`
+### 5. `aarambh-ai-config-toml-guide.md`
 **Every field in every `.toml` config file, explained — the practical "turn the dial" layer.**
 
 This walks through the checked-in training and inference configurations in
 `configs/` — Tiny/Small/Medium/Large, CUDA, long-context, MoE, distributed,
-vision, and smoke configurations — field by field:
+vision, video, and smoke configurations — field by field:
 
 - **Top-level settings:** `dataset_path`, `tokenizer_path`, `vocab_size`, `validation_split`, `shuffle`, `resume`, `device`, `dtype`.
 - **`[model]` architecture:** `hidden_dim`, `ffn_dim`, `n_layers`, `n_heads`/`n_kv_heads` (Grouped-Query Attention), `max_seq_len`, `rope_theta`, `norm_eps`, `tie_embeddings`.
 - **`[model.rope_scaling]` (YaRN):** `method`, `factor`, `original_max_seq_len`, `beta_fast`/`beta_slow`, `attn_factor` — how the long-context configs stretch to 16K tokens.
 - **`[[context_schedule]]`:** the staged sequence-length ramp-up used during long-context training.
-- **`[vision]`:** `mode`, CLIP config/weights paths, `caption_jsonl`, `image_root`, `projector_hidden_mult`, `max_caption_tokens`, `max_samples`.
+- **`[vision]`:** image/projector paths and VLM limits.
+- **`[vision.video]`:** video root, sampling budget, temporal encoding,
+  frozen-feature cache, and encoder batch size.
 - **`[train]` hyperparameters:** `lr`, `batch_size`/`grad_accum_steps`, `warmup_steps`, `min_lr_ratio`, `weight_decay`, Adam's `beta1`/`beta2`/`epsilon`, `clip_grad_norm`, checkpointing, and more — each one tied back to the exact formula it came from in the math guide.
 
 Read this whenever you're about to write a new training config, or want to understand exactly what a specific field in an existing one actually does.
@@ -86,7 +95,7 @@ No prior ML background is assumed anywhere in these three files. If something is
 
 ## Keeping these docs updated
 
-The v2 roadmap is complete. Future changes must update the matching guide,
+The v2 roadmap is complete. v3 changes must update the matching runbook,
 configuration reference, architecture section, and changelog in the same pull request.
 
 ---

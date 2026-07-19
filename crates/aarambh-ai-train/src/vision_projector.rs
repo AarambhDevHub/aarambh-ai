@@ -5,8 +5,9 @@ use aarambh_ai_core::{AarambhError, ModelConfig, Result, TokenizerLike, TrainCon
 use aarambh_ai_model::AarambhModel;
 use aarambh_ai_tokenizer::{BpeTokenizer, ENDOFTEXT_ID, IMAGE, IMAGE_END, IMAGE_END_ID, IMAGE_ID};
 use aarambh_ai_vision::{
-    ClipVisionEncoder, ImagePreprocessor, ProjectorConfig, VisionEncoderConfig,
-    VisionPreprocessConfig, VisionProjector, interleave_image_tokens,
+    ClipVisionEncoder, FrameSamplingStrategy, ImagePreprocessor, ProjectorConfig,
+    TemporalEncodingKind, VisionEncoderConfig, VisionPreprocessConfig, VisionProjector,
+    interleave_image_tokens,
 };
 use candle_core::backprop::GradStore;
 use candle_core::{DType, Tensor};
@@ -23,7 +24,7 @@ use crate::schedule::CosineScheduleWithWarmup;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct VisionTrainingConfig {
-    /// Vision mode. Phase 19 uses `projector_pretrain`.
+    /// Vision mode: `projector_pretrain` or `vlm_instruction`.
     pub mode: String,
     /// Frozen base language-model checkpoint.
     pub base_model_path: PathBuf,
@@ -43,6 +44,8 @@ pub struct VisionTrainingConfig {
     pub max_caption_tokens: usize,
     /// Optional cap for local smoke runs.
     pub max_samples: Option<usize>,
+    /// Optional native video understanding configuration.
+    pub video: Option<VideoTrainingConfig>,
 }
 
 impl Default for VisionTrainingConfig {
@@ -58,6 +61,7 @@ impl Default for VisionTrainingConfig {
             projector_hidden_mult: 4,
             max_caption_tokens: 128,
             max_samples: None,
+            video: None,
         }
     }
 }
@@ -65,6 +69,9 @@ impl Default for VisionTrainingConfig {
 impl VisionTrainingConfig {
     /// Validate required fields for projector pretraining.
     pub fn validate(&self) -> Result<()> {
+        if let Some(video) = &self.video {
+            video.validate()?;
+        }
         match self.mode.as_str() {
             "disabled" | "" => Ok(()),
             "projector_pretrain" => {
@@ -93,10 +100,100 @@ impl VisionTrainingConfig {
                 }
                 Ok(())
             }
+            "vlm_instruction" => {
+                if self.base_model_path.as_os_str().is_empty() {
+                    return Err(AarambhError::Config(
+                        "vision.base_model_path is required for vlm_instruction".into(),
+                    ));
+                }
+                if self.clip_config_path.as_os_str().is_empty()
+                    || self.clip_weights_path.as_os_str().is_empty()
+                {
+                    return Err(AarambhError::Config(
+                        "vision.clip_config_path and vision.clip_weights_path are required".into(),
+                    ));
+                }
+                if self.projector_path.is_none() {
+                    return Err(AarambhError::Config(
+                        "vision.projector_path is required for vlm_instruction".into(),
+                    ));
+                }
+                if self.projector_hidden_mult == 0 || self.max_caption_tokens == 0 {
+                    return Err(AarambhError::Config(
+                        "vision projector_hidden_mult and max_caption_tokens must be non-zero"
+                            .into(),
+                    ));
+                }
+                Ok(())
+            }
             other => Err(AarambhError::Config(format!(
-                "unsupported vision.mode '{other}', expected disabled|projector_pretrain"
+                "unsupported vision.mode '{other}', expected disabled|projector_pretrain|vlm_instruction"
             ))),
         }
+    }
+}
+
+/// Native video decoding, sampling, temporal fusion, and cache configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct VideoTrainingConfig {
+    /// Root directory used to resolve relative video paths.
+    pub video_root: PathBuf,
+    /// Number of source frames sampled per example.
+    pub frame_count: usize,
+    /// Maximum accepted frame count.
+    pub max_frame_count: usize,
+    /// Uniform or scene-aware frame selection.
+    pub sampling: FrameSamplingStrategy,
+    /// Minimum source-frame distance between scene-aware choices.
+    pub scene_min_gap: usize,
+    /// Learned or sinusoidal temporal frame positions.
+    pub temporal_encoding: TemporalEncodingKind,
+    /// Optional learned temporal checkpoint for inference or continued training.
+    pub temporal_path: Option<PathBuf>,
+    /// Maximum number of frames passed through CLIP in one forward call.
+    pub encoder_frame_batch_size: usize,
+    /// Number of detached pre-projector video features cached in memory.
+    pub feature_cache_entries: usize,
+}
+
+impl Default for VideoTrainingConfig {
+    fn default() -> Self {
+        Self {
+            video_root: PathBuf::from("."),
+            frame_count: 8,
+            max_frame_count: 8,
+            sampling: FrameSamplingStrategy::Uniform,
+            scene_min_gap: 8,
+            temporal_encoding: TemporalEncodingKind::Learned,
+            temporal_path: None,
+            encoder_frame_batch_size: 8,
+            feature_cache_entries: 16,
+        }
+    }
+}
+
+impl VideoTrainingConfig {
+    /// Validate video resource bounds and temporal configuration.
+    pub fn validate(&self) -> Result<()> {
+        if self.frame_count == 0 || self.max_frame_count == 0 || self.encoder_frame_batch_size == 0
+        {
+            return Err(AarambhError::Config(
+                "vision.video frame counts and encoder_frame_batch_size must be non-zero".into(),
+            ));
+        }
+        if self.frame_count > self.max_frame_count {
+            return Err(AarambhError::Config(format!(
+                "vision.video.frame_count {} exceeds max_frame_count {}",
+                self.frame_count, self.max_frame_count
+            )));
+        }
+        if self.sampling == FrameSamplingStrategy::SceneAware && self.scene_min_gap == 0 {
+            return Err(AarambhError::Config(
+                "vision.video.scene_min_gap must be non-zero".into(),
+            ));
+        }
+        Ok(())
     }
 }
 

@@ -9,7 +9,7 @@ use candle_core::{DType, Device};
 use crate::report::{Scorecard, TaskScore};
 use crate::tasks::{
     AssociativeRecallTask, Gsm8kSubsetTask, HellaSwagTask, HumanEvalLiteTask, ImageCaptionTask,
-    MmluLiteTask, PplTask, PreferenceTask, ToolCallingTask, VqaTask,
+    MmluLiteTask, PplTask, PreferenceTask, ToolCallingTask, VideoQaTask, VqaTask,
 };
 
 /// Evaluation run configuration.
@@ -165,6 +165,9 @@ fn selected_tasks(selectors: &[String], allow_code_exec: bool) -> Result<Vec<Box
             "vqa" | "vision-qa" | "vision_qa" | "vqa-smoke" | "vqa_smoke" => {
                 tasks.push(Box::new(VqaTask));
             }
+            "video-qa" | "video_qa" | "nextqa" | "video-qa-smoke" | "video_qa_smoke" => {
+                tasks.push(Box::new(VideoQaTask));
+            }
             "preference" | "dpo" | "preference-win-rate" | "preference_win_rate" => {
                 tasks.push(Box::new(PreferenceTask));
             }
@@ -176,7 +179,7 @@ fn selected_tasks(selectors: &[String], allow_code_exec: bool) -> Result<Vec<Box
             }
             other => {
                 return Err(AarambhError::Config(format!(
-                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,humaneval,preference,image-caption,vqa,tool-calling,associative-recall,all"
+                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,humaneval,preference,image-caption,vqa,video-qa,tool-calling,associative-recall,all"
                 )));
             }
         }

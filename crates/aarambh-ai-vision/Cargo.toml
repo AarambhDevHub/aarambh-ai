@@ -20,3 +20,6 @@ candle-nn       = { workspace = true }
 image           = { workspace = true }
 serde           = { workspace = true }
 serde_json      = { workspace = true }
+csv             = { workspace = true }
+mp4             = { workspace = true }
+openh264        = { workspace = true }

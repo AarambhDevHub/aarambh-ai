@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "aarambh-ai"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-data",
@@ -23,6 +23,7 @@ dependencies = [
  "aarambh-ai-weights",
  "anyhow",
  "candle-core",
+ "candle-nn",
  "clap",
  "serde",
  "serde_json",
@@ -33,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-core"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "candle-core",
  "serde",
@@ -43,7 +44,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-data"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "candle-core",
@@ -54,7 +55,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-distill"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-inference",
@@ -71,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-eval"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-finetune",
@@ -89,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-finetune"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-kernel",
@@ -109,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-inference"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-model",
@@ -125,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-kernel"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "candle-core",
@@ -139,7 +140,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-model"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-nn",
@@ -150,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-nn"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-kernel",
@@ -161,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-quant"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "candle-core",
@@ -172,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-safety"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-inference",
@@ -183,7 +184,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-selflearn"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-finetune",
@@ -203,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-serve"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-inference",
@@ -227,7 +228,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-tokenizer"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "serde",
@@ -237,7 +238,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-train"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-data",
@@ -254,19 +255,22 @@ dependencies = [
 
 [[package]]
 name = "aarambh-ai-vision"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "candle-core",
  "candle-nn",
+ "csv",
  "image",
+ "mp4",
+ "openh264",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "aarambh-ai-weights"
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 dependencies = [
  "aarambh-ai-core",
  "aarambh-ai-model",
@@ -587,6 +591,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f5d6cac793997bd970000024b2934968efe83b382de4fdcf4fcb46b6ee4ad996"
 dependencies = [
  "find-msvc-tools",
+ "jobserver",
+ "libc",
  "shlex",
 ]
 
@@ -789,6 +795,27 @@ checksum = "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a"
 dependencies = [
  "generic-array",
  "typenum",
+]
+
+[[package]]
+name = "csv"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52cd9d68cf7efc6ddfaaee42e7288d3a99d613d4b50f76ce9827ae0c6e14f938"
+dependencies = [
+ "csv-core",
+ "itoa",
+ "ryu",
+ "serde_core",
+]
+
+[[package]]
+name = "csv-core"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704a3c26996a80471189265814dbc2c257598b96b8a7feae2d31ace646bb9782"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -1615,6 +1642,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "jobserver"
+version = "0.1.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
+dependencies = [
+ "getrandom 0.4.3",
+ "libc",
+]
+
+[[package]]
 name = "js-sys"
 version = "0.3.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1803,6 +1840,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "mp4"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9ef834d5ed55e494a2ae350220314dc4aacd1c43a9498b00e320e0ea352a5c3"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "num-rational",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "nasm-rs"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "706bf8a5e8c8ddb99128c3291d31bd21f4bcde17f0f4c20ec678d85c74faa149"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1883,6 +1943,7 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -1944,6 +2005,27 @@ name = "oorandom"
 version = "11.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
+
+[[package]]
+name = "openh264"
+version = "0.9.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6b2b561d2103303e233779545da757ecd35bad82188d619a6d8901f3007e1ff"
+dependencies = [
+ "openh264-sys2",
+ "wide",
+]
+
+[[package]]
+name = "openh264-sys2"
+version = "0.9.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75a8867e48183bbd9147380227448c065fe456eb30b0ebc68929809c36c30985"
+dependencies = [
+ "cc",
+ "nasm-rs",
+ "walkdir",
+]
 
 [[package]]
 name = "parking_lot"
@@ -2311,6 +2393,15 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "safe_arch"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f7caad094bd561859bcd467734a720c3c1f5d1f338995351fefe2190c45efed"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "safetensors"
@@ -3087,6 +3178,16 @@ dependencies = [
  "env_home",
  "rustix 1.1.4",
  "winsafe",
+]
+
+[[package]]
+name = "wide"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfdfe6a32973f2d1b268b8895845a8a96cac2f0191e72c27cc929036060dbf89"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
 ]
 
 [[package]]

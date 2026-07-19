@@ -33,4 +33,4 @@ pub use mtp_loss::{MtpHeadLoss, MtpLossOutput, combine_mtp_losses, mtp_head_loss
 pub use optim::{AdamW, AdamWConfig, GradMap, TrainableParameter};
 pub use schedule::CosineScheduleWithWarmup;
 pub use trainer::{MtpHeadMetric, Trainer, TrainingMetrics};
-pub use vision_projector::{VisionTrainingConfig, run_projector_pretrain};
+pub use vision_projector::{VideoTrainingConfig, VisionTrainingConfig, run_projector_pretrain};

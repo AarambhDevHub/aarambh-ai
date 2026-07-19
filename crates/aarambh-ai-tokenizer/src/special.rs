@@ -16,6 +16,12 @@ pub const ASSISTANT: &str = "<|assistant|>";
 pub const IMAGE: &str = "<image>";
 /// Image prefix boundary token string.
 pub const IMAGE_END: &str = "<image_end>";
+/// Video placeholder token string.
+pub const VIDEO: &str = "<video>";
+/// Video prefix boundary token string.
+pub const VIDEO_END: &str = "<video_end>";
+/// Separator token inserted between sampled video frames.
+pub const FRAME_SEP: &str = "<frame_sep>";
 
 /// End-of-text token id.
 pub const ENDOFTEXT_ID: u32 = 0;
@@ -35,9 +41,31 @@ pub const ASSISTANT_ID: u32 = 6;
 pub const IMAGE_ID: u32 = 7;
 /// Image prefix boundary token id.
 pub const IMAGE_END_ID: u32 = 8;
+/// Video placeholder token id.
+pub const VIDEO_ID: u32 = 9;
+/// Video prefix boundary token id.
+pub const VIDEO_END_ID: u32 = 10;
+/// Sampled-frame separator token id.
+pub const FRAME_SEP_ID: u32 = 11;
 
 /// Reserved special token table in required id order.
-pub const SPECIAL_TOKENS: [(&str, u32); 9] = [
+pub const SPECIAL_TOKENS: [(&str, u32); 12] = [
+    (ENDOFTEXT, ENDOFTEXT_ID),
+    (PAD, PAD_ID),
+    (BOS, BOS_ID),
+    (THINK_START, THINK_START_ID),
+    (THINK_END, THINK_END_ID),
+    (USER, USER_ID),
+    (ASSISTANT, ASSISTANT_ID),
+    (IMAGE, IMAGE_ID),
+    (IMAGE_END, IMAGE_END_ID),
+    (VIDEO, VIDEO_ID),
+    (VIDEO_END, VIDEO_END_ID),
+    (FRAME_SEP, FRAME_SEP_ID),
+];
+
+/// Image-capable reserved token table accepted by v2 checkpoints.
+pub const VISION_SPECIAL_TOKENS: [(&str, u32); 9] = [
     (ENDOFTEXT, ENDOFTEXT_ID),
     (PAD, PAD_ID),
     (BOS, BOS_ID),

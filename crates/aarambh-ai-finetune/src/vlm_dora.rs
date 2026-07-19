@@ -3,15 +3,20 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use aarambh_ai_core::{AarambhError, Device, ModelConfig, Result, TokenizerLike, TrainConfig};
-use aarambh_ai_tokenizer::{BpeTokenizer, IMAGE, IMAGE_END, IMAGE_ID};
+use aarambh_ai_tokenizer::{
+    BpeTokenizer, FRAME_SEP, FRAME_SEP_ID, IMAGE, IMAGE_END, IMAGE_ID, VIDEO, VIDEO_END, VIDEO_ID,
+};
 use aarambh_ai_train::optim::clip_gradients;
 use aarambh_ai_train::{
-    AdamW, AdamWConfig, CosineScheduleWithWarmup, GradMap, TrainState, VisionTrainingConfig,
-    cross_entropy_loss,
+    AdamW, AdamWConfig, CosineScheduleWithWarmup, GradMap, TrainState, VideoTrainingConfig,
+    VisionTrainingConfig, cross_entropy_loss,
 };
 use aarambh_ai_vision::{
-    ClipVisionEncoder, ImagePreprocessor, ProjectorConfig, VisionEncoderConfig,
-    VisionPreprocessConfig, VisionProjector, VqaExample, interleave_image_tokens, load_vqa_jsonl,
+    ClipVisionEncoder, ImagePreprocessor, ProjectorConfig, TemporalEncoder, TemporalEncodingConfig,
+    TemporalEncodingKind, VideoFeatureCache, VideoFeatureCacheKey, VideoQaExample,
+    VideoSamplingConfig, VisionEncoderConfig, VisionPreprocessConfig, VisionProjector, VqaExample,
+    decode_sampled_video, interleave_image_tokens, interleave_video_tokens, load_video_qa,
+    load_vqa_jsonl,
 };
 use candle_core::backprop::GradStore;
 use candle_core::{DType, Tensor};
@@ -59,6 +64,13 @@ pub struct VlmDoraRunConfig {
     pub train_projector: bool,
 }
 
+/// Configuration for video-language DoRA instruction tuning.
+#[derive(Debug, Clone)]
+pub struct VideoVlmDoraRunConfig {
+    /// Shared image VLM model, optimizer, and vision paths.
+    pub vlm: VlmDoraRunConfig,
+}
+
 /// Metrics emitted by a VLM DoRA optimizer step.
 #[derive(Debug, Clone)]
 pub struct VlmDoraMetrics {
@@ -74,6 +86,8 @@ pub struct VlmDoraMetrics {
     pub dora_grad_norm: f64,
     /// Projector gradient norm when projector training is enabled.
     pub projector_grad_norm: Option<f64>,
+    /// Temporal-position gradient norm for learned video positions.
+    pub temporal_grad_norm: Option<f64>,
     /// Examples processed per second since the last log.
     pub samples_per_second: f64,
 }
@@ -94,7 +108,8 @@ pub struct VlmDoraTrainer {
     output_dir: PathBuf,
     metadata: AdapterMetadata,
     vlm_metadata: VlmArtifactsMetadata,
-    examples: Vec<VqaExample>,
+    examples: Vec<MultimodalExample>,
+    video: Option<VideoTrainingRuntime>,
     shuffle: bool,
     rng: StdRng,
     state: TrainState,
@@ -104,6 +119,40 @@ pub struct VlmDoraTrainer {
     last_loss: Option<f64>,
     samples_since_log: usize,
     last_log_at: Instant,
+}
+
+#[derive(Debug, Clone)]
+enum MultimodalExample {
+    Image(VqaExample),
+    Video(VideoQaExample),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum MediaLayout {
+    Image {
+        patch_count: usize,
+    },
+    Video {
+        frame_count: usize,
+        patch_count: usize,
+    },
+}
+
+struct VideoTrainingRuntime {
+    config: VideoTrainingConfig,
+    temporal: TemporalEncoder,
+    temporal_varmap: VarMap,
+    temporal_optimizer: Option<AdamW>,
+    temporal_pending_grads: GradMap,
+    feature_cache: VideoFeatureCache,
+    encoder_signature: String,
+}
+
+struct VideoRuntimeParts {
+    config: VideoTrainingConfig,
+    temporal: TemporalEncoder,
+    temporal_varmap: VarMap,
+    encoder_signature: String,
 }
 
 impl VlmDoraTrainer {
@@ -121,9 +170,10 @@ impl VlmDoraTrainer {
         output_dir: impl Into<PathBuf>,
         metadata: AdapterMetadata,
         vlm_metadata: VlmArtifactsMetadata,
-        examples: Vec<VqaExample>,
+        examples: Vec<MultimodalExample>,
         shuffle: bool,
         train_projector: bool,
+        video_parts: Option<VideoRuntimeParts>,
         device: candle_core::Device,
     ) -> Result<Self> {
         if train_config.batch_size == 0 || train_config.grad_accum_steps == 0 {
@@ -159,6 +209,34 @@ impl VlmDoraTrainer {
         } else {
             None
         };
+        let video = video_parts
+            .map(|parts| -> Result<VideoTrainingRuntime> {
+                let temporal_optimizer =
+                    if parts.config.temporal_encoding == TemporalEncodingKind::Learned {
+                        let optimizer = AdamW::from_varmap(
+                            &parts.temporal_varmap,
+                            AdamWConfig::from(&train_config),
+                        )?;
+                        if optimizer.parameters().is_empty() {
+                            return Err(AarambhError::Config(
+                                "learned temporal encoding produced zero trainable tensors".into(),
+                            ));
+                        }
+                        Some(optimizer)
+                    } else {
+                        None
+                    };
+                Ok(VideoTrainingRuntime {
+                    feature_cache: VideoFeatureCache::new(parts.config.feature_cache_entries),
+                    config: parts.config,
+                    temporal: parts.temporal,
+                    temporal_varmap: parts.temporal_varmap,
+                    temporal_optimizer,
+                    temporal_pending_grads: GradMap::new(),
+                    encoder_signature: parts.encoder_signature,
+                })
+            })
+            .transpose()?;
 
         let seed = train_config.seed;
         Ok(Self {
@@ -177,6 +255,7 @@ impl VlmDoraTrainer {
             metadata,
             vlm_metadata,
             examples,
+            video,
             shuffle,
             rng: StdRng::seed_from_u64(seed),
             state: TrainState::default(),
@@ -209,7 +288,8 @@ impl VlmDoraTrainer {
                 self.state.epoch += 1;
                 continue;
             }
-            let loss = self.example_loss(&self.examples[example_idx])?;
+            let example = self.examples[example_idx].clone();
+            let loss = self.example_loss(&example)?;
             example_idx += 1;
             let loss_value = loss.to_scalar::<f32>()? as f64;
             if !loss_value.is_finite() {
@@ -234,49 +314,103 @@ impl VlmDoraTrainer {
         self.save_final()
     }
 
-    fn example_loss(&self, example: &VqaExample) -> Result<Tensor> {
-        let image_path = resolve_image_path(&self.vlm_metadata.image_root, &example.image_path);
-        let image = self
-            .preprocess
-            .preprocess_path(&image_path, &self.device)?
-            .unsqueeze(0)?;
-        let patch_tokens = self.encoder.forward(&image)?.detach();
-        let projected = self.projector.forward(&patch_tokens)?;
-        let image_tokens = projected.dims()[1];
-        let (text_tokens, target_start_idx) = self.vlm_tokens(example, image_tokens)?;
+    fn example_loss(&mut self, example: &MultimodalExample) -> Result<Tensor> {
+        let (projected, text_tokens, target_start_idx, media) = match example {
+            MultimodalExample::Image(example) => {
+                let image_path =
+                    resolve_media_path(&self.vlm_metadata.image_root, &example.image_path);
+                let image = self
+                    .preprocess
+                    .preprocess_path(&image_path, &self.device)?
+                    .unsqueeze(0)?;
+                let patch_tokens = self.encoder.forward(&image)?.detach();
+                let projected = self.projector.forward(&patch_tokens)?;
+                let patch_count = projected.dims()[1];
+                let (tokens, target) = self.multimodal_tokens(
+                    &example.question,
+                    &example.answer,
+                    example.thinking.as_deref(),
+                    &format!("{IMAGE}{IMAGE_END}"),
+                    IMAGE_ID,
+                    patch_count,
+                )?;
+                (
+                    projected,
+                    tokens,
+                    target,
+                    MediaLayout::Image { patch_count },
+                )
+            }
+            MultimodalExample::Video(example) => {
+                let (projected, frame_count, patch_count) = self.project_video(example)?;
+                let prefix = video_marker_prefix(frame_count);
+                let (tokens, target) = self.multimodal_tokens(
+                    &example.question,
+                    &example.answer,
+                    example.thinking.as_deref(),
+                    &prefix,
+                    VIDEO_ID,
+                    frame_count * patch_count,
+                )?;
+                (
+                    projected,
+                    tokens,
+                    target,
+                    MediaLayout::Video {
+                        frame_count,
+                        patch_count,
+                    },
+                )
+            }
+        };
         let text = Tensor::from_vec(text_tokens.clone(), (1, text_tokens.len()), &self.device)?;
         let text_embeddings = self.model.embed_tokens(&text)?.detach();
-        let fused = interleave_image_tokens(&text_tokens, &text_embeddings, &projected, IMAGE_ID)?;
+        let fused = match media {
+            MediaLayout::Image { .. } => {
+                interleave_image_tokens(&text_tokens, &text_embeddings, &projected, IMAGE_ID)?
+            }
+            MediaLayout::Video { .. } => interleave_video_tokens(
+                &text_tokens,
+                &text_embeddings,
+                &projected,
+                VIDEO_ID,
+                FRAME_SEP_ID,
+            )?,
+        };
         let logits = self.model.forward_embeddings_train(&fused)?;
-        let (labels, mask) =
-            vlm_labels_and_mask(&text_tokens, target_start_idx, image_tokens, IMAGE_ID)?;
+        let (labels, mask) = multimodal_labels_and_mask(&text_tokens, target_start_idx, media)?;
         let seq_len = labels.len();
         let labels = Tensor::from_vec(labels, (1, seq_len), &self.device)?;
         let mask = Tensor::from_vec(mask, (1, seq_len), &self.device)?;
         cross_entropy_loss(&logits, &labels, &mask)
     }
 
-    fn vlm_tokens(&self, example: &VqaExample, image_tokens: usize) -> Result<(Vec<u32>, usize)> {
-        if image_tokens == 0 || image_tokens > self.model.config().max_seq_len {
+    fn multimodal_tokens(
+        &self,
+        question: &str,
+        answer: &str,
+        thinking: Option<&str>,
+        media_prefix: &str,
+        placeholder_id: u32,
+        inserted_tokens: usize,
+    ) -> Result<(Vec<u32>, usize)> {
+        if inserted_tokens == 0 || inserted_tokens > self.model.config().max_seq_len {
             return Err(AarambhError::Shape(format!(
-                "image token count {image_tokens} is invalid for max_seq_len {}",
+                "multimodal token count {inserted_tokens} is invalid for max_seq_len {}",
                 self.model.config().max_seq_len
             )));
         }
         let template = ChatTemplate;
-        let prefix = format!(
-            "{IMAGE}{IMAGE_END}\n{}",
-            template.prefix(&example.question, None)
-        );
-        let target = match &example.thinking {
-            Some(thinking) => template.thinking_target(thinking, &example.answer),
-            None => template.target(&example.answer),
+        let prefix = format!("{media_prefix}\n{}", template.prefix(question, None));
+        let target = match thinking {
+            Some(thinking) => template.thinking_target(thinking, answer),
+            None => template.target(answer),
         };
         let prefix_ids = self.tokenizer.encode(&prefix)?;
         let mut target_ids = self.tokenizer.encode(&target)?;
-        if !prefix_ids.contains(&IMAGE_ID) {
+        if !prefix_ids.contains(&placeholder_id) {
             return Err(AarambhError::Tokenizer(
-                "VLM prefix did not encode the image placeholder token".into(),
+                "VLM prefix did not encode the multimodal placeholder token".into(),
             ));
         }
         if target_ids.is_empty() {
@@ -285,10 +419,10 @@ impl VlmDoraTrainer {
             ));
         }
 
-        let max_text_tokens = self.model.config().max_seq_len + 1 - image_tokens;
+        let max_text_tokens = self.model.config().max_seq_len + 1 - inserted_tokens;
         if prefix_ids.len() >= max_text_tokens {
             return Err(AarambhError::Shape(format!(
-                "VLM prompt has {} text tokens plus {image_tokens} image tokens, exceeding max_seq_len {}",
+                "VLM prompt has {} text tokens plus {inserted_tokens} media tokens, exceeding max_seq_len {}",
                 prefix_ids.len(),
                 self.model.config().max_seq_len
             )));
@@ -308,6 +442,47 @@ impl VlmDoraTrainer {
         Ok((tokens, target_start_idx))
     }
 
+    fn project_video(&mut self, example: &VideoQaExample) -> Result<(Tensor, usize, usize)> {
+        let video = self.video.as_mut().ok_or_else(|| {
+            AarambhError::Config("video example reached an image-only VLM trainer".into())
+        })?;
+        let path = resolve_media_path(&video.config.video_root, &example.video_path);
+        let sampling = VideoSamplingConfig {
+            frame_count: video.config.frame_count,
+            max_frame_count: video.config.max_frame_count,
+            strategy: video.config.sampling,
+            scene_min_gap: video.config.scene_min_gap,
+        };
+        let cache_key =
+            VideoFeatureCacheKey::new(&path, sampling.clone(), &video.encoder_signature)?;
+        let patch_tokens = match video.feature_cache.get(&cache_key) {
+            Some(features) => features,
+            None => {
+                let sampled = decode_sampled_video(&path, &sampling)?;
+                let pixels = self
+                    .preprocess
+                    .preprocess_rgb_batch(&sampled.frames, &self.device)?;
+                let mut chunks = Vec::new();
+                for start in
+                    (0..sampled.frames.len()).step_by(video.config.encoder_frame_batch_size)
+                {
+                    let len = video
+                        .config
+                        .encoder_frame_batch_size
+                        .min(sampled.frames.len() - start);
+                    chunks.push(self.encoder.forward(&pixels.narrow(0, start, len)?)?);
+                }
+                let references = chunks.iter().collect::<Vec<_>>();
+                let features = Tensor::cat(&references, 0)?.detach();
+                video.feature_cache.insert(cache_key, features.clone());
+                features
+            }
+        };
+        let temporal = video.temporal.forward(&patch_tokens)?;
+        let projected = self.projector.forward(&temporal)?;
+        Ok((projected, patch_tokens.dims()[0], patch_tokens.dims()[1]))
+    }
+
     fn accumulate_gradients(&mut self, grads: &GradStore) -> Result<()> {
         accumulate_for_optimizer(
             grads,
@@ -321,6 +496,16 @@ impl VlmDoraTrainer {
                 projector_optimizer,
                 &mut self.projector_pending_grads,
                 "VLM projector",
+            )?;
+        }
+        if let Some(video) = &mut self.video
+            && let Some(temporal_optimizer) = &video.temporal_optimizer
+        {
+            accumulate_for_optimizer(
+                grads,
+                temporal_optimizer,
+                &mut video.temporal_pending_grads,
+                "VLM temporal encoder",
             )?;
         }
         Ok(())
@@ -346,6 +531,19 @@ impl VlmDoraTrainer {
         } else {
             None
         };
+        let temporal_grad_norm = if let Some(video) = &mut self.video
+            && let Some(temporal_optimizer) = &mut video.temporal_optimizer
+        {
+            let norm = clip_gradients(
+                &mut video.temporal_pending_grads,
+                self.train_config.clip_grad_norm,
+            )?;
+            temporal_optimizer.step(&video.temporal_pending_grads, lr)?;
+            video.temporal_pending_grads.clear();
+            Some(norm)
+        } else {
+            None
+        };
 
         self.state.step += 1;
         let metrics = VlmDoraMetrics {
@@ -355,6 +553,7 @@ impl VlmDoraTrainer {
             lr,
             dora_grad_norm,
             projector_grad_norm,
+            temporal_grad_norm,
             samples_per_second: self.samples_per_second_since_last_log(),
         };
         self.after_optimizer_step(&metrics)
@@ -370,14 +569,19 @@ impl VlmDoraTrainer {
                 .projector_grad_norm
                 .map(|value| format!(" projector_grad_norm={value:.4}"))
                 .unwrap_or_default();
+            let temporal = metrics
+                .temporal_grad_norm
+                .map(|value| format!(" temporal_grad_norm={value:.4}"))
+                .unwrap_or_default();
             println!(
-                "vlm_dora step={} loss={:.4} ppl={:.2} lr={:.6} dora_grad_norm={:.4}{} samples/s={:.2}",
+                "vlm_dora step={} loss={:.4} ppl={:.2} lr={:.6} dora_grad_norm={:.4}{}{} samples/s={:.2}",
                 metrics.step,
                 metrics.loss,
                 metrics.perplexity,
                 metrics.lr,
                 metrics.dora_grad_norm,
                 projector,
+                temporal,
                 metrics.samples_per_second
             );
         }
@@ -407,6 +611,7 @@ impl VlmDoraTrainer {
         save_vlm_artifacts(
             &self.dora_varmap,
             &self.projector_varmap,
+            self.video.as_ref().map(|video| &video.temporal_varmap),
             &self.metadata,
             &self.vlm_metadata,
             &self.state,
@@ -422,6 +627,7 @@ impl VlmDoraTrainer {
         save_vlm_artifacts(
             &self.dora_varmap,
             &self.projector_varmap,
+            self.video.as_ref().map(|video| &video.temporal_varmap),
             &self.metadata,
             &self.vlm_metadata,
             &self.state,
@@ -489,7 +695,10 @@ pub fn run_vlm_dora_from_config(config: VlmDoraRunConfig) -> Result<()> {
     let mut projector_varmap = projector_varmap;
     projector_varmap.load(&config.projector_path)?;
 
-    let examples = load_vqa_jsonl(&config.data_path, config.vision.max_samples)?;
+    let examples = load_vqa_jsonl(&config.data_path, config.vision.max_samples)?
+        .into_iter()
+        .map(MultimodalExample::Image)
+        .collect();
     let metadata = AdapterMetadata::new_with_method(
         model_config,
         config.lora_config.clone(),
@@ -505,6 +714,7 @@ pub fn run_vlm_dora_from_config(config: VlmDoraRunConfig) -> Result<()> {
         clip_config_path: config.vision.clip_config_path.display().to_string(),
         clip_weights_path: config.vision.clip_weights_path.display().to_string(),
         image_root: config.vision.image_root.clone(),
+        video: None,
     };
     let mut trainer = VlmDoraTrainer::new(
         model,
@@ -521,6 +731,148 @@ pub fn run_vlm_dora_from_config(config: VlmDoraRunConfig) -> Result<()> {
         examples,
         config.shuffle,
         config.train_projector,
+        None,
+        candle_device,
+    )?;
+    trainer.train()
+}
+
+/// Build and run a video-language DoRA trainer using the shared VLM training loop.
+pub fn run_video_vlm_dora_from_config(config: VideoVlmDoraRunConfig) -> Result<()> {
+    let config = config.vlm;
+    config.lora_config.validate()?;
+    let video_config = config.vision.video.clone().ok_or_else(|| {
+        AarambhError::Config("video VLM training requires a [vision.video] config block".into())
+    })?;
+    video_config.validate()?;
+    let candle_device = config.device.to_candle()?;
+    let tokenizer = BpeTokenizer::from_pretrained(&config.tokenizer_path)?;
+    tokenizer.validate_video_special_tokens()?;
+    let mut model_config = config.model_config.clone();
+    model_config.vocab_size = tokenizer.vocab_size();
+    if model_config.moe.is_some() {
+        return Err(AarambhError::Config(
+            "video VLM DoRA training currently requires a dense base model".into(),
+        ));
+    }
+    let base = aarambh_ai_weights::load_any_model_with_dtype(
+        &config.base_model_path,
+        &model_config,
+        &candle_device,
+        config.dtype,
+    )?;
+    let base_tensors = base.named_tensors();
+    drop(base);
+    let (model, dora_varmap) = DoraAarambhModel::from_tensors(
+        &model_config,
+        &base_tensors,
+        &config.lora_config,
+        config.qdora,
+        &candle_device,
+    )?;
+    eprintln!(
+        "video VLM adapter params: {} / {} ({:.3}%)",
+        model.adapter_param_count(),
+        model.base_param_count(),
+        model.trainable_ratio() * 100.0
+    );
+
+    let encoder_config = VisionEncoderConfig::from_json(&config.vision.clip_config_path)?;
+    let encoder = ClipVisionEncoder::load_pretrained(
+        &config.vision.clip_weights_path,
+        encoder_config.clone(),
+        &candle_device,
+        config.dtype,
+    )?;
+    let preprocess = ImagePreprocessor::new(VisionPreprocessConfig {
+        image_size: encoder_config.image_size,
+        ..VisionPreprocessConfig::default()
+    })?;
+    let projector_varmap = VarMap::new();
+    let projector_vb = VarBuilder::from_varmap(&projector_varmap, config.dtype, &candle_device);
+    let projector = VisionProjector::new(
+        ProjectorConfig {
+            vit_d_model: encoder_config.vit_d_model,
+            llm_d_model: model_config.hidden_dim,
+            hidden_mult: config.vision.projector_hidden_mult,
+        },
+        projector_vb,
+    )?;
+    let mut projector_varmap = projector_varmap;
+    projector_varmap.load(&config.projector_path)?;
+
+    let temporal_varmap = VarMap::new();
+    let temporal_vb = VarBuilder::from_varmap(&temporal_varmap, config.dtype, &candle_device);
+    let temporal = TemporalEncoder::new(
+        TemporalEncodingConfig {
+            max_frames: video_config.max_frame_count,
+            hidden_dim: encoder_config.vit_d_model,
+            kind: video_config.temporal_encoding,
+        },
+        (video_config.temporal_encoding == TemporalEncodingKind::Learned).then_some(temporal_vb),
+    )?;
+    let mut temporal_varmap = temporal_varmap;
+    if let Some(path) = &video_config.temporal_path {
+        temporal_varmap.load(path)?;
+    }
+
+    let examples = load_video_qa(&config.data_path, config.vision.max_samples)?
+        .into_iter()
+        .map(MultimodalExample::Video)
+        .collect();
+    let metadata = AdapterMetadata::new_with_method(
+        model_config,
+        config.lora_config.clone(),
+        Some(config.base_model_path.display().to_string()),
+        config.qdora,
+        AdapterMethod::Dora,
+    );
+    let temporal_path = (video_config.temporal_encoding == TemporalEncodingKind::Learned)
+        .then(|| "temporal.safetensors".to_string());
+    let vlm_metadata = VlmArtifactsMetadata {
+        format_version: 2,
+        projector_path: "projector.safetensors".into(),
+        train_projector: config.train_projector,
+        base_projector_path: config.projector_path.display().to_string(),
+        clip_config_path: config.vision.clip_config_path.display().to_string(),
+        clip_weights_path: config.vision.clip_weights_path.display().to_string(),
+        image_root: config.vision.image_root.clone(),
+        video: Some(VideoArtifactsMetadata {
+            temporal_path,
+            video_root: video_config.video_root.clone(),
+            frame_count: video_config.frame_count,
+            sampling: video_config.sampling,
+            temporal_encoding: video_config.temporal_encoding,
+        }),
+    };
+    let encoder_signature = format!(
+        "{}:{}:{}:{}",
+        config.vision.clip_weights_path.display(),
+        encoder_config.image_size,
+        encoder_config.patch_size,
+        encoder_config.vit_d_model
+    );
+    let mut trainer = VlmDoraTrainer::new(
+        model,
+        dora_varmap,
+        projector,
+        projector_varmap,
+        encoder,
+        preprocess,
+        tokenizer,
+        config.train_config,
+        config.output_dir,
+        metadata,
+        vlm_metadata,
+        examples,
+        config.shuffle,
+        config.train_projector,
+        Some(VideoRuntimeParts {
+            config: video_config,
+            temporal,
+            temporal_varmap,
+            encoder_signature,
+        }),
         candle_device,
     )?;
     trainer.train()
@@ -535,6 +887,16 @@ struct VlmArtifactsMetadata {
     clip_config_path: String,
     clip_weights_path: String,
     image_root: PathBuf,
+    video: Option<VideoArtifactsMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct VideoArtifactsMetadata {
+    temporal_path: Option<String>,
+    video_root: PathBuf,
+    frame_count: usize,
+    sampling: aarambh_ai_vision::FrameSamplingStrategy,
+    temporal_encoding: TemporalEncodingKind,
 }
 
 fn accumulate_for_optimizer(
@@ -569,6 +931,7 @@ fn accumulate_for_optimizer(
 fn save_vlm_artifacts(
     dora_varmap: &VarMap,
     projector_varmap: &VarMap,
+    temporal_varmap: Option<&VarMap>,
     metadata: &AdapterMetadata,
     vlm_metadata: &VlmArtifactsMetadata,
     state: &TrainState,
@@ -577,6 +940,11 @@ fn save_vlm_artifacts(
     let output_dir = output_dir.as_ref();
     save_adapter(dora_varmap, metadata, output_dir)?;
     projector_varmap.save(output_dir.join("projector.safetensors"))?;
+    if let Some(temporal_varmap) = temporal_varmap
+        && !temporal_varmap.all_vars().is_empty()
+    {
+        temporal_varmap.save(output_dir.join("temporal.safetensors"))?;
+    }
     write_json(output_dir.join("vlm_config.json"), vlm_metadata)?;
     write_json(output_dir.join("train_state.json"), state)?;
     Ok(())
@@ -588,27 +956,53 @@ fn write_json(path: impl AsRef<Path>, value: &impl Serialize) -> Result<()> {
     Ok(())
 }
 
-fn resolve_image_path(root: &Path, image_path: &Path) -> PathBuf {
-    if image_path.is_absolute() {
-        image_path.to_path_buf()
+fn resolve_media_path(root: &Path, media_path: &Path) -> PathBuf {
+    if media_path.is_absolute() {
+        media_path.to_path_buf()
     } else {
-        root.join(image_path)
+        root.join(media_path)
     }
 }
 
-fn vlm_labels_and_mask(
+fn video_marker_prefix(frame_count: usize) -> String {
+    let mut prefix = String::from(VIDEO);
+    for _ in 1..frame_count {
+        prefix.push_str(FRAME_SEP);
+    }
+    prefix.push_str(VIDEO_END);
+    prefix
+}
+
+fn multimodal_labels_and_mask(
     text_tokens: &[u32],
     target_start_idx: usize,
-    image_token_count: usize,
-    image_placeholder_id: u32,
+    media: MediaLayout,
 ) -> Result<(Vec<u32>, Vec<u32>)> {
+    let (placeholder_id, separator_id, frame_count, patch_count) = match media {
+        MediaLayout::Image { patch_count } => (IMAGE_ID, None, 1, patch_count),
+        MediaLayout::Video {
+            frame_count,
+            patch_count,
+        } => (VIDEO_ID, Some(FRAME_SEP_ID), frame_count, patch_count),
+    };
     let mut items = Vec::new();
+    let mut inserted_frames = 0usize;
     for (idx, token) in text_tokens.iter().enumerate() {
-        if *token == image_placeholder_id {
-            items.extend(std::iter::repeat_n((None, idx), image_token_count));
+        if *token == placeholder_id {
+            items.extend(std::iter::repeat_n((None, idx), patch_count));
+            inserted_frames = 1;
         } else {
             items.push((Some(*token), idx));
+            if separator_id == Some(*token) {
+                items.extend(std::iter::repeat_n((None, idx), patch_count));
+                inserted_frames += 1;
+            }
         }
+    }
+    if inserted_frames != frame_count {
+        return Err(AarambhError::Shape(format!(
+            "expected {frame_count} expanded media frames, found {inserted_frames}"
+        )));
     }
     let mut labels = Vec::with_capacity(items.len());
     let mut mask = Vec::with_capacity(items.len());
@@ -644,10 +1038,34 @@ mod tests {
     #[test]
     fn vlm_loss_mask_zeros_image_and_question_tokens() {
         let text = vec![IMAGE_ID, IMAGE_END_ID, 10, 11, 12, ENDOFTEXT_ID];
-        let (labels, mask) = vlm_labels_and_mask(&text, 4, 3, IMAGE_ID).unwrap();
+        let (labels, mask) =
+            multimodal_labels_and_mask(&text, 4, MediaLayout::Image { patch_count: 3 }).unwrap();
         assert_eq!(labels.len(), 8);
         assert_eq!(mask, vec![0, 0, 0, 0, 0, 1, 1, 0]);
         assert_eq!(labels[5], 12);
         assert_eq!(labels[6], ENDOFTEXT_ID);
+    }
+
+    #[test]
+    fn video_marker_prefix_has_one_separator_per_additional_frame() {
+        assert_eq!(
+            video_marker_prefix(3),
+            format!("{VIDEO}{FRAME_SEP}{FRAME_SEP}{VIDEO_END}")
+        );
+    }
+
+    #[test]
+    fn video_loss_mask_includes_separator_but_not_frame_patches() {
+        let text = vec![VIDEO_ID, FRAME_SEP_ID, 10, 20, 21, ENDOFTEXT_ID];
+        let (_, mask) = multimodal_labels_and_mask(
+            &text,
+            4,
+            MediaLayout::Video {
+                frame_count: 2,
+                patch_count: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(mask, vec![0, 0, 0, 0, 0, 0, 1, 1, 0]);
     }
 }

@@ -1,9 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use aarambh_ai_core::TokenizerLike;
+use aarambh_ai_tokenizer::{BpeTokenizer, IMAGE_END_ID, IMAGE_ID};
 use aarambh_ai_train::TrainingRunConfig;
 use aarambh_ai_weights::{
-    GgufFormat, HfArch, convert_hf_with_arch, load_any_model, save_gguf, save_model,
+    GgufFormat, HfArch, VocabularyExpansion, convert_hf_with_arch, expand_safetensors_vocabulary,
+    load_any_model, save_gguf, save_model,
 };
 use clap::Args;
 
@@ -21,12 +24,62 @@ pub struct ConvertArgs {
     pub gguf: bool,
     #[arg(long, default_value = "q4_k_m")]
     pub format: String,
+    #[arg(long, requires = "tokenizer", requires = "output_tokenizer")]
+    pub upgrade_video_vocab: bool,
+    #[arg(long)]
+    pub tokenizer: Option<PathBuf>,
+    #[arg(long)]
+    pub output_tokenizer: Option<PathBuf>,
 }
 
 pub fn run(args: ConvertArgs) -> anyhow::Result<()> {
     let run_config = TrainingRunConfig::from_toml(&args.config)?;
     let device = run_config.device()?.to_candle()?;
     write_parent_dir(&args.output)?;
+
+    if args.upgrade_video_vocab {
+        if args.gguf {
+            return Err(anyhow::anyhow!(
+                "--upgrade-video-vocab requires SafeTensors input; migrate first, then quantise the migrated checkpoint"
+            ));
+        }
+        let tokenizer_path = args.tokenizer.as_ref().expect("required by clap");
+        let output_tokenizer = args.output_tokenizer.as_ref().expect("required by clap");
+        let tokenizer = BpeTokenizer::from_pretrained(tokenizer_path)?;
+        if tokenizer.validate_video_special_tokens().is_ok() {
+            return Err(anyhow::anyhow!(
+                "tokenizer {} already contains the Phase 35 video vocabulary",
+                tokenizer_path.display()
+            ));
+        }
+        tokenizer.validate_vision_special_tokens()?;
+        let old_vocab_size = tokenizer.vocab_size();
+        let upgraded = tokenizer.upgraded_for_video()?;
+        write_parent_dir(output_tokenizer)?;
+        let report = expand_safetensors_vocabulary(
+            &args.input,
+            &args.output,
+            old_vocab_size,
+            &VocabularyExpansion {
+                insertion_id: 9,
+                source_ids: vec![
+                    IMAGE_ID as usize,
+                    IMAGE_END_ID as usize,
+                    IMAGE_END_ID as usize,
+                ],
+            },
+        )?;
+        upgraded.save_pretrained(output_tokenizer)?;
+        eprintln!(
+            "upgraded video vocabulary {} -> {} rows across {} tensors; model={} tokenizer={}",
+            report.old_vocab_size,
+            report.new_vocab_size,
+            report.expanded_tensors,
+            args.output.display(),
+            output_tokenizer.display()
+        );
+        return Ok(());
+    }
 
     if args.gguf {
         let format = GgufFormat::from_name(&args.format)?;

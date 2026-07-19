@@ -22,6 +22,8 @@ pub mod ppl_task;
 pub mod preference;
 /// Grammar-constrained function-selection task.
 pub mod tool_calling;
+/// Native video question-answering task.
+pub mod video_qa;
 /// Vision-question-answering task.
 pub mod vqa;
 
@@ -34,6 +36,7 @@ pub use mmlu_lite::MmluLiteTask;
 pub use ppl_task::PplTask;
 pub use preference::PreferenceTask;
 pub use tool_calling::ToolCallingTask;
+pub use video_qa::VideoQaTask;
 pub use vqa::VqaTask;
 
 fn read_jsonl<T: DeserializeOwned>(path: &Path, max_examples: Option<usize>) -> Result<Vec<T>> {

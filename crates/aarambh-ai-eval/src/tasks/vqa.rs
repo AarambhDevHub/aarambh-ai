@@ -69,7 +69,10 @@ impl EvalTask for VqaTask {
     }
 }
 
-fn load_vision_runtime(context: &EvalContext, config: &EvalConfig) -> Result<VisionModel> {
+pub(crate) fn load_vision_runtime(
+    context: &EvalContext,
+    config: &EvalConfig,
+) -> Result<VisionModel> {
     let config_path = config
         .config_path
         .as_ref()
@@ -140,7 +143,7 @@ fn build_prompt_embeddings(
     interleave_image_tokens(&prompt_ids, &text_embeddings, &image_embeddings, IMAGE_ID)
 }
 
-fn greedy_generate_from_embeddings(
+pub(crate) fn greedy_generate_from_embeddings(
     context: &EvalContext,
     embeddings: &Tensor,
     max_new_tokens: usize,
