@@ -1,0 +1,44 @@
+tokenizer_path = "checkpoints/video_smoke/tokenizer.json"
+vocab_size = 8003
+validation_split = 0.0
+shuffle = false
+resume = false
+device = "cpu"
+dtype = "f32"
+
+[model]
+vocab_size = 8003
+hidden_dim = 384
+ffn_dim = 1024
+n_layers = 8
+n_heads = 6
+n_kv_heads = 2
+max_seq_len = 512
+rope_theta = 10000.0
+norm_eps = 0.00001
+tie_embeddings = true
+
+[train]
+checkpoint_dir = "adapters/video_qa_smoke"
+
+[vision]
+mode = "vlm_instruction"
+base_model_path = "checkpoints/video_smoke/model.safetensors"
+clip_config_path = "data/vision_smoke/clip_tiny_config.json"
+clip_weights_path = "data/vision_smoke/clip_tiny.safetensors"
+projector_path = "adapters/video_qa_smoke/projector.safetensors"
+image_root = "data/vision_smoke/images"
+projector_hidden_mult = 1
+max_caption_tokens = 32
+max_samples = 4
+
+[vision.video]
+video_root = "data/video_smoke/videos"
+frame_count = 2
+max_frame_count = 8
+sampling = "uniform"
+scene_min_gap = 2
+temporal_encoding = "learned"
+temporal_path = "adapters/video_qa_smoke/temporal.safetensors"
+encoder_frame_batch_size = 2
+feature_cache_entries = 4

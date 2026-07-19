@@ -885,102 +885,104 @@ post-hoc quantization remains available.
 
 ## 44. Video Understanding
 
-v2's vision pipeline (`ARCHITECTURE_V2.md` §24–25) is images-only: a
-frozen ViT encoder produces patch embeddings, a trainable `Projector` MLP
-maps them into the language model's hidden width, and
-`interleave_image_tokens()` splices the projected tokens into the
-surrounding text token stream at the position of an `<image>` marker.
+Phase 35 extends v2's image pipeline (`ARCHITECTURE_V2.md` §24–25) without
+adding a second visual backbone. A native decoder samples RGB frames, the
+existing frozen CLIP-style ViT encodes them, temporal positions distinguish
+frame order, and the existing projector maps every patch into the language
+model width.
 
 ### 44.1 Frame sampling
 
 ```rust
-pub struct FrameSampler {
-    pub target_frame_count: usize,   // default 8
-    pub strategy: SamplingStrategy,
+pub struct VideoSamplingConfig {
+    pub frame_count: usize,      // default 8, hard bounded
+    pub max_frame_count: usize,
+    pub strategy: FrameSamplingStrategy,
+    pub scene_min_gap: usize,
 }
 
-pub enum SamplingStrategy {
-    /// Frames taken at even intervals across the video's duration.
+pub enum FrameSamplingStrategy {
     Uniform,
-    /// Frames concentrated around detected shot/scene boundaries
-    /// (simple frame-difference heuristic, not a learned model) —
-    /// useful when the video has few, information-dense cuts rather
-    /// than continuous smooth motion.
-    SceneChangeAware { min_gap_frames: usize },
+    SceneAware,
 }
+
+pub fn decode_sampled_video(path: impl AsRef<Path>, config: &VideoSamplingConfig)
+    -> Result<SampledVideo>;
 ```
 
-Each sampled frame is decoded to a plain image and flows through the
-*exact same* frozen ViT encoder v2 already uses — there is no
-video-specific encoder architecture. This is a deliberate reuse
-decision: the frozen encoder's per-image representations are already
-general-purpose visual features; video-specific structure is added
-entirely in the fusion step that follows, not in the encoder itself.
+`video.rs` reads MP4 metadata with `mp4` and decodes H.264 through bundled
+OpenH264. The runtime does not spawn FFmpeg and rejects unsupported containers
+or codecs explicitly. Uniform sampling is endpoint-inclusive. Scene-aware
+sampling ranks 32x32 luma mean-absolute-difference boundaries, enforces a
+minimum source-frame gap, and fills any remaining positions uniformly. A
+second decode pass avoids retaining every full-resolution frame for scene
+selection.
+
+Frames are preprocessed on CPU, stacked contiguously, transferred to the model
+device once per chunk, and encoded in configurable batches. A bounded FIFO
+cache keys frozen pre-projector CLIP features by canonical path, file metadata,
+sampler configuration, and encoder signature. Trainable projector and temporal
+outputs are never cached.
 
 ### 44.2 Temporal fusion
 
 ```rust
-pub struct TemporalPositionEmbedding {
-    /// One additional embedding vector per sampled frame index,
-    /// added to that frame's projected patch tokens before fusion.
-    /// Learned (a small embedding table indexed by frame position)
-    /// by default; a sinusoidal variant is available as a
-    /// parameter-free alternative, following the same learned-vs-
-    /// sinusoidal choice v1's RoPE section already documents for
-    /// token position.
-    embeddings: EmbeddingKind,
+pub enum TemporalEncodingKind {
+    Learned,
+    Sinusoidal,
 }
 
 pub fn interleave_video_tokens(
-    text_tokens: &[TokenId],
-    frame_token_blocks: &[Vec<Tensor>],   // one Vec<Tensor> per sampled frame
-    temporal_embed: &TemporalPositionEmbedding,
-    video_marker_position: usize,
-) -> Vec<Tensor> {
-    // Extends v2's interleave_image_tokens() (ARCHITECTURE_V2.md §24)
-    // to handle a SEQUENCE of frame-token blocks rather than a single
-    // image's tokens. Each block has the corresponding frame's temporal
-    // embedding added before splicing. The single-frame case
-    // (frame_token_blocks.len() == 1) must reduce to byte-identical
-    // output versus v2's interleave_image_tokens() — enforced by a
-    // regression test, not just documented as intent.
-    ...
-}
+    text_tokens: &[u32],
+    text_embeddings: &Tensor,               // [1, text, lm_hidden]
+    frame_embeddings: &Tensor,              // [frames, patches, lm_hidden]
+    video_placeholder_id: u32,
+    frame_separator_id: u32,
+) -> Result<Tensor>;
 ```
 
-Without the temporal embedding, a sequence of sampled frames would be
-architecturally indistinguishable from one shuffled batch of unrelated
-images — the model would have no signal that frame 3 comes after frame 2,
-only that some set of images co-occurred in context. This is the one
-genuinely new trainable component video adds; everything else (encoder,
-base projector shape) is reused unchanged from v2.
+`temporal.rs` adds one offset to every patch in a frame before projection.
+Position zero is exactly zero for both implementations, and a one-frame input
+returns the original tensor unchanged. This gives migrated `<video>` and
+`<video_end>` embeddings exact image-path compatibility while later positions
+encode ordering. Learned temporal weights participate in the same accumulation,
+clipping, optimizer step, and artifact save cadence as the projector.
+
+The canonical text prefix for `F` frames is `<video>`, followed by `F - 1`
+`<frame_sep>` tokens, then `<video_end>`. Fusion replaces `<video>` with frame
+zero and inserts each later frame immediately after its separator embedding.
+Exactly one placeholder and exactly `F - 1` separators are required.
 
 ### 44.3 Data schema and special tokens
 
 ```json
-{"video_path": "clips/v001.mp4", "question": "What happens after the ball leaves the ramp?", "answer": "It rolls across the table and falls off the edge.", "num_frames": 8}
+{"video": "clips/v001.mp4", "question": "What happens after the ball leaves the ramp?", "answer": "It rolls across the table."}
 ```
 
-New reserved tokens `<video>`, `<video_end>`, `<frame_sep>` are allocated
-with IDs immediately following v2's existing `<image>`/`<image_end>`
-reserved range (`ARCHITECTURE_V2.md` §24), keeping the tokenizer's
-reserved-ID block contiguous and documented in one place.
+`video_data.rs` accepts normalized JSONL and official NExT-QA CSV. NExT-QA's
+five choices are normalized to A-E text and a single-letter target. Frame count
+belongs to runtime/training configuration so one dataset can be evaluated at
+different compute budgets.
+
+Reserved IDs are `<video>` = 9, `<video_end>` = 10, and `<frame_sep>` = 11.
+Legacy image-era token IDs at 9 and above shift by three without changing their
+decoded strings or merge ranks. SafeTensors vocabulary migration inserts three
+rows at ID 9, cloning the existing image/image-end rows for function-preserving
+initialization. GGUF must be migrated in SafeTensors form before quantization.
 
 ### 44.4 Fine-tuning
 
-Video instruction tuning reuses v2 Phase 20's DoRA-adapted VLM training
-path (`vlm_dora.rs`) directly — the loss-masking scheme, the adapter
-placement, and the optimiser settings are all unchanged from v2; the
-only difference is that a training example now supplies a *sequence* of
-frame embeddings (via §44.2's fusion path) rather than one image's
-embeddings.
+`vlm_dora.rs` owns one trainer over `MultimodalExample::Image` and
+`MultimodalExample::Video`. Both modalities share answer-only labels, DoRA or
+QDoRA projections, optimizer scheduling, gradient clipping, checkpoint
+metadata, and projector training. Video adds only decode/sample/cache/temporal
+preparation. CLI commands are `finetune video-dora` and `video-qdora`.
 
-This mirrors, deliberately, how v2's own vision integration was framed
-as a reuse of the existing token-stream architecture rather than a
-separate model bolted alongside — video extends that same principle one
-level further, keeping the frozen-encoder-plus-trainable-projector
-economics that make v2's vision approach cheap to train in the first
-place.
+Inference accepts `--video`, `--frames`, and `--frame-sampling`; existing
+streaming safety remains token-by-token after multimodal prefill. The eval
+harness exposes `video-qa` and `nextqa` selectors with normalized exact-match
+accuracy. Phase 35 is visual-only: audio, server video uploads, video
+self-learning, and video speculative/tool paths remain outside this boundary.
 
 ---
 
@@ -1398,7 +1400,7 @@ crates in the same or lower layer, enforced by `Cargo.toml`.
 
 | Dependency | Allowed crates | Reason |
 |---|---|---|
-| Video container decode crate (pure-Rust or permissively-licensed) | `aarambh-ai-vision` | Frame extraction only, no network calls |
+| `mp4` + bundled `openh264` | `aarambh-ai-vision` | Native H.264 MP4 frame extraction only, no network calls or runtime FFmpeg |
 | PDF/document rasterisation crate | `aarambh-ai-vision` | Page-to-image rendering only, no network calls |
 
 **Still forbidden everywhere, unchanged from v1/v2:** PyTorch bindings

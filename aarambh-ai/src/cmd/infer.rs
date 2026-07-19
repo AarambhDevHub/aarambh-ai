@@ -19,14 +19,18 @@ use aarambh_ai_selflearn::{
     VisionVerifierKind, require_vision_hardware,
 };
 use aarambh_ai_tokenizer::{
-    ASSISTANT, BpeTokenizer, IMAGE, IMAGE_END, IMAGE_ID, THINK_END_ID, THINK_START_ID, USER,
+    ASSISTANT, BpeTokenizer, FRAME_SEP, FRAME_SEP_ID, IMAGE, IMAGE_END, IMAGE_ID, THINK_END_ID,
+    THINK_START_ID, USER, VIDEO, VIDEO_END, VIDEO_ID,
 };
 use aarambh_ai_train::TrainingRunConfig;
 use aarambh_ai_vision::{
-    ClipVisionEncoder, ImagePreprocessor, ProjectorConfig, VisionEncoderConfig, VisionModel,
-    VisionPreprocessConfig, VisionProjector, interleave_image_tokens,
+    ClipVisionEncoder, FrameSamplingStrategy, ImagePreprocessor, ProjectorConfig, TemporalEncoder,
+    TemporalEncodingConfig, TemporalEncodingKind, VideoSamplingConfig, VisionEncoderConfig,
+    VisionModel, VisionPreprocessConfig, VisionProjector, decode_sampled_video,
+    interleave_image_tokens, interleave_video_tokens,
 };
 use candle_core::Tensor;
+use candle_nn::{VarBuilder, VarMap};
 use clap::Args;
 use serde::Deserialize;
 
@@ -45,6 +49,12 @@ pub struct InferArgs {
     pub tokenizer: Option<PathBuf>,
     #[arg(long)]
     pub image: Option<PathBuf>,
+    #[arg(long, conflicts_with = "image")]
+    pub video: Option<PathBuf>,
+    #[arg(long)]
+    pub frames: Option<usize>,
+    #[arg(long)]
+    pub frame_sampling: Option<String>,
     #[arg(long)]
     pub prompt: String,
     #[arg(long, default_value_t = 256)]
@@ -107,6 +117,11 @@ struct CheckpointPointer {
 }
 
 pub fn run(args: InferArgs) -> anyhow::Result<()> {
+    if args.video.is_none() && (args.frames.is_some() || args.frame_sampling.is_some()) {
+        return Err(anyhow::anyhow!(
+            "--frames and --frame-sampling require --video"
+        ));
+    }
     let run_config = TrainingRunConfig::from_toml(&args.config)?;
     let run_device = run_config.device()?;
     let dtype = run_config.dtype_for_device(&run_device)?.to_candle();
@@ -161,6 +176,13 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
         );
     }
     if self_learn_mode.is_enabled() {
+        if args.video.is_some() {
+            return Err(AarambhError::Unsupported(
+                "video self-learning is not part of Phase 35; use text/image self-learning or disable --self-learn"
+                    .into(),
+            )
+            .into());
+        }
         if let Some(image_path) = args.image.clone() {
             return run_vision_self_learn_infer(
                 &args,
@@ -201,6 +223,20 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
         dtype,
     )?;
     let tokenizer_for_view = engine.tokenizer().clone();
+    if let Some(video_path) = args.video.clone() {
+        return run_video_infer(
+            &args,
+            &run_config,
+            engine,
+            video_path,
+            dtype,
+            config,
+            prompt,
+            safety_mode,
+            thinking_mode,
+            tokenizer_for_view,
+        );
+    }
     if let Some(image_path) = args.image.clone() {
         return run_vision_infer(
             &args,
@@ -471,9 +507,10 @@ fn validate_speculative_args(
         }
         return Ok(());
     }
-    if args.image.is_some() {
+    if args.image.is_some() || args.video.is_some() {
         return Err(AarambhError::Unsupported(
-            "speculative decoding supports text inference only; --image is not supported".into(),
+            "speculative decoding supports text inference only; --image/--video are not supported"
+                .into(),
         )
         .into());
     }
@@ -546,9 +583,10 @@ fn load_tool_calling_config(
         }
         return Ok(None);
     };
-    if args.image.is_some() {
+    if args.image.is_some() || args.video.is_some() {
         return Err(AarambhError::Unsupported(
-            "Phase 26 tool calling supports text inference only; --image is not supported".into(),
+            "Phase 26 tool calling supports text inference only; --image/--video are not supported"
+                .into(),
         )
         .into());
     }
@@ -753,9 +791,143 @@ fn run_vision_infer(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_video_infer(
+    args: &InferArgs,
+    run_config: &TrainingRunConfig,
+    mut engine: InferenceEngine,
+    video_path: PathBuf,
+    dtype: candle_core::DType,
+    config: GenerationConfig,
+    prompt: String,
+    safety_mode: SafetyMode,
+    thinking_mode: ThinkingMode,
+    tokenizer_for_view: BpeTokenizer,
+) -> anyhow::Result<()> {
+    let runtime = load_vision_runtime(run_config, engine.device(), dtype)?;
+    let video_config = run_config
+        .vision
+        .as_ref()
+        .and_then(|vision| vision.video.as_ref())
+        .ok_or_else(|| anyhow::anyhow!("--video requires a [vision.video] config block"))?;
+    let sampling = VideoSamplingConfig {
+        frame_count: args.frames.unwrap_or(video_config.frame_count),
+        max_frame_count: video_config.max_frame_count,
+        strategy: args
+            .frame_sampling
+            .as_deref()
+            .map(parse_frame_sampling)
+            .transpose()?
+            .unwrap_or(video_config.sampling),
+        scene_min_gap: video_config.scene_min_gap,
+    };
+    sampling.validate()?;
+    let prompt = ensure_video_prompt(&prompt, sampling.frame_count);
+
+    if let Some(policy) = SafetyPolicy::for_mode(safety_mode)
+        .map(|policy| policy.with_audit_path(&args.safety_audit_log))
+    {
+        let adapter = VideoSafetyAdapter {
+            engine,
+            runtime,
+            video_path,
+            sampling,
+            encoder_batch_size: video_config.encoder_frame_batch_size,
+        };
+        let mut guard = SafetyGuard::new(adapter, policy);
+        let mut stream_state = StreamState::default();
+        let response = if args.stream {
+            guard.generate_streaming_with_callback(&prompt, config, print_safe_stream_event)?
+        } else {
+            guard.generate_with_callback(&prompt, config, |step| {
+                if args.predict_view {
+                    print!(
+                        "{}",
+                        predict_view::render(
+                            step,
+                            &tokenizer_for_view,
+                            args.temperature,
+                            args.top_p,
+                        )
+                    );
+                    io::stdout().flush()?;
+                }
+                Ok(())
+            })?
+        };
+        print_safe_response(&response, thinking_mode, args.stream, &mut stream_state)?;
+        io::stdout().flush()?;
+        eprintln!(
+            "finish_reason={}",
+            response
+                .output
+                .as_ref()
+                .map(|output| format!("{:?}", output.finish_reason))
+                .unwrap_or_else(|| "SafetyBlocked".to_string())
+        );
+        return Ok(());
+    }
+
+    let embeddings = build_video_prompt_embeddings(
+        &engine,
+        &runtime,
+        &video_path,
+        &prompt,
+        &sampling,
+        video_config.encoder_frame_batch_size,
+    )?;
+    let mut stream_state = StreamState::default();
+    let output = engine.generate_with_embeddings_callback(&embeddings, config, |step| {
+        if args.predict_view {
+            print!(
+                "{}",
+                predict_view::render(step, &tokenizer_for_view, args.temperature, args.top_p)
+            );
+        }
+        if args.stream {
+            stream_step(step, thinking_mode, &mut stream_state)?;
+        }
+        if args.predict_view || args.stream {
+            io::stdout().flush()?;
+        }
+        Ok(())
+    })?;
+    if args.stream {
+        finish_stream(&mut stream_state);
+    } else {
+        print_generation_output(&output, thinking_mode)?;
+    }
+    io::stdout().flush()?;
+    eprintln!("finish_reason={:?}", output.finish_reason);
+    Ok(())
+}
+
+fn ensure_video_prompt(prompt: &str, frame_count: usize) -> String {
+    if prompt.contains(VIDEO) {
+        return prompt.to_string();
+    }
+    let mut marker = String::from(VIDEO);
+    for _ in 1..frame_count {
+        marker.push_str(FRAME_SEP);
+    }
+    marker.push_str(VIDEO_END);
+    format!("{marker}\n{prompt}")
+}
+
+fn parse_frame_sampling(value: &str) -> anyhow::Result<FrameSamplingStrategy> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "uniform" => Ok(FrameSamplingStrategy::Uniform),
+        "scene" | "scene-aware" | "scene_aware" => Ok(FrameSamplingStrategy::SceneAware),
+        other => Err(anyhow::anyhow!(
+            "unsupported frame sampling '{other}', expected uniform|scene-aware"
+        )),
+    }
+}
+
 struct VisionRuntime {
     model: VisionModel,
     preprocess: ImagePreprocessor,
+    temporal: Option<TemporalEncoder>,
     cache_salt: String,
 }
 
@@ -767,7 +939,7 @@ fn load_vision_runtime(
     let vision = run_config
         .vision
         .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("--image requires a [vision] config block"))?;
+        .ok_or_else(|| anyhow::anyhow!("--image/--video requires a [vision] config block"))?;
     let encoder_config = VisionEncoderConfig::from_json(&vision.clip_config_path)?;
     let encoder = ClipVisionEncoder::load_pretrained(
         &vision.clip_weights_path,
@@ -798,9 +970,35 @@ fn load_vision_runtime(
         vision.projector_hidden_mult,
         run_config.model.hidden_dim
     );
+    let temporal = if let Some(video) = &vision.video {
+        video.validate()?;
+        let varmap = VarMap::new();
+        let vb = VarBuilder::from_varmap(&varmap, dtype, device);
+        let temporal = TemporalEncoder::new(
+            TemporalEncodingConfig {
+                max_frames: video.max_frame_count,
+                hidden_dim: encoder_config.vit_d_model,
+                kind: video.temporal_encoding,
+            },
+            (video.temporal_encoding == TemporalEncodingKind::Learned).then_some(vb),
+        )?;
+        if video.temporal_encoding == TemporalEncodingKind::Learned {
+            let path = video.temporal_path.as_ref().ok_or_else(|| {
+                AarambhError::Config(
+                    "learned video temporal encoding requires vision.video.temporal_path".into(),
+                )
+            })?;
+            let mut varmap = varmap;
+            varmap.load(path)?;
+        }
+        Some(temporal)
+    } else {
+        None
+    };
     Ok(VisionRuntime {
         model: VisionModel::new(encoder, projector),
         preprocess,
+        temporal,
         cache_salt,
     })
 }
@@ -848,10 +1046,119 @@ fn project_image_tokens(
     runtime.model.forward(&image)
 }
 
+fn build_video_prompt_embeddings(
+    engine: &InferenceEngine,
+    runtime: &VisionRuntime,
+    video_path: &Path,
+    prompt: &str,
+    sampling: &VideoSamplingConfig,
+    encoder_batch_size: usize,
+) -> aarambh_ai_core::Result<Tensor> {
+    engine.tokenizer().validate_video_special_tokens()?;
+    let prompt_ids = engine.tokenizer().encode(prompt)?;
+    if prompt_ids.is_empty() {
+        return Err(AarambhError::Config(
+            "video prompt produced no tokens".into(),
+        ));
+    }
+    let text = Tensor::from_vec(prompt_ids.clone(), (1, prompt_ids.len()), engine.device())?;
+    let text_embeddings = engine.model().embed_tokens(&text)?;
+    let frame_tokens = project_video_tokens(
+        runtime,
+        video_path,
+        engine.device(),
+        sampling,
+        encoder_batch_size,
+    )?;
+    interleave_video_tokens(
+        &prompt_ids,
+        &text_embeddings,
+        &frame_tokens,
+        VIDEO_ID,
+        FRAME_SEP_ID,
+    )
+}
+
+fn project_video_tokens(
+    runtime: &VisionRuntime,
+    video_path: &Path,
+    device: &candle_core::Device,
+    sampling: &VideoSamplingConfig,
+    encoder_batch_size: usize,
+) -> aarambh_ai_core::Result<Tensor> {
+    if encoder_batch_size == 0 {
+        return Err(AarambhError::Config(
+            "vision.video.encoder_frame_batch_size must be non-zero".into(),
+        ));
+    }
+    let sampled = decode_sampled_video(video_path, sampling)?;
+    let pixels = runtime
+        .preprocess
+        .preprocess_rgb_batch(&sampled.frames, device)?;
+    let mut encoded = Vec::new();
+    for start in (0..sampled.frames.len()).step_by(encoder_batch_size) {
+        let len = encoder_batch_size.min(sampled.frames.len() - start);
+        encoded.push(
+            runtime
+                .model
+                .encoder()
+                .forward(&pixels.narrow(0, start, len)?)?,
+        );
+    }
+    let references = encoded.iter().collect::<Vec<_>>();
+    let patch_tokens = Tensor::cat(&references, 0)?;
+    let temporal = runtime.temporal.as_ref().ok_or_else(|| {
+        AarambhError::Config("video inference requires a temporal encoder".into())
+    })?;
+    runtime
+        .model
+        .projector()
+        .forward(&temporal.forward(&patch_tokens)?)
+}
+
 struct VisionSafetyAdapter {
     engine: InferenceEngine,
     runtime: VisionRuntime,
     image_path: PathBuf,
+}
+
+struct VideoSafetyAdapter {
+    engine: InferenceEngine,
+    runtime: VisionRuntime,
+    video_path: PathBuf,
+    sampling: VideoSamplingConfig,
+    encoder_batch_size: usize,
+}
+
+impl SafetyGenerator for VideoSafetyAdapter {
+    fn generate(
+        &mut self,
+        prompt: &str,
+        config: GenerationConfig,
+    ) -> aarambh_ai_core::Result<GenerationOutput> {
+        self.generate_with_callback(prompt, config, |_| Ok(()))
+    }
+
+    fn generate_with_callback<F>(
+        &mut self,
+        prompt: &str,
+        config: GenerationConfig,
+        on_step: F,
+    ) -> aarambh_ai_core::Result<GenerationOutput>
+    where
+        F: FnMut(&GenerationStep) -> aarambh_ai_core::Result<()>,
+    {
+        let embeddings = build_video_prompt_embeddings(
+            &self.engine,
+            &self.runtime,
+            &self.video_path,
+            prompt,
+            &self.sampling,
+            self.encoder_batch_size,
+        )?;
+        self.engine
+            .generate_with_embeddings_callback(&embeddings, config, on_step)
+    }
 }
 
 impl SafetyGenerator for VisionSafetyAdapter {
@@ -1442,6 +1749,9 @@ mod tests {
             model: Some("target.safetensors".into()),
             tokenizer: Some("tokenizer.json".into()),
             image: None,
+            video: None,
+            frames: None,
+            frame_sampling: None,
             prompt: "test".into(),
             max_tokens: 8,
             temperature: 0.7,

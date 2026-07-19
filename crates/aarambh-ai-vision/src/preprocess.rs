@@ -73,6 +73,28 @@ impl ImagePreprocessor {
 
     /// Preprocess an already decoded RGB image.
     pub fn preprocess_rgb(&self, image: &RgbImage, device: &Device) -> Result<Tensor> {
+        self.preprocess_rgb_values(image, device)
+    }
+
+    /// Preprocess RGB frames on CPU, concatenate them, and transfer one contiguous batch.
+    pub fn preprocess_rgb_batch(&self, images: &[RgbImage], device: &Device) -> Result<Tensor> {
+        if images.is_empty() {
+            return Err(AarambhError::Config(
+                "video preprocessing requires at least one frame".into(),
+            ));
+        }
+        let cpu = Device::Cpu;
+        let frames = images
+            .iter()
+            .map(|image| self.preprocess_rgb_values(image, &cpu))
+            .collect::<Result<Vec<_>>>()?;
+        let references = frames.iter().collect::<Vec<_>>();
+        Ok(Tensor::stack(&references, 0)?
+            .contiguous()?
+            .to_device(device)?)
+    }
+
+    fn preprocess_rgb_values(&self, image: &RgbImage, device: &Device) -> Result<Tensor> {
         let image_size = self.config.image_size as u32;
         let (width, height) = image.dimensions();
         if width == 0 || height == 0 {
@@ -129,5 +151,21 @@ mod tests {
         let pre = ImagePreprocessor::default();
         let tensor = pre.preprocess_rgb(&image, &Device::Cpu).unwrap();
         assert_eq!(tensor.dims(), &[3, 224, 224]);
+    }
+
+    #[test]
+    fn preprocess_rgb_batch_returns_contiguous_nchw() {
+        let images = vec![
+            ImageBuffer::from_pixel(32, 32, Rgb([255, 0, 0])),
+            ImageBuffer::from_pixel(32, 32, Rgb([0, 255, 0])),
+        ];
+        let pre = ImagePreprocessor::new(VisionPreprocessConfig {
+            image_size: 16,
+            ..VisionPreprocessConfig::default()
+        })
+        .unwrap();
+        let tensor = pre.preprocess_rgb_batch(&images, &Device::Cpu).unwrap();
+        assert_eq!(tensor.dims(), &[2, 3, 16, 16]);
+        assert!(tensor.is_contiguous());
     }
 }

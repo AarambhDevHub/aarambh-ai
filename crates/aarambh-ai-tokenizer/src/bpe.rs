@@ -171,10 +171,69 @@ impl BpeTokenizer {
 
     /// Verify that multimodal v2 special tokens use their required ids.
     pub fn validate_vision_special_tokens(&self) -> Result<()> {
+        for (token, id) in special::VISION_SPECIAL_TOKENS {
+            self.validate_special_token(token, id)?;
+        }
+        Ok(())
+    }
+
+    /// Verify that Phase 35 video tokens and all earlier special tokens use their required ids.
+    pub fn validate_video_special_tokens(&self) -> Result<()> {
         for (token, id) in special::SPECIAL_TOKENS {
             self.validate_special_token(token, id)?;
         }
         Ok(())
+    }
+
+    /// Return an image-capable tokenizer upgraded to the Phase 35 video vocabulary layout.
+    ///
+    /// Existing learned token ids beginning at 9 are shifted by three. Callers must apply
+    /// the same row migration to the model embedding and untied language-model head.
+    pub fn upgraded_for_video(&self) -> Result<Self> {
+        self.validate_vision_special_tokens()?;
+        if self.validate_video_special_tokens().is_ok() {
+            return Ok(self.clone());
+        }
+        for (token, _) in special::SPECIAL_TOKENS
+            .iter()
+            .skip(special::VISION_SPECIAL_TOKENS.len())
+        {
+            if let Some(id) = self.vocab.get_id(token) {
+                return Err(AarambhError::Tokenizer(format!(
+                    "cannot reserve video token {token:?}: it already exists at id {id}"
+                )));
+            }
+        }
+
+        let insertion = special::VIDEO_ID;
+        let added = (special::SPECIAL_TOKENS.len() - special::VISION_SPECIAL_TOKENS.len()) as u32;
+        let mut token_to_id = HashMap::with_capacity(self.vocab.token_to_id.len() + added as usize);
+        for (token, id) in &self.vocab.token_to_id {
+            let migrated = if *id >= insertion { *id + added } else { *id };
+            token_to_id.insert(token.clone(), migrated);
+        }
+        for (token, id) in special::SPECIAL_TOKENS
+            .iter()
+            .skip(special::VISION_SPECIAL_TOKENS.len())
+        {
+            token_to_id.insert((*token).to_string(), *id);
+        }
+
+        let max_id = token_to_id.values().copied().max().unwrap_or(0);
+        let mut id_to_token = vec![String::new(); (max_id + 1) as usize];
+        for (token, id) in &token_to_id {
+            id_to_token[*id as usize] = token.clone();
+        }
+        let upgraded = Self {
+            vocab: Vocab {
+                token_to_id,
+                id_to_token,
+            },
+            merges: self.merges.clone(),
+            merge_rank: self.merge_rank.clone(),
+        };
+        upgraded.validate_video_special_tokens()?;
+        Ok(upgraded)
     }
 
     fn validate_special_token(&self, token: &str, id: u32) -> Result<()> {
@@ -226,7 +285,7 @@ impl BpeTokenizer {
             merges: self.merges,
             merge_rank: self.merge_rank,
         };
-        tokenizer.validate_vision_special_tokens()?;
+        tokenizer.validate_video_special_tokens()?;
         Ok(tokenizer)
     }
 
@@ -300,6 +359,7 @@ impl TokenizerLike for BpeTokenizer {
         while !rest.is_empty() {
             let next_special = special::SPECIAL_TOKENS
                 .iter()
+                .filter(|(token, id)| self.vocab.get_id(token) == Some(*id))
                 .filter_map(|(token, id)| rest.find(token).map(|pos| (pos, *token, *id)))
                 .min_by_key(|(pos, _, _)| *pos);
 

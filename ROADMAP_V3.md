@@ -35,7 +35,7 @@ Phase 31 →  DeepSeek-style fine-grained MoE + shared    (10–14 days)  [Kaggl
 Phase 32 →  Multi-Token Prediction (MTP)                (7–10 days)   [Kaggle] ✅
 Phase 33 →  On-policy distillation                      (10–14 days)  [Kaggle] ✅
 Phase 34 →  Native QAT (quantization-aware training)    (7–10 days)   [i3 + Kaggle] ✅
-Phase 35 →  Native video understanding                  (14–18 days)  [Kaggle]
+Phase 35 →  Native video understanding                  (14–18 days)  [Kaggle] ✅
 Phase 36 →  Native document understanding               (10–14 days)  [Kaggle]
 Phase 37 →  Long-horizon tool-use chains                (10–14 days)  [i3 + Kaggle]
 Phase 38 →  Forgetting diagnostics tied to Manas         (7–10 days)   [i3 + Kaggle]
@@ -725,79 +725,80 @@ Qwen3.5 integrate video/vision early rather than bolting it on.
 
 **`aarambh-ai-vision` (extends v2's crate):**
 ```
-[ ] src/video_sample.rs
-      FrameSampler — uniform or scene-change-aware frame sampling from a
-      video file at a configurable target frame count, reusing the
-      `image` crate decode path already allowed in v2's dependency policy
-      (§32) for the per-frame images; video container decode uses a
-      permitted, license-compatible crate documented in the Dependency
-      Policy update below
+[x] src/video.rs
+      Native H.264 MP4 decode through bundled OpenH264, deterministic
+      uniform or scene-aware fixed-count frame sampling, and a bounded
+      cache for detached frozen-encoder features
 
-[ ] src/temporal_fusion.rs
-      TemporalPositionEmbedding — adds a learned or sinusoidal temporal
-      offset to each sampled frame's projected tokens, distinguishing
-      "frame 1 of 8" from "frame 8 of 8" before fusion into the language
-      model's token stream
-      interleave_video_tokens() — extends v2's interleave_image_tokens()
-      (§24) to handle a sequence of frame-token blocks rather than one
-      image's tokens
+[x] src/temporal.rs + src/video_fusion.rs
+      Learned or sinusoidal temporal offsets, exact-zero frame zero, and
+      interleave_video_tokens() with explicit frame-separator validation
 
-[ ] src/instruct_data.rs (extends v2's schema)
-      VideoQaExample — JSONL schema for video-question-answer training
-      pairs, alongside v2's existing VqaExample
+[x] src/video_data.rs
+      Normalized JSONL VideoQaExample loading plus direct official NExT-QA
+      CSV parsing and multiple-choice target normalization
+
+[x] src/preprocess.rs
+      CPU frame preprocessing followed by one contiguous batch transfer;
+      frozen CLIP forwards are chunked by encoder_frame_batch_size
 ```
 
 **`aarambh-ai-finetune`:**
 ```
-[ ] Video instruction tuning reuses v2 Phase 20's DoRA-adapted VLM
+[x] Video instruction tuning reuses v2 Phase 20's DoRA-adapted VLM
     training path (`vlm_dora.rs`), extended to accept a sequence of frame
-    embeddings per example instead of a single image's embeddings
+    embeddings per example instead of a single image's embeddings; learned
+    temporal parameters share accumulation, clipping, and artifact-save cadence
 ```
 
 **`aarambh-ai-tokenizer`:**
 ```
-[ ] New reserved special tokens: <video>, <video_end>, <frame_sep> — IDs
-    allocated adjacent to v2's existing <image>/<image_end> tokens
+[x] New reserved special tokens: <video>, <video_end>, <frame_sep> — IDs
+    9, 10, and 11, with deterministic legacy tokenizer and SafeTensors
+    vocabulary migration while preserving all existing token text
 ```
 
 ### Data Setup
 
 ```bash
-# Free public video-QA data (e.g. a small public video-caption/QA dataset
-# subset that fits Kaggle's free storage/compute quota — same "free and
-# public only" policy as every prior phase, no paid synthetic data).
-scripts/phase35_prepare_video_qa.sh data
+# Deterministic four-clip local fixture. FFmpeg is used only to create the
+# fixture; the aarambh-ai runtime decoder never invokes it.
+python3 scripts/phase35_make_video_smoke_fixture.py
+scripts/phase35_smoke.sh
+
+# Real training/eval accepts normalized JSONL or official NExT-QA CSV
+# directly; point [vision.video].video_root at the extracted H.264 MP4 clips.
 ```
 
 ### Tests
 
 ```rust
-#[test]
+#[test] // exact-count uniform/scene samplers and native decode smoke
 fn frame_sampler_returns_configured_frame_count_for_variable_length_video() {}
 
-#[test]
+#[test] // complete for learned and sinusoidal positions
 fn temporal_position_embedding_distinguishes_frame_order() {
     // Shuffling frame order changes the fused embedding sequence, proving
     // temporal information is actually encoded, not just concatenated.
 }
 
-#[test]
+#[test] // complete; one-frame temporal path is identity
 fn interleave_video_tokens_extends_image_interleaving_without_regressing_it() {
     // Single-frame ("image") case must still behave exactly as v2's
     // interleave_image_tokens() did.
 }
 
-#[test]
+#[test] // one shared trainer handles Image and Video examples
 fn video_qa_instruction_tuning_reuses_vlm_dora_path_without_duplication() {}
 ```
 
 ### Milestone
 ```
-Model correctly answers a held-out set of video-QA prompts (free/public
-subset) with accuracy tracked via the eval harness's new video task,
-following the same frozen-encoder-plus-trainable-projector economics v2
-established for images — only the temporal fusion and per-frame sampling
-are new trainable/engineering surface.
+Native video ingestion, fixed-count sampling, temporal fusion, shared VLM DoRA
+training, CLI inference, and `eval --tasks video-qa|nextqa` are complete. The
+checked-in smoke proves execution and metric plumbing; useful held-out NExT-QA
+accuracy remains evidence produced by training a real checkpoint and is not
+claimed by this source-only release.
 
 git commit -m "feat: Phase 35 — native video understanding"
 git tag v3.0.0-alpha.7

@@ -7,6 +7,8 @@ use std::path::Path;
 pub mod convert;
 /// GGUF checkpoint reader and writer.
 pub mod gguf;
+/// Vocabulary-row migration helpers.
+pub mod vocab;
 
 use aarambh_ai_core::{ModelConfig, Result};
 use aarambh_ai_model::AarambhModel;
@@ -16,6 +18,7 @@ use candle_nn::{VarBuilder, VarMap};
 
 pub use convert::{HfArch, convert_hf, convert_hf_tensors, convert_hf_with_arch};
 pub use gguf::{load_gguf, load_gguf_tensors, load_gguf_with_dtype, save_gguf};
+pub use vocab::{VocabularyExpansion, VocabularyExpansionReport, expand_safetensors_vocabulary};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Summary of tensors copied and initialized during a hybrid retrofit.

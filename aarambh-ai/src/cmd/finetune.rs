@@ -3,11 +3,13 @@ use std::str::FromStr;
 
 use aarambh_ai_finetune::{
     AdapterMethod, DpoConfig, DpoRunConfig, GrpoConfig, GrpoRunConfig, GrpoThinkingMode,
-    LoraConfig, SftRunConfig, VerifierKind, VlmDoraRunConfig, merge_adapter_from_paths,
-    run_dora_from_config, run_dpo_from_config, run_grpo_from_config, run_sft_from_config,
-    run_tool_sft_from_config, run_vlm_dora_from_config,
+    LoraConfig, SftRunConfig, VerifierKind, VideoVlmDoraRunConfig, VlmDoraRunConfig,
+    merge_adapter_from_paths, run_dora_from_config, run_dpo_from_config, run_grpo_from_config,
+    run_sft_from_config, run_tool_sft_from_config, run_video_vlm_dora_from_config,
+    run_vlm_dora_from_config,
 };
 use aarambh_ai_train::TrainingRunConfig;
+use aarambh_ai_vision::{FrameSamplingStrategy, TemporalEncodingKind};
 use clap::{Args, Subcommand};
 
 #[derive(Debug, Args)]
@@ -26,6 +28,8 @@ pub enum FinetuneCommand {
     Qdora(FinetuneRunArgs),
     VlmDora(VlmFinetuneArgs),
     VlmQdora(VlmFinetuneArgs),
+    VideoDora(VlmFinetuneArgs),
+    VideoQdora(VlmFinetuneArgs),
     Grpo(GrpoArgs),
     Dpo(DpoArgs),
     Qdpo(DpoArgs),
@@ -213,6 +217,16 @@ pub struct VlmFinetuneArgs {
     #[arg(long)]
     pub image_root: Option<PathBuf>,
     #[arg(long)]
+    pub video_root: Option<PathBuf>,
+    #[arg(long)]
+    pub frames: Option<usize>,
+    #[arg(long)]
+    pub frame_sampling: Option<String>,
+    #[arg(long)]
+    pub temporal_encoding: Option<String>,
+    #[arg(long)]
+    pub temporal: Option<PathBuf>,
+    #[arg(long)]
     pub freeze_projector: bool,
     #[arg(long, default_value_t = 16)]
     pub lora_rank: usize,
@@ -255,6 +269,8 @@ pub fn run(args: FinetuneArgs) -> anyhow::Result<()> {
         FinetuneCommand::Qdora(args) => run_dora_finetune(args, true),
         FinetuneCommand::VlmDora(args) => run_vlm_dora_finetune(args, false),
         FinetuneCommand::VlmQdora(args) => run_vlm_dora_finetune(args, true),
+        FinetuneCommand::VideoDora(args) => run_video_vlm_dora_finetune(args, false),
+        FinetuneCommand::VideoQdora(args) => run_video_vlm_dora_finetune(args, true),
         FinetuneCommand::Grpo(args) => run_grpo(args),
         FinetuneCommand::Dpo(args) => run_dpo(args, false),
         FinetuneCommand::Qdpo(args) => run_dpo(args, true),
@@ -356,6 +372,22 @@ fn run_dora_finetune(args: FinetuneRunArgs, qdora: bool) -> anyhow::Result<()> {
 }
 
 fn run_vlm_dora_finetune(args: VlmFinetuneArgs, qdora: bool) -> anyhow::Result<()> {
+    let config = build_vlm_dora_config(args, qdora, false)?;
+    run_vlm_dora_from_config(config)?;
+    Ok(())
+}
+
+fn run_video_vlm_dora_finetune(args: VlmFinetuneArgs, qdora: bool) -> anyhow::Result<()> {
+    let config = build_vlm_dora_config(args, qdora, true)?;
+    run_video_vlm_dora_from_config(VideoVlmDoraRunConfig { vlm: config })?;
+    Ok(())
+}
+
+fn build_vlm_dora_config(
+    args: VlmFinetuneArgs,
+    qdora: bool,
+    video_mode: bool,
+) -> anyhow::Result<VlmDoraRunConfig> {
     let run_config = TrainingRunConfig::from_toml(&args.config)?;
     let device = run_config.device()?;
     let dtype = run_config.dtype_for_device(&device)?.to_candle();
@@ -380,6 +412,27 @@ fn run_vlm_dora_finetune(args: VlmFinetuneArgs, qdora: bool) -> anyhow::Result<(
     if let Some(path) = args.image_root.clone() {
         vision.image_root = path;
     }
+    if video_mode {
+        let video = vision.video.as_mut().ok_or_else(|| {
+            anyhow::anyhow!("video VLM fine-tuning requires a [vision.video] config block")
+        })?;
+        if let Some(path) = args.video_root.clone() {
+            video.video_root = path;
+        }
+        if let Some(frames) = args.frames {
+            video.frame_count = frames;
+        }
+        if let Some(value) = args.frame_sampling.as_deref() {
+            video.sampling = parse_frame_sampling(value)?;
+        }
+        if let Some(value) = args.temporal_encoding.as_deref() {
+            video.temporal_encoding = parse_temporal_encoding(value)?;
+        }
+        if let Some(path) = args.temporal.clone() {
+            video.temporal_path = Some(path);
+        }
+        video.validate()?;
+    }
     let projector_path = vision.projector_path.clone().ok_or_else(|| {
         anyhow::anyhow!("VLM fine-tuning requires --projector or vision.projector_path")
     })?;
@@ -392,7 +445,7 @@ fn run_vlm_dora_finetune(args: VlmFinetuneArgs, qdora: bool) -> anyhow::Result<(
         ..Default::default()
     };
 
-    let config = VlmDoraRunConfig {
+    Ok(VlmDoraRunConfig {
         model_config: run_config.model,
         train_config,
         base_model_path: args.base,
@@ -407,9 +460,27 @@ fn run_vlm_dora_finetune(args: VlmFinetuneArgs, qdora: bool) -> anyhow::Result<(
         vision,
         projector_path,
         train_projector: !args.freeze_projector,
-    };
-    run_vlm_dora_from_config(config)?;
-    Ok(())
+    })
+}
+
+fn parse_frame_sampling(value: &str) -> anyhow::Result<FrameSamplingStrategy> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "uniform" => Ok(FrameSamplingStrategy::Uniform),
+        "scene" | "scene-aware" | "scene_aware" => Ok(FrameSamplingStrategy::SceneAware),
+        other => Err(anyhow::anyhow!(
+            "unsupported frame sampling '{other}', expected uniform|scene-aware"
+        )),
+    }
+}
+
+fn parse_temporal_encoding(value: &str) -> anyhow::Result<TemporalEncodingKind> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "learned" => Ok(TemporalEncodingKind::Learned),
+        "sinusoidal" => Ok(TemporalEncodingKind::Sinusoidal),
+        other => Err(anyhow::anyhow!(
+            "unsupported temporal encoding '{other}', expected learned|sinusoidal"
+        )),
+    }
 }
 
 fn run_grpo(args: GrpoArgs) -> anyhow::Result<()> {

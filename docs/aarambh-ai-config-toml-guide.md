@@ -937,6 +937,42 @@ Just 4 training examples total — purely to let the whole training loop run sta
 
 ---
 
+## 30a. The `[vision.video]` Section
+
+Phase 35 adds a nested video block while retaining the same frozen encoder and
+projector used for images:
+
+```toml
+[vision.video]
+video_root = "data/nextqa/videos"
+frame_count = 8
+max_frame_count = 8
+sampling = "uniform"
+scene_min_gap = 8
+temporal_encoding = "learned"
+temporal_path = "adapters/video_vqa/temporal.safetensors"
+encoder_frame_batch_size = 8
+feature_cache_entries = 16
+```
+
+- `video_root` resolves relative video paths from JSONL or NExT-QA CSV.
+- `frame_count` is the exact number of frames supplied to each example;
+  `max_frame_count` is a hard safety and memory bound.
+- `sampling` is `uniform` or `scene_aware`. Scene-aware mode ranks simple
+  visual changes and uses `scene_min_gap` to avoid clustered selections.
+- `temporal_encoding` is `learned` or `sinusoidal`. Learned training writes
+  `temporal.safetensors`; inference must set `temporal_path` to that artifact.
+- `encoder_frame_batch_size` limits the number of frames passed through frozen
+  CLIP at once. Lower it when GPU memory is constrained.
+- `feature_cache_entries` bounds detached pre-projector video features cached
+  during instruction tuning. Set it to `0` to disable caching.
+
+The runtime accepts visual H.264 tracks in MP4 containers. `frame_count`
+multiplies visual patch-token and activation cost, so increase it only after a
+small end-to-end run succeeds.
+
+---
+
 # PART 6 — The `[train]` Section (Training Hyperparameters)
 
 These fields map directly onto the Gradient Descent and Adam Optimizer formulas from your Math Formulas guide.
@@ -1278,6 +1314,8 @@ Notice this one is inside an `adapters/` folder rather than `checkpoints/` — a
 | `vision_projector_pretrain.toml` | Real vision projector training | 384 / 8 | 512 | Full CLIP-B/32, COCO data |
 | `vision_vqa_smoke.toml` | VQA instruction smoke test | 384 / 8 | 256 | Tiny CLIP, 4 samples |
 | `vision_vqa_instruct.toml` | Real VQA instruction fine-tune | 384 / 8 | 512 | Full CLIP-B/32, LLaVA-style data |
+| `video_qa_smoke.toml` | Native video-QA training smoke | 384 / 8 | 512 | 2 frames, learned temporal fusion |
+| `video_qa_smoke_infer.toml` | Video inference/eval artifacts | 384 / 8 | 512 | Saved projector + temporal weights |
 
 ---
 

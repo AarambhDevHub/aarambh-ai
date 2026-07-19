@@ -795,6 +795,28 @@ mod tests {
     }
 
     #[test]
+    fn phase35_video_configs_parse_and_validate() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for name in ["video_qa_smoke.toml", "video_qa_smoke_infer.toml"] {
+            let config = TrainingRunConfig::from_toml(workspace.join("configs").join(name))
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            config
+                .validate()
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            AarambhModel::validate_config(&config.model)
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            assert!(
+                config
+                    .vision
+                    .as_ref()
+                    .and_then(|vision| vision.video.as_ref())
+                    .is_some(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn moe_retrofit_requires_scaled_active_expert_count() {
         let mut config = TrainingRunConfig {
             dataset_path: "data.txt".into(),

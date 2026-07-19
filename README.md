@@ -12,9 +12,9 @@ construction, training, inference, quantization, adapter tuning, alignment,
 evaluation, multimodal input, safety, and an OpenAI-compatible server.
 
 The production source release is **v2.0.0**. Current mainline development is
-**v3.0.0-alpha.6**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
-fine-grained MoE with shared experts, Multi-Token Prediction (MTP), and
-on-policy distillation and native quantization-aware training.
+**v3.0.0-alpha.7**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
+fine-grained MoE with shared experts, Multi-Token Prediction (MTP), on-policy
+distillation, native quantization-aware training, and native video input.
 
 > [!IMPORTANT]
 > This is a source and engineering project. It does not publish crates to
@@ -32,7 +32,7 @@ on-policy distillation and native quantization-aware training.
 | Inference | Greedy/sampled decoding, streaming, thinking budgets, external or one-checkpoint MTP speculation, tool grammar |
 | Model formats | SafeTensors, INT8, GPTQ/AWQ INT4, GGUF, Hugging Face conversion, quantized KV cache |
 | Evaluation | Perplexity, MMLU-lite, HellaSwag, GSM8K, HumanEval-lite, preference, recall, vision, and tool scorecards |
-| Vision | Frozen CLIP-style encoder, projector pretraining, image fusion, VQA instruction tuning |
+| Vision | Frozen CLIP-style encoder, image/video fusion, temporal encoding, VQA and video-QA tuning |
 | Runtime | CPU SIMD, Rayon attention, optional custom CUDA PTX kernels, Axum 0.8.9 HTTP/SSE server |
 | Guardrails | Prompt-injection checks, jailbreak checks, PII redaction, output scanning, streaming token safety, audit logs |
 | Self-learning | Opt-in critique, replay buffer, verifier rewards, deferred CPU updates, CUDA vision mode |
@@ -45,6 +45,7 @@ project.
 
 - Rust 1.89 or newer
 - Linux or another platform supported by Candle
+- A C/C++ build toolchain for the bundled OpenH264 decoder
 - Optional NVIDIA GPU and CUDA toolkit for `--features cuda`
 - `nvcc` available at build time for custom CUDA PTX kernels
 - Python 3 only for dataset preparation scripts
@@ -88,7 +89,7 @@ produce useful language quality.
 
 ```text
 aarambh-ai train       Pretrain or continue a configured model
-aarambh-ai infer       Generate text or answer an image-grounded prompt
+aarambh-ai infer       Generate text or answer an image/video-grounded prompt
 aarambh-ai eval        Run evaluation tasks and compare scorecards
 aarambh-ai quantise    Calibrate and export INT8/INT4 GGUF checkpoints
 aarambh-ai convert     Convert SafeTensors, GGUF, or Hugging Face layouts
@@ -175,11 +176,50 @@ Useful inference options include:
 - `--stats` for throughput, cache, sparse-attention, and MoE diagnostics
 - `--safety strict|permissive|research|none` for policy selection
 - `--image <path>` for vision-language inference
+- `--video <path>` with `--frames` and `--frame-sampling uniform|scene-aware`
+  for visual-only H.264 MP4 inference
 - `--speculative` for one-checkpoint MTP, or add draft-model options for the
   external path
 - `--tools <schema.json>` for grammar-constrained function calls
 
 Tool calls are emitted and validated but never executed by aarambh-ai.
+
+### Understand Video
+
+Phase 35 uses the existing frozen CLIP encoder for sampled frames, adds a
+learned or sinusoidal temporal position, and fuses the frame blocks through
+the same language-model input path used for images. Runtime decoding is native
+H.264-in-MP4 through bundled OpenH264 and does not invoke FFmpeg.
+
+Existing image-era tokenizers and SafeTensors checkpoints need a one-time,
+function-preserving three-token vocabulary expansion:
+
+```sh
+target/release/aarambh-ai convert \
+  --config configs/vision_vqa_smoke.toml \
+  --input checkpoints/tiny_shakespeare/step_000050/model.safetensors \
+  --output checkpoints/video_smoke/model.safetensors \
+  --tokenizer checkpoints/vision_projector_smoke/tokenizer.json \
+  --output-tokenizer checkpoints/video_smoke/tokenizer.json \
+  --upgrade-video-vocab
+```
+
+After video instruction tuning, run inference with the saved projector and
+temporal weights referenced by the config:
+
+```sh
+target/release/aarambh-ai infer \
+  --config configs/video_qa_smoke_infer.toml \
+  --model checkpoints/video_smoke/model.safetensors \
+  --tokenizer checkpoints/video_smoke/tokenizer.json \
+  --video data/video_smoke/videos/red_to_blue.mp4 \
+  --prompt "What color is shown at the end?" \
+  --frames 2 --frame-sampling uniform \
+  --max-tokens 8 --greedy --safety none
+```
+
+See [the Phase 35 guide](docs/phase35_video.md) for fixture generation,
+training, NExT-QA evaluation, supported formats, and memory controls.
 
 ### Serve An OpenAI-Compatible API
 
@@ -378,6 +418,9 @@ scripts/phase33_smoke.sh
 
 # Native INT4 fake quantization, STE backward, checkpoints, and cache metrics
 scripts/phase34_smoke.sh
+
+# Native H.264 decode, video vocabulary migration, tuning, inference, and eval
+scripts/phase35_smoke.sh
 ```
 
 For an MTP-trained checkpoint, `--speculative` needs no draft checkpoint:
@@ -404,6 +447,8 @@ Checkpoint retrofit and comparison tooling:
 - `scripts/phase33_compare_distillation.sh`
 - `scripts/phase34_smoke.sh`
 - `scripts/phase34_compare_qat.sh`
+- `scripts/phase35_make_video_smoke_fixture.py`
+- `scripts/phase35_smoke.sh`
 
 The Phase 31 method and result contract are documented in
 [docs/phase31_moe_sweep.md](docs/phase31_moe_sweep.md). Hardware benchmark
@@ -415,6 +460,8 @@ protocol are in
 [docs/phase33_distillation_results.md](docs/phase33_distillation_results.md).
 The native QAT policy, exact continuation contract, and four-way robustness
 gate are in [docs/phase34_qat.md](docs/phase34_qat.md).
+The video decoding, sampling, temporal fusion, migration, training, and eval
+contract is in [docs/phase35_video.md](docs/phase35_video.md).
 
 ## Model Scales
 
@@ -448,7 +495,7 @@ aarambh-ai-inference   Sampling, caching, thinking, MTP/external speculation, to
 aarambh-ai-safety      Input, output, streaming, PII, and audit policies
 aarambh-ai-selflearn   Critique, replay, verifiers, and persistent update state
 aarambh-ai-eval        Evaluation tasks, scorecards, and comparisons
-aarambh-ai-vision      Image preprocessing, encoder, projector, and fusion
+aarambh-ai-vision      Image/video decode, preprocessing, encoder, temporal fusion
 aarambh-ai-distill     On-policy rollouts, teacher scoring, losses, and resume
 aarambh-ai-serve       Axum HTTP/SSE serving and continuous batching
 aarambh-ai             Command-line application
@@ -493,6 +540,7 @@ CUDA checks require a CUDA-capable environment and are intentionally opt-in.
 | [docs/phase32_mtp.md](docs/phase32_mtp.md) | MTP training, retrofit, exact speculation, and benchmark method |
 | [docs/phase33_distillation_results.md](docs/phase33_distillation_results.md) | On-policy distillation design, smoke proof, and comparison method |
 | [docs/phase34_qat.md](docs/phase34_qat.md) | Native QAT configuration, continuation, export, and robustness validation |
+| [docs/phase35_video.md](docs/phase35_video.md) | Video migration, decoding, tuning, inference, and NExT-QA evaluation |
 | [RELEASE.md](RELEASE.md) | Source-release process and artifact policy |
 | [CHANGELOG.md](CHANGELOG.md) | Versioned implementation history |
 
@@ -510,6 +558,9 @@ CUDA checks require a CUDA-capable environment and are intentionally opt-in.
 - Tool calls are generated but never executed.
 - The server currently hosts one text model and one generated choice per
   request; vision and self-learning are CLI workflows.
+- Video understanding is visual-only and currently accepts H.264 MP4 input;
+  audio, other containers/codecs, server upload, and video self-learning are
+  outside Phase 35.
 - HumanEval-style code execution requires explicit opt-in.
 
 Additional exclusions and future work are tracked in the versioned roadmaps,

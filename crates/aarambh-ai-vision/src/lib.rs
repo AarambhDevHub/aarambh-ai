@@ -11,12 +11,27 @@ pub mod instruct_data;
 pub mod preprocess;
 /// Trainable projector from vision width to language-model width.
 pub mod projector;
+/// Temporal positions for sampled video frames.
+pub mod temporal;
+/// Native H.264 MP4 decode, sampling, and frozen-feature caching.
+pub mod video;
+/// Video instruction data and NExT-QA normalization.
+pub mod video_data;
+/// Video placeholder and frame-separator fusion helpers.
+pub mod video_fusion;
 
 pub use encoder::{ClipVisionEncoder, VisionEncoderConfig};
 pub use fusion::interleave_image_tokens;
 pub use instruct_data::{VqaExample, load_vqa_jsonl};
 pub use preprocess::{ImagePreprocessor, VisionPreprocessConfig};
 pub use projector::{ProjectorConfig, VisionProjector};
+pub use temporal::{TemporalEncoder, TemporalEncodingConfig, TemporalEncodingKind};
+pub use video::{
+    FrameSamplingStrategy, SampledVideo, VideoFeatureCache, VideoFeatureCacheKey,
+    VideoSamplingConfig, decode_sampled_video, scene_aware_frame_indices, uniform_frame_indices,
+};
+pub use video_data::{VideoQaExample, load_video_qa};
+pub use video_fusion::interleave_video_tokens;
 
 /// Frozen vision encoder plus trainable language-model projector.
 #[derive(Debug, Clone)]

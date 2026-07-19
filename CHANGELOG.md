@@ -1,5 +1,41 @@
 # Changelog
 
+## [3.0.0-alpha.7] - 2026-07-19
+
+### Added
+
+- **Phase 35 Native Video Understanding**
+  - Added native H.264 MP4 decoding through bundled OpenH264, deterministic
+    uniform and scene-aware fixed-count frame sampling, and a bounded cache of
+    detached frozen-CLIP frame features.
+  - Added learned and sinusoidal temporal position encodings, canonical
+    `<video>`/`<video_end>`/`<frame_sep>` fusion, and exact single-frame
+    compatibility with the existing image path.
+  - Added normalized video-QA JSONL and official NExT-QA CSV loading, shared
+    image/video DoRA and QDoRA instruction tuning, CLI video inference, and
+    `video-qa`/`nextqa` evaluation tasks.
+  - Added deterministic tokenizer and SafeTensors vocabulary migration for
+    video token IDs 9-11, batched frame preprocessing/encoding, smoke configs,
+    generated clips, an end-to-end smoke script, and a Phase 35 runbook.
+
+### Changed
+
+- VLM instruction tuning now uses one multimodal trainer for image and video
+  examples; optimizer accumulation, clipping, artifact saving, and masking
+  remain shared instead of being duplicated by modality.
+- The workspace version is now `3.0.0-alpha.7`.
+
+### Verified
+
+- Token migration preserves every legacy token and clones compatible image
+  rows for the new video markers; old image tokenizers retain their previous
+  marker behavior until explicitly migrated.
+- Unit coverage checks frame selection, scene boundaries, H.264 NAL parsing,
+  temporal ordering, single-frame parity, video masking, and NExT-QA parsing.
+- The local smoke workflow covers video generation, native decode, migration,
+  two-step VLM tuning, video inference, and evaluation without claiming useful
+  model quality from a two-step fixture.
+
 ## [3.0.0-alpha.6] - 2026-07-18
 
 ### Added

@@ -4,9 +4,10 @@ use aarambh_ai_core::TokenizerLike;
 use aarambh_ai_tokenizer::{
     BpeTokenizer, Vocab,
     special::{
-        ASSISTANT, ASSISTANT_ID, BOS, BOS_ID, ENDOFTEXT, ENDOFTEXT_ID, IMAGE, IMAGE_END,
-        IMAGE_END_ID, IMAGE_ID, PAD, PAD_ID, SPECIAL_TOKEN_COUNT, THINK_END, THINK_END_ID,
-        THINK_START, THINK_START_ID, USER, USER_ID,
+        ASSISTANT, ASSISTANT_ID, BOS, BOS_ID, ENDOFTEXT, ENDOFTEXT_ID, FRAME_SEP, FRAME_SEP_ID,
+        IMAGE, IMAGE_END, IMAGE_END_ID, IMAGE_ID, PAD, PAD_ID, SPECIAL_TOKEN_COUNT, THINK_END,
+        THINK_END_ID, THINK_START, THINK_START_ID, USER, USER_ID, VIDEO, VIDEO_END, VIDEO_END_ID,
+        VIDEO_ID, VISION_SPECIAL_TOKENS,
     },
 };
 
@@ -21,6 +22,9 @@ fn special_token_ids_are_correct() {
     assert_eq!(ASSISTANT_ID, 6);
     assert_eq!(IMAGE_ID, 7);
     assert_eq!(IMAGE_END_ID, 8);
+    assert_eq!(VIDEO_ID, 9);
+    assert_eq!(VIDEO_END_ID, 10);
+    assert_eq!(FRAME_SEP_ID, 11);
     assert_eq!(ENDOFTEXT, "<|endoftext|>");
     assert_eq!(PAD, "<|pad|>");
     assert_eq!(BOS, "<|bos|>");
@@ -30,6 +34,9 @@ fn special_token_ids_are_correct() {
     assert_eq!(ASSISTANT, "<|assistant|>");
     assert_eq!(IMAGE, "<image>");
     assert_eq!(IMAGE_END, "<image_end>");
+    assert_eq!(VIDEO, "<video>");
+    assert_eq!(VIDEO_END, "<video_end>");
+    assert_eq!(FRAME_SEP, "<frame_sep>");
 }
 
 #[test]
@@ -242,4 +249,51 @@ fn validate_special_tokens_rejects_plain_character_ids() {
 
     let err = tokenizer.validate_special_tokens().unwrap_err();
     assert!(err.to_string().contains("special token"));
+}
+
+#[test]
+fn image_tokenizer_upgrades_video_tokens_without_changing_learned_token_text() {
+    let mut token_to_id = HashMap::new();
+    let mut id_to_token = Vec::new();
+    for (token, id) in VISION_SPECIAL_TOKENS {
+        token_to_id.insert(token.to_string(), id);
+        id_to_token.push(token.to_string());
+    }
+    token_to_id.insert("hello".into(), 9);
+    id_to_token.push("hello".into());
+    let tokenizer = BpeTokenizer {
+        vocab: Vocab {
+            token_to_id,
+            id_to_token,
+        },
+        merges: Vec::new(),
+        merge_rank: HashMap::new(),
+    };
+
+    tokenizer.validate_vision_special_tokens().unwrap();
+    let upgraded = tokenizer.upgraded_for_video().unwrap();
+    upgraded.validate_video_special_tokens().unwrap();
+    assert_eq!(upgraded.vocab.get_id("hello"), Some(12));
+    assert_eq!(upgraded.decode(&[12]).unwrap(), "hello");
+    assert_eq!(upgraded.encode("<video><video_end>").unwrap(), vec![9, 10]);
+}
+
+#[test]
+fn legacy_image_tokenizer_does_not_emit_unmapped_video_ids() {
+    let mut token_to_id = HashMap::new();
+    let mut id_to_token = Vec::new();
+    for (token, id) in VISION_SPECIAL_TOKENS {
+        token_to_id.insert(token.to_string(), id);
+        id_to_token.push(token.to_string());
+    }
+    let tokenizer = BpeTokenizer {
+        vocab: Vocab {
+            token_to_id,
+            id_to_token,
+        },
+        merges: Vec::new(),
+        merge_rank: HashMap::new(),
+    };
+
+    assert!(!tokenizer.encode("<video>").unwrap().contains(&VIDEO_ID));
 }
