@@ -2,14 +2,14 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use aarambh_ai_finetune::{
-    AdapterMethod, DpoConfig, DpoRunConfig, GrpoConfig, GrpoRunConfig, GrpoThinkingMode,
-    LoraConfig, SftRunConfig, VerifierKind, VideoVlmDoraRunConfig, VlmDoraRunConfig,
-    merge_adapter_from_paths, run_dora_from_config, run_dpo_from_config, run_grpo_from_config,
-    run_sft_from_config, run_tool_sft_from_config, run_video_vlm_dora_from_config,
-    run_vlm_dora_from_config,
+    AdapterMethod, DocumentVlmDoraRunConfig, DpoConfig, DpoRunConfig, GrpoConfig, GrpoRunConfig,
+    GrpoThinkingMode, LoraConfig, SftRunConfig, VerifierKind, VideoVlmDoraRunConfig,
+    VlmDoraRunConfig, merge_adapter_from_paths, run_document_vlm_dora_from_config,
+    run_dora_from_config, run_dpo_from_config, run_grpo_from_config, run_sft_from_config,
+    run_tool_sft_from_config, run_video_vlm_dora_from_config, run_vlm_dora_from_config,
 };
 use aarambh_ai_train::TrainingRunConfig;
-use aarambh_ai_vision::{FrameSamplingStrategy, TemporalEncodingKind};
+use aarambh_ai_vision::{FrameSamplingStrategy, LayoutEncodingKind, TemporalEncodingKind};
 use clap::{Args, Subcommand};
 
 #[derive(Debug, Args)]
@@ -30,6 +30,8 @@ pub enum FinetuneCommand {
     VlmQdora(VlmFinetuneArgs),
     VideoDora(VlmFinetuneArgs),
     VideoQdora(VlmFinetuneArgs),
+    DocumentDora(VlmFinetuneArgs),
+    DocumentQdora(VlmFinetuneArgs),
     Grpo(GrpoArgs),
     Dpo(DpoArgs),
     Qdpo(DpoArgs),
@@ -227,6 +229,16 @@ pub struct VlmFinetuneArgs {
     #[arg(long)]
     pub temporal: Option<PathBuf>,
     #[arg(long)]
+    pub document_root: Option<PathBuf>,
+    #[arg(long)]
+    pub document_dpi: Option<u32>,
+    #[arg(long)]
+    pub max_document_pages: Option<usize>,
+    #[arg(long)]
+    pub layout_encoding: Option<String>,
+    #[arg(long)]
+    pub layout: Option<PathBuf>,
+    #[arg(long)]
     pub freeze_projector: bool,
     #[arg(long, default_value_t = 16)]
     pub lora_rank: usize,
@@ -271,6 +283,8 @@ pub fn run(args: FinetuneArgs) -> anyhow::Result<()> {
         FinetuneCommand::VlmQdora(args) => run_vlm_dora_finetune(args, true),
         FinetuneCommand::VideoDora(args) => run_video_vlm_dora_finetune(args, false),
         FinetuneCommand::VideoQdora(args) => run_video_vlm_dora_finetune(args, true),
+        FinetuneCommand::DocumentDora(args) => run_document_vlm_dora_finetune(args, false),
+        FinetuneCommand::DocumentQdora(args) => run_document_vlm_dora_finetune(args, true),
         FinetuneCommand::Grpo(args) => run_grpo(args),
         FinetuneCommand::Dpo(args) => run_dpo(args, false),
         FinetuneCommand::Qdpo(args) => run_dpo(args, true),
@@ -372,14 +386,20 @@ fn run_dora_finetune(args: FinetuneRunArgs, qdora: bool) -> anyhow::Result<()> {
 }
 
 fn run_vlm_dora_finetune(args: VlmFinetuneArgs, qdora: bool) -> anyhow::Result<()> {
-    let config = build_vlm_dora_config(args, qdora, false)?;
+    let config = build_vlm_dora_config(args, qdora, false, false)?;
     run_vlm_dora_from_config(config)?;
     Ok(())
 }
 
 fn run_video_vlm_dora_finetune(args: VlmFinetuneArgs, qdora: bool) -> anyhow::Result<()> {
-    let config = build_vlm_dora_config(args, qdora, true)?;
+    let config = build_vlm_dora_config(args, qdora, true, false)?;
     run_video_vlm_dora_from_config(VideoVlmDoraRunConfig { vlm: config })?;
+    Ok(())
+}
+
+fn run_document_vlm_dora_finetune(args: VlmFinetuneArgs, qdora: bool) -> anyhow::Result<()> {
+    let config = build_vlm_dora_config(args, qdora, false, true)?;
+    run_document_vlm_dora_from_config(DocumentVlmDoraRunConfig { vlm: config })?;
     Ok(())
 }
 
@@ -387,6 +407,7 @@ fn build_vlm_dora_config(
     args: VlmFinetuneArgs,
     qdora: bool,
     video_mode: bool,
+    document_mode: bool,
 ) -> anyhow::Result<VlmDoraRunConfig> {
     let run_config = TrainingRunConfig::from_toml(&args.config)?;
     let device = run_config.device()?;
@@ -432,6 +453,27 @@ fn build_vlm_dora_config(
             video.temporal_path = Some(path);
         }
         video.validate()?;
+    }
+    if document_mode {
+        let document = vision.document.as_mut().ok_or_else(|| {
+            anyhow::anyhow!("document VLM fine-tuning requires a [vision.document] config block")
+        })?;
+        if let Some(path) = args.document_root.clone() {
+            document.document_root = path;
+        }
+        if let Some(dpi) = args.document_dpi {
+            document.target_dpi = dpi;
+        }
+        if let Some(max_pages) = args.max_document_pages {
+            document.max_pages_per_document = max_pages;
+        }
+        if let Some(value) = args.layout_encoding.as_deref() {
+            document.layout_encoding = parse_layout_encoding(value)?;
+        }
+        if let Some(path) = args.layout.clone() {
+            document.layout_path = Some(path);
+        }
+        document.validate()?;
     }
     let projector_path = vision.projector_path.clone().ok_or_else(|| {
         anyhow::anyhow!("VLM fine-tuning requires --projector or vision.projector_path")
@@ -479,6 +521,16 @@ fn parse_temporal_encoding(value: &str) -> anyhow::Result<TemporalEncodingKind> 
         "sinusoidal" => Ok(TemporalEncodingKind::Sinusoidal),
         other => Err(anyhow::anyhow!(
             "unsupported temporal encoding '{other}', expected learned|sinusoidal"
+        )),
+    }
+}
+
+fn parse_layout_encoding(value: &str) -> anyhow::Result<LayoutEncodingKind> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "learned" => Ok(LayoutEncodingKind::Learned),
+        "sinusoidal" => Ok(LayoutEncodingKind::Sinusoidal),
+        other => Err(anyhow::anyhow!(
+            "unsupported layout encoding '{other}', expected learned|sinusoidal"
         )),
     }
 }

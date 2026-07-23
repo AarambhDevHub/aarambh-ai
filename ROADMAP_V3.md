@@ -820,15 +820,17 @@ standing up a separate document-specific model.
 
 **`aarambh-ai-vision` (extends the crate again):**
 ```
-[ ] src/document_sample.rs
-      PageRasterizer — renders PDF/document pages to images for the
+[x] src/document_sample.rs
+      PageRasterizer — renders PDFs through pinned pure-Rust Hayro 0.4 and
+      accepts ordered page images for the
       existing frozen ViT encoder path (documents are treated as a
       sequence of page-images, reusing v2's per-image encoder rather than
-      a new architecture)
+      a new architecture); defaults to 150 DPI and at most 16 pages, with
+      explicit pixel limits and a bounded detached-feature cache
       Reuses `image` crate preprocessing (v2 §32 dependency policy);
       document-to-image rendering uses a permitted crate, documented below
 
-[ ] src/layout_projector.rs
+[x] src/layout_projector.rs
       LayoutAwareProjector — extends v2's plain Projector MLP (§24) with
       2D positional information per patch (row/column position on the
       page), so the model can distinguish "this text is in a table cell"
@@ -840,29 +842,38 @@ standing up a separate document-specific model.
       reasoning" framing of v2's VLM approach rather than a hybrid
       OCR+LLM pipeline
 
-[ ] src/instruct_data.rs (extends again)
+[x] src/instruct_data.rs (extends again)
       DocQaExample — JSONL schema for document-question-answer pairs,
       covering both born-digital PDFs and scanned/rasterized pages
 ```
 
 **`aarambh-ai-finetune`:**
 ```
-[ ] Document instruction tuning reuses the same DoRA-adapted VLM path as
+[x] Document instruction tuning reuses the same DoRA-adapted VLM path as
     Phase 35's video tuning and v2 Phase 20's image tuning — one training
     code path, three data types (image, video, document)
 ```
 
 **`aarambh-ai-tokenizer`:**
 ```
-[ ] New reserved special tokens: <document>, <document_end>, <page_sep>
+[x] New reserved special tokens: <document>, <document_end>, <page_sep> —
+    IDs 12, 13, and 14, with deterministic video-tokenizer and SafeTensors
+    migration
 ```
 
 ### Data Setup
 
 ```bash
-# Free public document-QA data (e.g. a small public scanned-document or
-# PDF-QA dataset subset, DocVQA-style, sized for Kaggle's free quota).
-scripts/phase36_prepare_document_qa.sh data
+# Deterministic four-PDF local fixture and complete smoke workflow.
+python3 scripts/phase36_make_document_smoke_fixture.py
+scripts/phase36_smoke.sh
+
+# Normalize annotations from a user-downloaded DocVQA/MP-DocVQA release.
+# Dataset login, terms, and original files remain the user's responsibility.
+python3 scripts/phase36_prepare_docvqa.py \
+  --annotations /path/to/annotations.json \
+  --documents-dir /path/to/documents \
+  --output data/document_qa/train.jsonl
 ```
 
 ### Tests
@@ -886,12 +897,11 @@ fn table_cell_text_and_paragraph_text_produce_distinguishable_embeddings() {
 
 ### Milestone
 ```
-Model correctly answers a held-out set of document-QA prompts (free/public
-DocVQA-style subset), including at least one multi-page and one
-table-containing example class, tracked via the eval harness's new
-document task. Vision pipeline now handles three modalities (image, video,
-document) through one shared frozen-encoder-plus-trainable-projector-and-
-fusion path.
+Native PDF/page ingestion, layout-aware projection, shared DoRA/QDoRA tuning,
+CLI inference, and `eval --tasks document-qa|docvqa` with ANLS are complete.
+The checked-in multi-page smoke fixture proves execution and metric plumbing;
+useful held-out DocVQA accuracy remains evidence produced by training a real
+checkpoint and is not claimed by this source-only release.
 
 git commit -m "feat: Phase 36 — native document understanding"
 git tag v3.0.0-alpha.8
@@ -1235,7 +1245,7 @@ git commit -m "chore: v3.0.0 — crates.io publish, source release"
 | 33 | On-Policy Distillation | New `aarambh-ai-distill`, teacher-scored student rollouts | Kaggle | 10–14 days |
 | 34 | Native QAT | Fake-quantize training, folds INT4/INT8 into the training loop | i3 + Kaggle | 7–10 days ✅ |
 | 35 | Video Understanding | Frame sampling + temporal fusion, extends `aarambh-ai-vision` | Kaggle | 14–18 days |
-| 36 | Document Understanding | Layout-aware projector, shares vision encoder with video | Kaggle | 10–14 days |
+| 36 | Document Understanding | Layout-aware projector, shares vision encoder with video | Kaggle | 10–14 days ✅ |
 | 37 | Long-Horizon Tool Chains | New `aarambh-ai-agent`, multi-step tool calls with result ingestion | i3 + Kaggle | 10–14 days |
 | 38 | Forgetting Diagnostics | Per-capability forgetting curves, shared export format for Manas | i3 + Kaggle | 7–10 days |
 | 39 | Max Thinking Mode | 5th reasoning depth, 16,384-token budget, extends `ThinkingController` | i3 + Kaggle | 5–7 days |

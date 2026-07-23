@@ -22,7 +22,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "3.0.0-alpha.7"
+version = "3.0.0-alpha.8"
 edition = "2024"
 rust-version = "1.89"
 
@@ -47,6 +47,7 @@ which              = "6"
 criterion          = "0.5"
 sha2               = "0.10"
 image              = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+hayro              = { version = "=0.4.0", features = ["jpeg2000"] }
 mp4                = "=0.14.0"
 openh264           = "=0.9.7"
 axum               = "=0.8.9"

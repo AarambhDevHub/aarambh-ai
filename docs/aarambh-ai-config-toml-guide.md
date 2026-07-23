@@ -973,6 +973,41 @@ small end-to-end run succeeds.
 
 ---
 
+## 30b. The `[vision.document]` Section
+
+Phase 36 treats a document as an ordered sequence of rendered pages through the
+same frozen vision encoder:
+
+```toml
+[vision.document]
+document_root = "data/document_qa/documents"
+target_dpi = 150
+max_pages_per_document = 16
+max_page_pixels = 32000000
+encoder_page_batch_size = 4
+feature_cache_entries = 8
+layout_encoding = "learned"
+layout_path = "adapters/document_qa/layout.safetensors"
+```
+
+- `document_root` resolves relative PDF and page-image paths.
+- `target_dpi` controls PDF raster resolution. Higher values improve source
+  detail before the fixed-size CLIP resize but increase rendering memory.
+- `max_pages_per_document` is a hard page limit. Examples can select explicit
+  1-based pages in JSONL; otherwise the first configured page window is used.
+- `max_page_pixels` rejects unexpectedly large decoded/rendered pages.
+- `encoder_page_batch_size` limits frozen-CLIP pages per forward call.
+- `feature_cache_entries` bounds detached pre-projector document features
+  cached during training. Set it to `0` to disable caching.
+- `layout_encoding` is `learned` or `sinusoidal`. Learned runs save
+  `layout.safetensors`; inference/eval must set `layout_path` to that file.
+
+Page preprocessing preserves aspect ratio and pads with white instead of
+center-cropping document edges. There is no OCR or table parser; row/column
+patch positions supply layout information directly to the VLM.
+
+---
+
 # PART 6 — The `[train]` Section (Training Hyperparameters)
 
 These fields map directly onto the Gradient Descent and Adam Optimizer formulas from your Math Formulas guide.

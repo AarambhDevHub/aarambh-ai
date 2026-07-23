@@ -179,6 +179,14 @@ impl BpeTokenizer {
 
     /// Verify that Phase 35 video tokens and all earlier special tokens use their required ids.
     pub fn validate_video_special_tokens(&self) -> Result<()> {
+        for (token, id) in special::VIDEO_SPECIAL_TOKENS {
+            self.validate_special_token(token, id)?;
+        }
+        Ok(())
+    }
+
+    /// Verify that Phase 36 document tokens and all earlier special tokens use required ids.
+    pub fn validate_document_special_tokens(&self) -> Result<()> {
         for (token, id) in special::SPECIAL_TOKENS {
             self.validate_special_token(token, id)?;
         }
@@ -194,7 +202,7 @@ impl BpeTokenizer {
         if self.validate_video_special_tokens().is_ok() {
             return Ok(self.clone());
         }
-        for (token, _) in special::SPECIAL_TOKENS
+        for (token, _) in special::VIDEO_SPECIAL_TOKENS
             .iter()
             .skip(special::VISION_SPECIAL_TOKENS.len())
         {
@@ -206,13 +214,14 @@ impl BpeTokenizer {
         }
 
         let insertion = special::VIDEO_ID;
-        let added = (special::SPECIAL_TOKENS.len() - special::VISION_SPECIAL_TOKENS.len()) as u32;
+        let added =
+            (special::VIDEO_SPECIAL_TOKENS.len() - special::VISION_SPECIAL_TOKENS.len()) as u32;
         let mut token_to_id = HashMap::with_capacity(self.vocab.token_to_id.len() + added as usize);
         for (token, id) in &self.vocab.token_to_id {
             let migrated = if *id >= insertion { *id + added } else { *id };
             token_to_id.insert(token.clone(), migrated);
         }
-        for (token, id) in special::SPECIAL_TOKENS
+        for (token, id) in special::VIDEO_SPECIAL_TOKENS
             .iter()
             .skip(special::VISION_SPECIAL_TOKENS.len())
         {
@@ -233,6 +242,57 @@ impl BpeTokenizer {
             merge_rank: self.merge_rank.clone(),
         };
         upgraded.validate_video_special_tokens()?;
+        Ok(upgraded)
+    }
+
+    /// Return a video-capable tokenizer upgraded to the Phase 36 document layout.
+    ///
+    /// Existing learned token ids beginning at 12 are shifted by three. Callers must
+    /// apply the same migration to model embeddings and an untied language-model head.
+    pub fn upgraded_for_document(&self) -> Result<Self> {
+        self.validate_video_special_tokens()?;
+        if self.validate_document_special_tokens().is_ok() {
+            return Ok(self.clone());
+        }
+        for (token, _) in special::SPECIAL_TOKENS
+            .iter()
+            .skip(special::VIDEO_SPECIAL_TOKENS.len())
+        {
+            if let Some(id) = self.vocab.get_id(token) {
+                return Err(AarambhError::Tokenizer(format!(
+                    "cannot reserve document token {token:?}: it already exists at id {id}"
+                )));
+            }
+        }
+
+        let insertion = special::DOCUMENT_ID;
+        let added = (special::SPECIAL_TOKENS.len() - special::VIDEO_SPECIAL_TOKENS.len()) as u32;
+        let mut token_to_id = HashMap::with_capacity(self.vocab.token_to_id.len() + added as usize);
+        for (token, id) in &self.vocab.token_to_id {
+            let migrated = if *id >= insertion { *id + added } else { *id };
+            token_to_id.insert(token.clone(), migrated);
+        }
+        for (token, id) in special::SPECIAL_TOKENS
+            .iter()
+            .skip(special::VIDEO_SPECIAL_TOKENS.len())
+        {
+            token_to_id.insert((*token).to_string(), *id);
+        }
+
+        let max_id = token_to_id.values().copied().max().unwrap_or(0);
+        let mut id_to_token = vec![String::new(); (max_id + 1) as usize];
+        for (token, id) in &token_to_id {
+            id_to_token[*id as usize] = token.clone();
+        }
+        let upgraded = Self {
+            vocab: Vocab {
+                token_to_id,
+                id_to_token,
+            },
+            merges: self.merges.clone(),
+            merge_rank: self.merge_rank.clone(),
+        };
+        upgraded.validate_document_special_tokens()?;
         Ok(upgraded)
     }
 
@@ -285,7 +345,7 @@ impl BpeTokenizer {
             merges: self.merges,
             merge_rank: self.merge_rank,
         };
-        tokenizer.validate_video_special_tokens()?;
+        tokenizer.validate_document_special_tokens()?;
         Ok(tokenizer)
     }
 

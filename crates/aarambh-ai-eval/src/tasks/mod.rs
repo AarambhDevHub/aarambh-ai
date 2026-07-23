@@ -6,6 +6,8 @@ use serde::de::DeserializeOwned;
 
 /// Associative key-value recall task.
 pub mod associative_recall;
+/// Native document question-answering task.
+pub mod document_qa;
 /// GSM8K subset task.
 pub mod gsm8k_subset;
 /// HellaSwag task.
@@ -28,6 +30,7 @@ pub mod video_qa;
 pub mod vqa;
 
 pub use associative_recall::AssociativeRecallTask;
+pub use document_qa::DocumentQaTask;
 pub use gsm8k_subset::Gsm8kSubsetTask;
 pub use hellaswag::HellaSwagTask;
 pub use humaneval_lite::HumanEvalLiteTask;

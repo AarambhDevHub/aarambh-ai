@@ -2,7 +2,7 @@ use std::path::Path;
 
 use aarambh_ai_core::{AarambhError, Result};
 use candle_core::{Device, Tensor};
-use image::{ImageReader, RgbImage, imageops::FilterType};
+use image::{ImageReader, Rgb, RgbImage, imageops::FilterType};
 use serde::{Deserialize, Serialize};
 
 /// Configuration for CLIP-style image preprocessing.
@@ -78,15 +78,38 @@ impl ImagePreprocessor {
 
     /// Preprocess RGB frames on CPU, concatenate them, and transfer one contiguous batch.
     pub fn preprocess_rgb_batch(&self, images: &[RgbImage], device: &Device) -> Result<Tensor> {
+        self.preprocess_rgb_batch_with(images, device, |preprocessor, image, cpu| {
+            preprocessor.preprocess_rgb_values(image, cpu)
+        })
+    }
+
+    /// Preprocess document pages with aspect-preserving resize and white padding.
+    pub fn preprocess_document_pages(
+        &self,
+        images: &[RgbImage],
+        device: &Device,
+    ) -> Result<Tensor> {
+        self.preprocess_rgb_batch_with(images, device, |preprocessor, image, cpu| {
+            let fitted = preprocessor.fit_and_pad_rgb(image)?;
+            preprocessor.normalize_rgb(&fitted, cpu)
+        })
+    }
+
+    fn preprocess_rgb_batch_with(
+        &self,
+        images: &[RgbImage],
+        device: &Device,
+        mut preprocess: impl FnMut(&Self, &RgbImage, &Device) -> Result<Tensor>,
+    ) -> Result<Tensor> {
         if images.is_empty() {
             return Err(AarambhError::Config(
-                "video preprocessing requires at least one frame".into(),
+                "batched vision preprocessing requires at least one image".into(),
             ));
         }
         let cpu = Device::Cpu;
         let frames = images
             .iter()
-            .map(|image| self.preprocess_rgb_values(image, &cpu))
+            .map(|image| preprocess(self, image, &cpu))
             .collect::<Result<Vec<_>>>()?;
         let references = frames.iter().collect::<Vec<_>>();
         Ok(Tensor::stack(&references, 0)?
@@ -112,13 +135,43 @@ impl ImagePreprocessor {
         let top = (resized_height - image_size) / 2;
         let cropped =
             image::imageops::crop_imm(&resized, left, top, image_size, image_size).to_image();
+        self.normalize_rgb(&cropped, device)
+    }
 
+    fn fit_and_pad_rgb(&self, image: &RgbImage) -> Result<RgbImage> {
+        let image_size = self.config.image_size as u32;
+        let (width, height) = image.dimensions();
+        if width == 0 || height == 0 {
+            return Err(AarambhError::Config(
+                "image dimensions must be non-zero".into(),
+            ));
+        }
+        let scale = image_size as f32 / width.max(height) as f32;
+        let resized_width = ((width as f32 * scale).round() as u32).clamp(1, image_size);
+        let resized_height = ((height as f32 * scale).round() as u32).clamp(1, image_size);
+        let resized =
+            image::imageops::resize(image, resized_width, resized_height, FilterType::CatmullRom);
+        let mut canvas = RgbImage::from_pixel(image_size, image_size, Rgb([255, 255, 255]));
+        let left = (image_size - resized_width) / 2;
+        let top = (image_size - resized_height) / 2;
+        image::imageops::replace(&mut canvas, &resized, i64::from(left), i64::from(top));
+        Ok(canvas)
+    }
+
+    fn normalize_rgb(&self, image: &RgbImage, device: &Device) -> Result<Tensor> {
         let size = self.config.image_size;
+        if image.dimensions() != (size as u32, size as u32) {
+            return Err(AarambhError::Shape(format!(
+                "normalized image must be {size}x{size}, got {}x{}",
+                image.width(),
+                image.height()
+            )));
+        }
         let plane = size * size;
         let mut values = vec![0f32; 3 * plane];
         for y in 0..size {
             for x in 0..size {
-                let pixel = cropped.get_pixel(x as u32, y as u32);
+                let pixel = image.get_pixel(x as u32, y as u32);
                 let idx = y * size + x;
                 for channel in 0..3 {
                     let value = pixel[channel] as f32 / 255.0;
@@ -165,6 +218,24 @@ mod tests {
         })
         .unwrap();
         let tensor = pre.preprocess_rgb_batch(&images, &Device::Cpu).unwrap();
+        assert_eq!(tensor.dims(), &[2, 3, 16, 16]);
+        assert!(tensor.is_contiguous());
+    }
+
+    #[test]
+    fn document_preprocess_preserves_orientation_with_padding() {
+        let images = vec![
+            ImageBuffer::from_pixel(32, 16, Rgb([255, 0, 0])),
+            ImageBuffer::from_pixel(16, 32, Rgb([0, 255, 0])),
+        ];
+        let pre = ImagePreprocessor::new(VisionPreprocessConfig {
+            image_size: 16,
+            ..VisionPreprocessConfig::default()
+        })
+        .unwrap();
+        let tensor = pre
+            .preprocess_document_pages(&images, &Device::Cpu)
+            .unwrap();
         assert_eq!(tensor.dims(), &[2, 3, 16, 16]);
         assert!(tensor.is_contiguous());
     }

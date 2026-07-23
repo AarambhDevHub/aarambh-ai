@@ -12,52 +12,92 @@ pub fn interleave_video_tokens(
     video_placeholder_id: u32,
     frame_separator_id: u32,
 ) -> Result<Tensor> {
+    interleave_media_sequence_tokens(
+        text_tokens,
+        text_embeddings,
+        frame_embeddings,
+        video_placeholder_id,
+        frame_separator_id,
+        "video",
+    )
+}
+
+/// Replace one document token and its page separators with projected page patch tokens.
+///
+/// `page_embeddings` must be `[pages, patches, hidden]`. Each page after the first
+/// is inserted immediately after its corresponding page-separator text embedding.
+pub fn interleave_document_tokens(
+    text_tokens: &[u32],
+    text_embeddings: &Tensor,
+    page_embeddings: &Tensor,
+    document_placeholder_id: u32,
+    page_separator_id: u32,
+) -> Result<Tensor> {
+    interleave_media_sequence_tokens(
+        text_tokens,
+        text_embeddings,
+        page_embeddings,
+        document_placeholder_id,
+        page_separator_id,
+        "document",
+    )
+}
+
+/// Interleave an ordered visual sequence at one placeholder and separator positions.
+pub fn interleave_media_sequence_tokens(
+    text_tokens: &[u32],
+    text_embeddings: &Tensor,
+    media_embeddings: &Tensor,
+    placeholder_id: u32,
+    separator_id: u32,
+    media_name: &str,
+) -> Result<Tensor> {
     let text_dims = text_embeddings.dims();
-    let frame_dims = frame_embeddings.dims();
+    let media_dims = media_embeddings.dims();
     if text_dims.len() != 3 || text_dims[0] != 1 || text_dims[1] != text_tokens.len() {
         return Err(AarambhError::Shape(format!(
             "text_embeddings must be [1, {}, hidden], got {text_dims:?}",
             text_tokens.len()
         )));
     }
-    if frame_dims.len() != 3 || frame_dims[0] == 0 {
+    if media_dims.len() != 3 || media_dims[0] == 0 {
         return Err(AarambhError::Shape(format!(
-            "frame_embeddings must be [frames, patches, hidden], got {frame_dims:?}"
+            "{media_name}_embeddings must be [items, patches, hidden], got {media_dims:?}"
         )));
     }
-    if text_dims[2] != frame_dims[2] {
+    if text_dims[2] != media_dims[2] {
         return Err(AarambhError::Shape(format!(
-            "text hidden dim {} does not match frame hidden dim {}",
-            text_dims[2], frame_dims[2]
+            "text hidden dim {} does not match {media_name} hidden dim {}",
+            text_dims[2], media_dims[2]
         )));
     }
     let placeholders = text_tokens
         .iter()
-        .filter(|token| **token == video_placeholder_id)
+        .filter(|token| **token == placeholder_id)
         .count();
     let separators = text_tokens
         .iter()
-        .filter(|token| **token == frame_separator_id)
+        .filter(|token| **token == separator_id)
         .count();
-    if placeholders != 1 || separators != frame_dims[0] - 1 {
+    if placeholders != 1 || separators != media_dims[0] - 1 {
         return Err(AarambhError::Config(format!(
-            "video prompt requires one placeholder and {} frame separators; found {placeholders} and {separators}",
-            frame_dims[0] - 1
+            "{media_name} prompt requires one placeholder and {} separators; found {placeholders} and {separators}",
+            media_dims[0] - 1
         )));
     }
 
-    let mut next_frame = 0usize;
-    let mut parts = Vec::with_capacity(text_tokens.len() + frame_dims[0]);
+    let mut next_item = 0usize;
+    let mut parts = Vec::with_capacity(text_tokens.len() + media_dims[0]);
     for (index, token) in text_tokens.iter().enumerate() {
-        if *token == video_placeholder_id {
-            parts.push(frame_embeddings.narrow(0, 0, 1)?);
-            next_frame = 1;
+        if *token == placeholder_id {
+            parts.push(media_embeddings.narrow(0, 0, 1)?);
+            next_item = 1;
             continue;
         }
         parts.push(text_embeddings.narrow(1, index, 1)?);
-        if *token == frame_separator_id {
-            parts.push(frame_embeddings.narrow(0, next_frame, 1)?);
-            next_frame += 1;
+        if *token == separator_id {
+            parts.push(media_embeddings.narrow(0, next_item, 1)?);
+            next_item += 1;
         }
     }
     Ok(Tensor::cat(&parts, 1)?)
