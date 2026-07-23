@@ -19,14 +19,17 @@ use aarambh_ai_selflearn::{
     VisionVerifierKind, require_vision_hardware,
 };
 use aarambh_ai_tokenizer::{
-    ASSISTANT, BpeTokenizer, FRAME_SEP, FRAME_SEP_ID, IMAGE, IMAGE_END, IMAGE_ID, THINK_END_ID,
-    THINK_START_ID, USER, VIDEO, VIDEO_END, VIDEO_ID,
+    ASSISTANT, BpeTokenizer, DOCUMENT, DOCUMENT_END, DOCUMENT_ID, FRAME_SEP, FRAME_SEP_ID, IMAGE,
+    IMAGE_END, IMAGE_ID, PAGE_SEP, PAGE_SEP_ID, THINK_END_ID, THINK_START_ID, USER, VIDEO,
+    VIDEO_END, VIDEO_ID,
 };
 use aarambh_ai_train::TrainingRunConfig;
 use aarambh_ai_vision::{
-    ClipVisionEncoder, FrameSamplingStrategy, ImagePreprocessor, ProjectorConfig, TemporalEncoder,
-    TemporalEncodingConfig, TemporalEncodingKind, VideoSamplingConfig, VisionEncoderConfig,
-    VisionModel, VisionPreprocessConfig, VisionProjector, decode_sampled_video,
+    ClipVisionEncoder, DocumentSource, FrameSamplingStrategy, ImagePreprocessor,
+    LayoutAwareProjector, LayoutEncodingKind, LayoutProjectorConfig, PageRasterizer,
+    PageRasterizerConfig, ProjectorConfig, TemporalEncoder, TemporalEncodingConfig,
+    TemporalEncodingKind, VideoSamplingConfig, VisionEncoderConfig, VisionModel,
+    VisionPreprocessConfig, VisionProjector, decode_sampled_video, interleave_document_tokens,
     interleave_image_tokens, interleave_video_tokens,
 };
 use candle_core::Tensor;
@@ -51,6 +54,14 @@ pub struct InferArgs {
     pub image: Option<PathBuf>,
     #[arg(long, conflicts_with = "image")]
     pub video: Option<PathBuf>,
+    #[arg(long, conflicts_with_all = ["image", "video"])]
+    pub document: Option<PathBuf>,
+    #[arg(long, requires = "document")]
+    pub pages: Option<String>,
+    #[arg(long, requires = "document")]
+    pub document_dpi: Option<u32>,
+    #[arg(long, requires = "document")]
+    pub max_document_pages: Option<usize>,
     #[arg(long)]
     pub frames: Option<usize>,
     #[arg(long)]
@@ -176,9 +187,9 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
         );
     }
     if self_learn_mode.is_enabled() {
-        if args.video.is_some() {
+        if args.video.is_some() || args.document.is_some() {
             return Err(AarambhError::Unsupported(
-                "video self-learning is not part of Phase 35; use text/image self-learning or disable --self-learn"
+                "video/document self-learning is not supported; use text/image self-learning or disable --self-learn"
                     .into(),
             )
             .into());
@@ -223,6 +234,20 @@ pub fn run(args: InferArgs) -> anyhow::Result<()> {
         dtype,
     )?;
     let tokenizer_for_view = engine.tokenizer().clone();
+    if let Some(document_path) = args.document.clone() {
+        return run_document_infer(
+            &args,
+            &run_config,
+            engine,
+            document_path,
+            dtype,
+            config,
+            prompt,
+            safety_mode,
+            thinking_mode,
+            tokenizer_for_view,
+        );
+    }
     if let Some(video_path) = args.video.clone() {
         return run_video_infer(
             &args,
@@ -507,9 +532,9 @@ fn validate_speculative_args(
         }
         return Ok(());
     }
-    if args.image.is_some() || args.video.is_some() {
+    if args.image.is_some() || args.video.is_some() || args.document.is_some() {
         return Err(AarambhError::Unsupported(
-            "speculative decoding supports text inference only; --image/--video are not supported"
+            "speculative decoding supports text inference only; --image/--video/--document are not supported"
                 .into(),
         )
         .into());
@@ -583,9 +608,9 @@ fn load_tool_calling_config(
         }
         return Ok(None);
     };
-    if args.image.is_some() || args.video.is_some() {
+    if args.image.is_some() || args.video.is_some() || args.document.is_some() {
         return Err(AarambhError::Unsupported(
-            "Phase 26 tool calling supports text inference only; --image/--video are not supported"
+            "Phase 26 tool calling supports text inference only; multimodal inputs are not supported"
                 .into(),
         )
         .into());
@@ -902,6 +927,103 @@ fn run_video_infer(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_document_infer(
+    args: &InferArgs,
+    run_config: &TrainingRunConfig,
+    mut engine: InferenceEngine,
+    document_path: PathBuf,
+    dtype: candle_core::DType,
+    config: GenerationConfig,
+    prompt: String,
+    safety_mode: SafetyMode,
+    thinking_mode: ThinkingMode,
+    tokenizer_for_view: BpeTokenizer,
+) -> anyhow::Result<()> {
+    let runtime = load_document_runtime(run_config, engine.device(), dtype)?;
+    let selected_pages = args
+        .pages
+        .as_deref()
+        .map(parse_page_selection)
+        .transpose()?;
+    let (page_tokens, page_count) = project_document_tokens(
+        &runtime,
+        &document_path,
+        selected_pages.as_deref(),
+        engine.device(),
+        args.document_dpi,
+        args.max_document_pages,
+    )?;
+    let prompt = ensure_document_prompt(&prompt, page_count);
+
+    if let Some(policy) = SafetyPolicy::for_mode(safety_mode)
+        .map(|policy| policy.with_audit_path(&args.safety_audit_log))
+    {
+        let adapter = DocumentSafetyAdapter {
+            engine,
+            page_tokens,
+        };
+        let mut guard = SafetyGuard::new(adapter, policy);
+        let mut stream_state = StreamState::default();
+        let response = if args.stream {
+            guard.generate_streaming_with_callback(&prompt, config, print_safe_stream_event)?
+        } else {
+            guard.generate_with_callback(&prompt, config, |step| {
+                if args.predict_view {
+                    print!(
+                        "{}",
+                        predict_view::render(
+                            step,
+                            &tokenizer_for_view,
+                            args.temperature,
+                            args.top_p,
+                        )
+                    );
+                    io::stdout().flush()?;
+                }
+                Ok(())
+            })?
+        };
+        print_safe_response(&response, thinking_mode, args.stream, &mut stream_state)?;
+        io::stdout().flush()?;
+        eprintln!(
+            "finish_reason={}",
+            response
+                .output
+                .as_ref()
+                .map(|output| format!("{:?}", output.finish_reason))
+                .unwrap_or_else(|| "SafetyBlocked".to_string())
+        );
+        return Ok(());
+    }
+
+    let embeddings = build_document_prompt_embeddings(&engine, &page_tokens, &prompt)?;
+    let mut stream_state = StreamState::default();
+    let output = engine.generate_with_embeddings_callback(&embeddings, config, |step| {
+        if args.predict_view {
+            print!(
+                "{}",
+                predict_view::render(step, &tokenizer_for_view, args.temperature, args.top_p)
+            );
+        }
+        if args.stream {
+            stream_step(step, thinking_mode, &mut stream_state)?;
+        }
+        if args.predict_view || args.stream {
+            io::stdout().flush()?;
+        }
+        Ok(())
+    })?;
+    if args.stream {
+        finish_stream(&mut stream_state);
+    } else {
+        print_generation_output(&output, thinking_mode)?;
+    }
+    io::stdout().flush()?;
+    eprintln!("finish_reason={:?}", output.finish_reason);
+    Ok(())
+}
+
 fn ensure_video_prompt(prompt: &str, frame_count: usize) -> String {
     if prompt.contains(VIDEO) {
         return prompt.to_string();
@@ -912,6 +1034,36 @@ fn ensure_video_prompt(prompt: &str, frame_count: usize) -> String {
     }
     marker.push_str(VIDEO_END);
     format!("{marker}\n{prompt}")
+}
+
+fn ensure_document_prompt(prompt: &str, page_count: usize) -> String {
+    if prompt.contains(DOCUMENT) {
+        return prompt.to_string();
+    }
+    let mut marker = String::from(DOCUMENT);
+    for _ in 1..page_count {
+        marker.push_str(PAGE_SEP);
+    }
+    marker.push_str(DOCUMENT_END);
+    format!("{marker}\n{prompt}")
+}
+
+fn parse_page_selection(value: &str) -> anyhow::Result<Vec<usize>> {
+    let pages = value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(|item| {
+            item.parse::<usize>()
+                .map_err(|error| anyhow::anyhow!("invalid 1-based document page {item:?}: {error}"))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    if pages.is_empty() || pages.contains(&0) {
+        return Err(anyhow::anyhow!(
+            "--pages requires non-zero 1-based page numbers"
+        ));
+    }
+    Ok(pages)
 }
 
 fn parse_frame_sampling(value: &str) -> anyhow::Result<FrameSamplingStrategy> {
@@ -929,6 +1081,13 @@ struct VisionRuntime {
     preprocess: ImagePreprocessor,
     temporal: Option<TemporalEncoder>,
     cache_salt: String,
+}
+
+struct DocumentRuntime {
+    vision: VisionRuntime,
+    layout: LayoutAwareProjector,
+    rasterizer_config: PageRasterizerConfig,
+    encoder_page_batch_size: usize,
 }
 
 fn load_vision_runtime(
@@ -1003,6 +1162,56 @@ fn load_vision_runtime(
     })
 }
 
+fn load_document_runtime(
+    run_config: &TrainingRunConfig,
+    device: &candle_core::Device,
+    dtype: candle_core::DType,
+) -> anyhow::Result<DocumentRuntime> {
+    let vision_config = run_config
+        .vision
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("--document requires a [vision] config block"))?;
+    let document = vision_config
+        .document
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("--document requires a [vision.document] config block"))?;
+    document.validate()?;
+    let encoder_config = VisionEncoderConfig::from_json(&vision_config.clip_config_path)?;
+    let vision = load_vision_runtime(run_config, device, dtype)?;
+    let patch_side = encoder_config.image_size / encoder_config.patch_size;
+    let layout_varmap = VarMap::new();
+    let layout_vb = VarBuilder::from_varmap(&layout_varmap, dtype, device);
+    let layout = LayoutAwareProjector::new(
+        vision.model.projector().clone(),
+        LayoutProjectorConfig {
+            patch_rows: patch_side,
+            patch_cols: patch_side,
+            hidden_dim: run_config.model.hidden_dim,
+            encoding: document.layout_encoding,
+        },
+        (document.layout_encoding == LayoutEncodingKind::Learned).then_some(layout_vb),
+    )?;
+    if document.layout_encoding == LayoutEncodingKind::Learned {
+        let path = document.layout_path.as_ref().ok_or_else(|| {
+            AarambhError::Config(
+                "learned document layout encoding requires vision.document.layout_path".into(),
+            )
+        })?;
+        let mut layout_varmap = layout_varmap;
+        layout_varmap.load(path)?;
+    }
+    Ok(DocumentRuntime {
+        vision,
+        layout,
+        rasterizer_config: PageRasterizerConfig {
+            target_dpi: document.target_dpi,
+            max_pages_per_document: document.max_pages_per_document,
+            max_page_pixels: document.max_page_pixels,
+        },
+        encoder_page_batch_size: document.encoder_page_batch_size,
+    })
+}
+
 fn ensure_image_prompt(prompt: &str) -> String {
     if prompt.contains(IMAGE) {
         prompt.to_string()
@@ -1044,6 +1253,88 @@ fn project_image_tokens(
         .preprocess_path(image_path, device)?
         .unsqueeze(0)?;
     runtime.model.forward(&image)
+}
+
+fn build_document_prompt_embeddings(
+    engine: &InferenceEngine,
+    page_tokens: &Tensor,
+    prompt: &str,
+) -> aarambh_ai_core::Result<Tensor> {
+    engine.tokenizer().validate_document_special_tokens()?;
+    let prompt_ids = engine.tokenizer().encode(prompt)?;
+    if prompt_ids.is_empty() {
+        return Err(AarambhError::Config(
+            "document prompt produced no tokens".into(),
+        ));
+    }
+    let text = Tensor::from_vec(prompt_ids.clone(), (1, prompt_ids.len()), engine.device())?;
+    let text_embeddings = engine.model().embed_tokens(&text)?;
+    interleave_document_tokens(
+        &prompt_ids,
+        &text_embeddings,
+        page_tokens,
+        DOCUMENT_ID,
+        PAGE_SEP_ID,
+    )
+}
+
+fn project_document_tokens(
+    runtime: &DocumentRuntime,
+    document_path: &Path,
+    selected_pages: Option<&[usize]>,
+    device: &candle_core::Device,
+    target_dpi: Option<u32>,
+    max_pages: Option<usize>,
+) -> aarambh_ai_core::Result<(Tensor, usize)> {
+    let mut rasterizer_config = runtime.rasterizer_config.clone();
+    if let Some(dpi) = target_dpi {
+        rasterizer_config.target_dpi = dpi;
+    }
+    if let Some(max_pages) = max_pages {
+        rasterizer_config.max_pages_per_document = max_pages;
+    }
+    let rasterizer = PageRasterizer::new(rasterizer_config)?;
+    let rendered = rasterizer.rasterize(
+        &DocumentSource::File(document_path.to_path_buf()),
+        selected_pages,
+    )?;
+    if rendered.truncated {
+        eprintln!(
+            "warning: document has {} pages; using the first {}",
+            rendered.source_page_count,
+            rendered.pages.len()
+        );
+    }
+    let pages = rendered
+        .pages
+        .into_iter()
+        .map(|page| page.image)
+        .collect::<Vec<_>>();
+    let pixels = runtime
+        .vision
+        .preprocess
+        .preprocess_document_pages(&pages, device)?;
+    let mut chunks = Vec::new();
+    for start in (0..pages.len()).step_by(runtime.encoder_page_batch_size) {
+        let len = runtime.encoder_page_batch_size.min(pages.len() - start);
+        chunks.push(
+            runtime
+                .vision
+                .model
+                .encoder()
+                .forward(&pixels.narrow(0, start, len)?)?,
+        );
+    }
+    let references = chunks.iter().collect::<Vec<_>>();
+    let patch_tokens = Tensor::cat(&references, 0)?;
+    let projected = runtime.layout.forward(
+        &patch_tokens,
+        (
+            runtime.layout.config().patch_rows,
+            runtime.layout.config().patch_cols,
+        ),
+    )?;
+    Ok((projected, pages.len()))
 }
 
 fn build_video_prompt_embeddings(
@@ -1128,6 +1419,35 @@ struct VideoSafetyAdapter {
     video_path: PathBuf,
     sampling: VideoSamplingConfig,
     encoder_batch_size: usize,
+}
+
+struct DocumentSafetyAdapter {
+    engine: InferenceEngine,
+    page_tokens: Tensor,
+}
+
+impl SafetyGenerator for DocumentSafetyAdapter {
+    fn generate(
+        &mut self,
+        prompt: &str,
+        config: GenerationConfig,
+    ) -> aarambh_ai_core::Result<GenerationOutput> {
+        self.generate_with_callback(prompt, config, |_| Ok(()))
+    }
+
+    fn generate_with_callback<F>(
+        &mut self,
+        prompt: &str,
+        config: GenerationConfig,
+        on_step: F,
+    ) -> aarambh_ai_core::Result<GenerationOutput>
+    where
+        F: FnMut(&GenerationStep) -> aarambh_ai_core::Result<()>,
+    {
+        let embeddings = build_document_prompt_embeddings(&self.engine, &self.page_tokens, prompt)?;
+        self.engine
+            .generate_with_embeddings_callback(&embeddings, config, on_step)
+    }
 }
 
 impl SafetyGenerator for VideoSafetyAdapter {
@@ -1750,6 +2070,10 @@ mod tests {
             tokenizer: Some("tokenizer.json".into()),
             image: None,
             video: None,
+            document: None,
+            pages: None,
+            document_dpi: None,
+            max_document_pages: None,
             frames: None,
             frame_sampling: None,
             prompt: "test".into(),
@@ -1801,6 +2125,13 @@ mod tests {
         assert!(validate_speculative_args(&args, SelfLearnMode::Disabled, &model).is_err());
         args.image = None;
         assert!(validate_speculative_args(&args, SelfLearnMode::Cpu, &model).is_err());
+    }
+
+    #[test]
+    fn document_page_selection_is_one_based() {
+        assert_eq!(parse_page_selection("3, 1").unwrap(), vec![3, 1]);
+        assert!(parse_page_selection("0").is_err());
+        assert!(parse_page_selection("").is_err());
     }
 
     #[test]

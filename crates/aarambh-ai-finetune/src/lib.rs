@@ -6,6 +6,7 @@
 //! Phase 20 adds vision-language DoRA instruction tuning.
 //! Phase 24 adds DoRA/QDoRA Direct Preference Optimization.
 //! Phase 35 extends the shared VLM trainer to native video instruction tuning.
+//! Phase 36 extends it to PDF and scanned-document instruction tuning.
 #![deny(missing_docs)]
 
 /// Adapter metadata and serialization helpers.
@@ -59,6 +60,7 @@ pub use verifier::{
     extract_final_number,
 };
 pub use vlm_dora::{
-    VideoVlmDoraRunConfig, VlmDoraMetrics, VlmDoraRunConfig, VlmDoraTrainer,
-    run_video_vlm_dora_from_config, run_vlm_dora_from_config,
+    DocumentVlmDoraRunConfig, VideoVlmDoraRunConfig, VlmDoraMetrics, VlmDoraRunConfig,
+    VlmDoraTrainer, run_document_vlm_dora_from_config, run_video_vlm_dora_from_config,
+    run_vlm_dora_from_config,
 };

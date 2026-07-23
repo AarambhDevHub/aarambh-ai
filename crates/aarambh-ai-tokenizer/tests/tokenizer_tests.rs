@@ -4,10 +4,11 @@ use aarambh_ai_core::TokenizerLike;
 use aarambh_ai_tokenizer::{
     BpeTokenizer, Vocab,
     special::{
-        ASSISTANT, ASSISTANT_ID, BOS, BOS_ID, ENDOFTEXT, ENDOFTEXT_ID, FRAME_SEP, FRAME_SEP_ID,
-        IMAGE, IMAGE_END, IMAGE_END_ID, IMAGE_ID, PAD, PAD_ID, SPECIAL_TOKEN_COUNT, THINK_END,
-        THINK_END_ID, THINK_START, THINK_START_ID, USER, USER_ID, VIDEO, VIDEO_END, VIDEO_END_ID,
-        VIDEO_ID, VISION_SPECIAL_TOKENS,
+        ASSISTANT, ASSISTANT_ID, BOS, BOS_ID, DOCUMENT, DOCUMENT_END, DOCUMENT_END_ID, DOCUMENT_ID,
+        ENDOFTEXT, ENDOFTEXT_ID, FRAME_SEP, FRAME_SEP_ID, IMAGE, IMAGE_END, IMAGE_END_ID, IMAGE_ID,
+        PAD, PAD_ID, PAGE_SEP, PAGE_SEP_ID, SPECIAL_TOKEN_COUNT, THINK_END, THINK_END_ID,
+        THINK_START, THINK_START_ID, USER, USER_ID, VIDEO, VIDEO_END, VIDEO_END_ID, VIDEO_ID,
+        VIDEO_SPECIAL_TOKENS, VISION_SPECIAL_TOKENS,
     },
 };
 
@@ -25,6 +26,9 @@ fn special_token_ids_are_correct() {
     assert_eq!(VIDEO_ID, 9);
     assert_eq!(VIDEO_END_ID, 10);
     assert_eq!(FRAME_SEP_ID, 11);
+    assert_eq!(DOCUMENT_ID, 12);
+    assert_eq!(DOCUMENT_END_ID, 13);
+    assert_eq!(PAGE_SEP_ID, 14);
     assert_eq!(ENDOFTEXT, "<|endoftext|>");
     assert_eq!(PAD, "<|pad|>");
     assert_eq!(BOS, "<|bos|>");
@@ -37,6 +41,9 @@ fn special_token_ids_are_correct() {
     assert_eq!(VIDEO, "<video>");
     assert_eq!(VIDEO_END, "<video_end>");
     assert_eq!(FRAME_SEP, "<frame_sep>");
+    assert_eq!(DOCUMENT, "<document>");
+    assert_eq!(DOCUMENT_END, "<document_end>");
+    assert_eq!(PAGE_SEP, "<page_sep>");
 }
 
 #[test]
@@ -296,4 +303,35 @@ fn legacy_image_tokenizer_does_not_emit_unmapped_video_ids() {
     };
 
     assert!(!tokenizer.encode("<video>").unwrap().contains(&VIDEO_ID));
+}
+
+#[test]
+fn video_tokenizer_upgrades_document_tokens_without_changing_learned_text() {
+    let mut token_to_id = HashMap::new();
+    let mut id_to_token = Vec::new();
+    for (token, id) in VIDEO_SPECIAL_TOKENS {
+        token_to_id.insert(token.to_string(), id);
+        id_to_token.push(token.to_string());
+    }
+    token_to_id.insert("invoice".into(), 12);
+    id_to_token.push("invoice".into());
+    let tokenizer = BpeTokenizer {
+        vocab: Vocab {
+            token_to_id,
+            id_to_token,
+        },
+        merges: Vec::new(),
+        merge_rank: HashMap::new(),
+    };
+
+    let upgraded = tokenizer.upgraded_for_document().unwrap();
+    upgraded.validate_document_special_tokens().unwrap();
+    assert_eq!(upgraded.vocab.get_id("invoice"), Some(15));
+    assert_eq!(upgraded.decode(&[15]).unwrap(), "invoice");
+    assert_eq!(
+        upgraded
+            .encode("<document><page_sep><document_end>")
+            .unwrap(),
+        vec![12, 14, 13]
+    );
 }

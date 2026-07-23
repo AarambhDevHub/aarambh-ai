@@ -26,14 +26,21 @@ This documents the H.264 MP4 boundary, frame sampling, tokenizer/checkpoint
 migration, temporal fusion, video DoRA/QDoRA tuning, inference, NExT-QA
 evaluation, smoke workflow, and memory controls introduced in Phase 35.
 
-### 3. `aarambh-ai-math-formulas-guide.md`
+### 3. `phase36_document.md`
+**The native-document implementation and operating guide.**
+
+This documents PDF/page rendering, 2D layout projection, vocabulary migration,
+document DoRA/QDoRA tuning, inference, DocVQA-style import, ANLS evaluation,
+the local smoke workflow, and resource limits introduced in Phase 36.
+
+### 4. `aarambh-ai-math-formulas-guide.md`
 **The math underneath every phase, explained from zero.**
 
 Once you know *what* each phase does, this file explains the actual formulas doing the work — Dot Product, Matrix Multiplication, Softmax, Scaled Dot-Product Attention, Layer Normalization, GELU Activation, Cross-Entropy Loss, Gradient Descent, Adam Optimizer, RoPE, LoRA Decomposition, Quantization, KL Divergence, and Perplexity.
 
 Every formula comes with a symbol-by-symbol translation (so `Σ`, `∂`, `θ` stop looking scary) and **two fully solved numeric examples** worked by hand, step by step. Read this after the phases guide, whenever you want to understand the actual arithmetic behind a specific phase.
 
-### 4. `ai-ml-dl-dataset-creation-guide.md`
+### 5. `ai-ml-dl-dataset-creation-guide.md`
 **The foundation underneath everything — terminology and where the training data comes from.**
 
 Two parts:
@@ -42,7 +49,7 @@ Two parts:
 
 Read this first if you're completely new to AI in general, or read it alongside the other two whenever data-related phases (like Phase 2, Data Pipeline) come up.
 
-### 5. `aarambh-ai-config-toml-guide.md`
+### 6. `aarambh-ai-config-toml-guide.md`
 **Every field in every `.toml` config file, explained — the practical "turn the dial" layer.**
 
 This walks through the checked-in training and inference configurations in
@@ -56,6 +63,8 @@ vision, video, and smoke configurations — field by field:
 - **`[vision]`:** image/projector paths and VLM limits.
 - **`[vision.video]`:** video root, sampling budget, temporal encoding,
   frozen-feature cache, and encoder batch size.
+- **`[vision.document]`:** document root, PDF DPI/page/pixel limits, 2D
+  layout encoding, feature cache, and encoder page batch size.
 - **`[train]` hyperparameters:** `lr`, `batch_size`/`grad_accum_steps`, `warmup_steps`, `min_lr_ratio`, `weight_decay`, Adam's `beta1`/`beta2`/`epsilon`, `clip_grad_norm`, checkpointing, and more — each one tied back to the exact formula it came from in the math guide.
 
 Read this whenever you're about to write a new training config, or want to understand exactly what a specific field in an existing one actually does.

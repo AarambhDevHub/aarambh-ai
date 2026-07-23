@@ -4,19 +4,22 @@ use std::time::Instant;
 
 use aarambh_ai_core::{AarambhError, Device, ModelConfig, Result, TokenizerLike, TrainConfig};
 use aarambh_ai_tokenizer::{
-    BpeTokenizer, FRAME_SEP, FRAME_SEP_ID, IMAGE, IMAGE_END, IMAGE_ID, VIDEO, VIDEO_END, VIDEO_ID,
+    BpeTokenizer, DOCUMENT, DOCUMENT_END, DOCUMENT_ID, FRAME_SEP, FRAME_SEP_ID, IMAGE, IMAGE_END,
+    IMAGE_ID, PAGE_SEP, PAGE_SEP_ID, VIDEO, VIDEO_END, VIDEO_ID,
 };
 use aarambh_ai_train::optim::clip_gradients;
 use aarambh_ai_train::{
-    AdamW, AdamWConfig, CosineScheduleWithWarmup, GradMap, TrainState, VideoTrainingConfig,
-    VisionTrainingConfig, cross_entropy_loss,
+    AdamW, AdamWConfig, CosineScheduleWithWarmup, DocumentTrainingConfig, GradMap, TrainState,
+    VideoTrainingConfig, VisionTrainingConfig, cross_entropy_loss,
 };
 use aarambh_ai_vision::{
-    ClipVisionEncoder, ImagePreprocessor, ProjectorConfig, TemporalEncoder, TemporalEncodingConfig,
+    ClipVisionEncoder, DocQaExample, DocumentFeatureCache, DocumentFeatureCacheKey, DocumentSource,
+    ImagePreprocessor, LayoutAwareProjector, LayoutEncodingKind, LayoutProjectorConfig,
+    PageRasterizer, PageRasterizerConfig, ProjectorConfig, TemporalEncoder, TemporalEncodingConfig,
     TemporalEncodingKind, VideoFeatureCache, VideoFeatureCacheKey, VideoQaExample,
     VideoSamplingConfig, VisionEncoderConfig, VisionPreprocessConfig, VisionProjector, VqaExample,
-    decode_sampled_video, interleave_image_tokens, interleave_video_tokens, load_video_qa,
-    load_vqa_jsonl,
+    decode_sampled_video, interleave_document_tokens, interleave_image_tokens,
+    interleave_video_tokens, load_document_qa_jsonl, load_video_qa, load_vqa_jsonl,
 };
 use candle_core::backprop::GradStore;
 use candle_core::{DType, Tensor};
@@ -71,6 +74,13 @@ pub struct VideoVlmDoraRunConfig {
     pub vlm: VlmDoraRunConfig,
 }
 
+/// Configuration for document-language DoRA instruction tuning.
+#[derive(Debug, Clone)]
+pub struct DocumentVlmDoraRunConfig {
+    /// Shared VLM model, optimizer, vision, and document paths.
+    pub vlm: VlmDoraRunConfig,
+}
+
 /// Metrics emitted by a VLM DoRA optimizer step.
 #[derive(Debug, Clone)]
 pub struct VlmDoraMetrics {
@@ -88,6 +98,8 @@ pub struct VlmDoraMetrics {
     pub projector_grad_norm: Option<f64>,
     /// Temporal-position gradient norm for learned video positions.
     pub temporal_grad_norm: Option<f64>,
+    /// Layout-position gradient norm for learned document positions.
+    pub layout_grad_norm: Option<f64>,
     /// Examples processed per second since the last log.
     pub samples_per_second: f64,
 }
@@ -110,6 +122,7 @@ pub struct VlmDoraTrainer {
     vlm_metadata: VlmArtifactsMetadata,
     examples: Vec<MultimodalExample>,
     video: Option<VideoTrainingRuntime>,
+    document: Option<DocumentTrainingRuntime>,
     shuffle: bool,
     rng: StdRng,
     state: TrainState,
@@ -125,6 +138,7 @@ pub struct VlmDoraTrainer {
 enum MultimodalExample {
     Image(VqaExample),
     Video(VideoQaExample),
+    Document(DocQaExample),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -134,6 +148,10 @@ enum MediaLayout {
     },
     Video {
         frame_count: usize,
+        patch_count: usize,
+    },
+    Document {
+        page_count: usize,
         patch_count: usize,
     },
 }
@@ -152,6 +170,25 @@ struct VideoRuntimeParts {
     config: VideoTrainingConfig,
     temporal: TemporalEncoder,
     temporal_varmap: VarMap,
+    encoder_signature: String,
+}
+
+struct DocumentTrainingRuntime {
+    config: DocumentTrainingConfig,
+    layout: LayoutAwareProjector,
+    layout_varmap: VarMap,
+    layout_optimizer: Option<AdamW>,
+    layout_pending_grads: GradMap,
+    rasterizer: PageRasterizer,
+    feature_cache: DocumentFeatureCache,
+    encoder_signature: String,
+}
+
+struct DocumentRuntimeParts {
+    config: DocumentTrainingConfig,
+    layout: LayoutAwareProjector,
+    layout_varmap: VarMap,
+    rasterizer: PageRasterizer,
     encoder_signature: String,
 }
 
@@ -174,6 +211,7 @@ impl VlmDoraTrainer {
         shuffle: bool,
         train_projector: bool,
         video_parts: Option<VideoRuntimeParts>,
+        document_parts: Option<DocumentRuntimeParts>,
         device: candle_core::Device,
     ) -> Result<Self> {
         if train_config.batch_size == 0 || train_config.grad_accum_steps == 0 {
@@ -237,6 +275,35 @@ impl VlmDoraTrainer {
                 })
             })
             .transpose()?;
+        let document = document_parts
+            .map(|parts| -> Result<DocumentTrainingRuntime> {
+                let layout_optimizer = if parts.config.layout_encoding
+                    == LayoutEncodingKind::Learned
+                {
+                    let optimizer =
+                        AdamW::from_varmap(&parts.layout_varmap, AdamWConfig::from(&train_config))?;
+                    if optimizer.parameters().is_empty() {
+                        return Err(AarambhError::Config(
+                            "learned document layout encoding produced zero trainable tensors"
+                                .into(),
+                        ));
+                    }
+                    Some(optimizer)
+                } else {
+                    None
+                };
+                Ok(DocumentTrainingRuntime {
+                    feature_cache: DocumentFeatureCache::new(parts.config.feature_cache_entries),
+                    config: parts.config,
+                    layout: parts.layout,
+                    layout_varmap: parts.layout_varmap,
+                    layout_optimizer,
+                    layout_pending_grads: GradMap::new(),
+                    rasterizer: parts.rasterizer,
+                    encoder_signature: parts.encoder_signature,
+                })
+            })
+            .transpose()?;
 
         let seed = train_config.seed;
         Ok(Self {
@@ -256,6 +323,7 @@ impl VlmDoraTrainer {
             vlm_metadata,
             examples,
             video,
+            document,
             shuffle,
             rng: StdRng::seed_from_u64(seed),
             state: TrainState::default(),
@@ -362,6 +430,27 @@ impl VlmDoraTrainer {
                     },
                 )
             }
+            MultimodalExample::Document(example) => {
+                let (projected, page_count, patch_count) = self.project_document(example)?;
+                let prefix = document_marker_prefix(page_count);
+                let (tokens, target) = self.multimodal_tokens(
+                    &example.question,
+                    example.primary_answer(),
+                    example.thinking.as_deref(),
+                    &prefix,
+                    DOCUMENT_ID,
+                    page_count * patch_count,
+                )?;
+                (
+                    projected,
+                    tokens,
+                    target,
+                    MediaLayout::Document {
+                        page_count,
+                        patch_count,
+                    },
+                )
+            }
         };
         let text = Tensor::from_vec(text_tokens.clone(), (1, text_tokens.len()), &self.device)?;
         let text_embeddings = self.model.embed_tokens(&text)?.detach();
@@ -375,6 +464,13 @@ impl VlmDoraTrainer {
                 &projected,
                 VIDEO_ID,
                 FRAME_SEP_ID,
+            )?,
+            MediaLayout::Document { .. } => interleave_document_tokens(
+                &text_tokens,
+                &text_embeddings,
+                &projected,
+                DOCUMENT_ID,
+                PAGE_SEP_ID,
             )?,
         };
         let logits = self.model.forward_embeddings_train(&fused)?;
@@ -483,6 +579,65 @@ impl VlmDoraTrainer {
         Ok((projected, patch_tokens.dims()[0], patch_tokens.dims()[1]))
     }
 
+    fn project_document(&mut self, example: &DocQaExample) -> Result<(Tensor, usize, usize)> {
+        let document = self.document.as_mut().ok_or_else(|| {
+            AarambhError::Config("document example reached a non-document VLM trainer".into())
+        })?;
+        let source = resolve_document_source(&document.config.document_root, &example.source());
+        let rasterizer_config = PageRasterizerConfig {
+            target_dpi: document.config.target_dpi,
+            max_pages_per_document: document.config.max_pages_per_document,
+            max_page_pixels: document.config.max_page_pixels,
+        };
+        let cache_key = DocumentFeatureCacheKey::new(
+            &source,
+            example.pages.as_deref(),
+            rasterizer_config,
+            &document.encoder_signature,
+        )?;
+        let patch_tokens = match document.feature_cache.get(&cache_key) {
+            Some(features) => features,
+            None => {
+                let rendered = document
+                    .rasterizer
+                    .rasterize(&source, example.pages.as_deref())?;
+                if rendered.truncated {
+                    eprintln!(
+                        "warning: document has {} pages; using the first {}",
+                        rendered.source_page_count,
+                        rendered.pages.len()
+                    );
+                }
+                let pages = rendered
+                    .pages
+                    .into_iter()
+                    .map(|page| page.image)
+                    .collect::<Vec<_>>();
+                let pixels = self
+                    .preprocess
+                    .preprocess_document_pages(&pages, &self.device)?;
+                let mut chunks = Vec::new();
+                for start in (0..pages.len()).step_by(document.config.encoder_page_batch_size) {
+                    let len = document
+                        .config
+                        .encoder_page_batch_size
+                        .min(pages.len() - start);
+                    chunks.push(self.encoder.forward(&pixels.narrow(0, start, len)?)?);
+                }
+                let references = chunks.iter().collect::<Vec<_>>();
+                let features = Tensor::cat(&references, 0)?.detach();
+                document.feature_cache.insert(cache_key, features.clone());
+                features
+            }
+        };
+        let grid = (
+            document.layout.config().patch_rows,
+            document.layout.config().patch_cols,
+        );
+        let projected = document.layout.forward(&patch_tokens, grid)?;
+        Ok((projected, patch_tokens.dims()[0], patch_tokens.dims()[1]))
+    }
+
     fn accumulate_gradients(&mut self, grads: &GradStore) -> Result<()> {
         accumulate_for_optimizer(
             grads,
@@ -506,6 +661,16 @@ impl VlmDoraTrainer {
                 temporal_optimizer,
                 &mut video.temporal_pending_grads,
                 "VLM temporal encoder",
+            )?;
+        }
+        if let Some(document) = &mut self.document
+            && let Some(layout_optimizer) = &document.layout_optimizer
+        {
+            accumulate_for_optimizer(
+                grads,
+                layout_optimizer,
+                &mut document.layout_pending_grads,
+                "VLM document layout encoder",
             )?;
         }
         Ok(())
@@ -544,6 +709,19 @@ impl VlmDoraTrainer {
         } else {
             None
         };
+        let layout_grad_norm = if let Some(document) = &mut self.document
+            && let Some(layout_optimizer) = &mut document.layout_optimizer
+        {
+            let norm = clip_gradients(
+                &mut document.layout_pending_grads,
+                self.train_config.clip_grad_norm,
+            )?;
+            layout_optimizer.step(&document.layout_pending_grads, lr)?;
+            document.layout_pending_grads.clear();
+            Some(norm)
+        } else {
+            None
+        };
 
         self.state.step += 1;
         let metrics = VlmDoraMetrics {
@@ -554,6 +732,7 @@ impl VlmDoraTrainer {
             dora_grad_norm,
             projector_grad_norm,
             temporal_grad_norm,
+            layout_grad_norm,
             samples_per_second: self.samples_per_second_since_last_log(),
         };
         self.after_optimizer_step(&metrics)
@@ -573,8 +752,12 @@ impl VlmDoraTrainer {
                 .temporal_grad_norm
                 .map(|value| format!(" temporal_grad_norm={value:.4}"))
                 .unwrap_or_default();
+            let layout = metrics
+                .layout_grad_norm
+                .map(|value| format!(" layout_grad_norm={value:.4}"))
+                .unwrap_or_default();
             println!(
-                "vlm_dora step={} loss={:.4} ppl={:.2} lr={:.6} dora_grad_norm={:.4}{}{} samples/s={:.2}",
+                "vlm_dora step={} loss={:.4} ppl={:.2} lr={:.6} dora_grad_norm={:.4}{}{}{} samples/s={:.2}",
                 metrics.step,
                 metrics.loss,
                 metrics.perplexity,
@@ -582,6 +765,7 @@ impl VlmDoraTrainer {
                 metrics.dora_grad_norm,
                 projector,
                 temporal,
+                layout,
                 metrics.samples_per_second
             );
         }
@@ -611,7 +795,13 @@ impl VlmDoraTrainer {
         save_vlm_artifacts(
             &self.dora_varmap,
             &self.projector_varmap,
-            self.video.as_ref().map(|video| &video.temporal_varmap),
+            MediaArtifactVarMaps {
+                temporal: self.video.as_ref().map(|video| &video.temporal_varmap),
+                layout: self
+                    .document
+                    .as_ref()
+                    .map(|document| &document.layout_varmap),
+            },
             &self.metadata,
             &self.vlm_metadata,
             &self.state,
@@ -627,7 +817,13 @@ impl VlmDoraTrainer {
         save_vlm_artifacts(
             &self.dora_varmap,
             &self.projector_varmap,
-            self.video.as_ref().map(|video| &video.temporal_varmap),
+            MediaArtifactVarMaps {
+                temporal: self.video.as_ref().map(|video| &video.temporal_varmap),
+                layout: self
+                    .document
+                    .as_ref()
+                    .map(|document| &document.layout_varmap),
+            },
             &self.metadata,
             &self.vlm_metadata,
             &self.state,
@@ -715,6 +911,7 @@ pub fn run_vlm_dora_from_config(config: VlmDoraRunConfig) -> Result<()> {
         clip_weights_path: config.vision.clip_weights_path.display().to_string(),
         image_root: config.vision.image_root.clone(),
         video: None,
+        document: None,
     };
     let mut trainer = VlmDoraTrainer::new(
         model,
@@ -731,6 +928,7 @@ pub fn run_vlm_dora_from_config(config: VlmDoraRunConfig) -> Result<()> {
         examples,
         config.shuffle,
         config.train_projector,
+        None,
         None,
         candle_device,
     )?;
@@ -844,6 +1042,7 @@ pub fn run_video_vlm_dora_from_config(config: VideoVlmDoraRunConfig) -> Result<(
             sampling: video_config.sampling,
             temporal_encoding: video_config.temporal_encoding,
         }),
+        document: None,
     };
     let encoder_signature = format!(
         "{}:{}:{}:{}",
@@ -873,6 +1072,163 @@ pub fn run_video_vlm_dora_from_config(config: VideoVlmDoraRunConfig) -> Result<(
             temporal_varmap,
             encoder_signature,
         }),
+        None,
+        candle_device,
+    )?;
+    trainer.train()
+}
+
+/// Build and run document-language DoRA training using the shared VLM loop.
+pub fn run_document_vlm_dora_from_config(config: DocumentVlmDoraRunConfig) -> Result<()> {
+    let config = config.vlm;
+    config.lora_config.validate()?;
+    let document_config = config.vision.document.clone().ok_or_else(|| {
+        AarambhError::Config(
+            "document VLM training requires a [vision.document] config block".into(),
+        )
+    })?;
+    document_config.validate()?;
+    let candle_device = config.device.to_candle()?;
+    let tokenizer = BpeTokenizer::from_pretrained(&config.tokenizer_path)?;
+    tokenizer.validate_document_special_tokens()?;
+    let mut model_config = config.model_config.clone();
+    model_config.vocab_size = tokenizer.vocab_size();
+    if model_config.moe.is_some() {
+        return Err(AarambhError::Config(
+            "document VLM DoRA training currently requires a dense base model".into(),
+        ));
+    }
+
+    let base = aarambh_ai_weights::load_any_model_with_dtype(
+        &config.base_model_path,
+        &model_config,
+        &candle_device,
+        config.dtype,
+    )?;
+    let base_tensors = base.named_tensors();
+    drop(base);
+    let (model, dora_varmap) = DoraAarambhModel::from_tensors(
+        &model_config,
+        &base_tensors,
+        &config.lora_config,
+        config.qdora,
+        &candle_device,
+    )?;
+    eprintln!(
+        "document VLM adapter params: {} / {} ({:.3}%)",
+        model.adapter_param_count(),
+        model.base_param_count(),
+        model.trainable_ratio() * 100.0
+    );
+
+    let encoder_config = VisionEncoderConfig::from_json(&config.vision.clip_config_path)?;
+    let encoder = ClipVisionEncoder::load_pretrained(
+        &config.vision.clip_weights_path,
+        encoder_config.clone(),
+        &candle_device,
+        config.dtype,
+    )?;
+    let preprocess = ImagePreprocessor::new(VisionPreprocessConfig {
+        image_size: encoder_config.image_size,
+        ..VisionPreprocessConfig::default()
+    })?;
+    let projector_varmap = VarMap::new();
+    let projector_vb = VarBuilder::from_varmap(&projector_varmap, config.dtype, &candle_device);
+    let projector = VisionProjector::new(
+        ProjectorConfig {
+            vit_d_model: encoder_config.vit_d_model,
+            llm_d_model: model_config.hidden_dim,
+            hidden_mult: config.vision.projector_hidden_mult,
+        },
+        projector_vb,
+    )?;
+    let mut projector_varmap = projector_varmap;
+    projector_varmap.load(&config.projector_path)?;
+
+    let patch_side = encoder_config.image_size / encoder_config.patch_size;
+    let layout_varmap = VarMap::new();
+    let layout_vb = VarBuilder::from_varmap(&layout_varmap, config.dtype, &candle_device);
+    let layout = LayoutAwareProjector::new(
+        projector.clone(),
+        LayoutProjectorConfig {
+            patch_rows: patch_side,
+            patch_cols: patch_side,
+            hidden_dim: model_config.hidden_dim,
+            encoding: document_config.layout_encoding,
+        },
+        (document_config.layout_encoding == LayoutEncodingKind::Learned).then_some(layout_vb),
+    )?;
+    let mut layout_varmap = layout_varmap;
+    if let Some(path) = &document_config.layout_path {
+        layout_varmap.load(path)?;
+    }
+    let rasterizer_config = PageRasterizerConfig {
+        target_dpi: document_config.target_dpi,
+        max_pages_per_document: document_config.max_pages_per_document,
+        max_page_pixels: document_config.max_page_pixels,
+    };
+    let rasterizer = PageRasterizer::new(rasterizer_config)?;
+
+    let examples = load_document_qa_jsonl(&config.data_path, config.vision.max_samples)?
+        .into_iter()
+        .map(MultimodalExample::Document)
+        .collect();
+    let metadata = AdapterMetadata::new_with_method(
+        model_config,
+        config.lora_config.clone(),
+        Some(config.base_model_path.display().to_string()),
+        config.qdora,
+        AdapterMethod::Dora,
+    );
+    let layout_path = (document_config.layout_encoding == LayoutEncodingKind::Learned)
+        .then(|| "layout.safetensors".to_string());
+    let vlm_metadata = VlmArtifactsMetadata {
+        format_version: 3,
+        projector_path: "projector.safetensors".into(),
+        train_projector: config.train_projector,
+        base_projector_path: config.projector_path.display().to_string(),
+        clip_config_path: config.vision.clip_config_path.display().to_string(),
+        clip_weights_path: config.vision.clip_weights_path.display().to_string(),
+        image_root: config.vision.image_root.clone(),
+        video: None,
+        document: Some(DocumentArtifactsMetadata {
+            layout_path,
+            document_root: document_config.document_root.clone(),
+            target_dpi: document_config.target_dpi,
+            max_pages_per_document: document_config.max_pages_per_document,
+            layout_encoding: document_config.layout_encoding,
+        }),
+    };
+    let encoder_signature = format!(
+        "{}:{}:{}:{}:document-fit-pad",
+        config.vision.clip_weights_path.display(),
+        encoder_config.image_size,
+        encoder_config.patch_size,
+        encoder_config.vit_d_model
+    );
+    let mut trainer = VlmDoraTrainer::new(
+        model,
+        dora_varmap,
+        projector,
+        projector_varmap,
+        encoder,
+        preprocess,
+        tokenizer,
+        config.train_config,
+        config.output_dir,
+        metadata,
+        vlm_metadata,
+        examples,
+        config.shuffle,
+        config.train_projector,
+        None,
+        Some(DocumentRuntimeParts {
+            config: document_config,
+            layout,
+            layout_varmap,
+            rasterizer,
+            encoder_signature,
+        }),
         candle_device,
     )?;
     trainer.train()
@@ -888,6 +1244,7 @@ struct VlmArtifactsMetadata {
     clip_weights_path: String,
     image_root: PathBuf,
     video: Option<VideoArtifactsMetadata>,
+    document: Option<DocumentArtifactsMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -897,6 +1254,20 @@ struct VideoArtifactsMetadata {
     frame_count: usize,
     sampling: aarambh_ai_vision::FrameSamplingStrategy,
     temporal_encoding: TemporalEncodingKind,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DocumentArtifactsMetadata {
+    layout_path: Option<String>,
+    document_root: PathBuf,
+    target_dpi: u32,
+    max_pages_per_document: usize,
+    layout_encoding: LayoutEncodingKind,
+}
+
+struct MediaArtifactVarMaps<'a> {
+    temporal: Option<&'a VarMap>,
+    layout: Option<&'a VarMap>,
 }
 
 fn accumulate_for_optimizer(
@@ -931,7 +1302,7 @@ fn accumulate_for_optimizer(
 fn save_vlm_artifacts(
     dora_varmap: &VarMap,
     projector_varmap: &VarMap,
-    temporal_varmap: Option<&VarMap>,
+    media_varmaps: MediaArtifactVarMaps<'_>,
     metadata: &AdapterMetadata,
     vlm_metadata: &VlmArtifactsMetadata,
     state: &TrainState,
@@ -940,10 +1311,15 @@ fn save_vlm_artifacts(
     let output_dir = output_dir.as_ref();
     save_adapter(dora_varmap, metadata, output_dir)?;
     projector_varmap.save(output_dir.join("projector.safetensors"))?;
-    if let Some(temporal_varmap) = temporal_varmap
+    if let Some(temporal_varmap) = media_varmaps.temporal
         && !temporal_varmap.all_vars().is_empty()
     {
         temporal_varmap.save(output_dir.join("temporal.safetensors"))?;
+    }
+    if let Some(layout_varmap) = media_varmaps.layout
+        && !layout_varmap.all_vars().is_empty()
+    {
+        layout_varmap.save(output_dir.join("layout.safetensors"))?;
     }
     write_json(output_dir.join("vlm_config.json"), vlm_metadata)?;
     write_json(output_dir.join("train_state.json"), state)?;
@@ -964,6 +1340,18 @@ fn resolve_media_path(root: &Path, media_path: &Path) -> PathBuf {
     }
 }
 
+fn resolve_document_source(root: &Path, source: &DocumentSource) -> DocumentSource {
+    match source {
+        DocumentSource::File(path) => DocumentSource::File(resolve_media_path(root, path)),
+        DocumentSource::PageImages(paths) => DocumentSource::PageImages(
+            paths
+                .iter()
+                .map(|path| resolve_media_path(root, path))
+                .collect(),
+        ),
+    }
+}
+
 fn video_marker_prefix(frame_count: usize) -> String {
     let mut prefix = String::from(VIDEO);
     for _ in 1..frame_count {
@@ -973,35 +1361,48 @@ fn video_marker_prefix(frame_count: usize) -> String {
     prefix
 }
 
+fn document_marker_prefix(page_count: usize) -> String {
+    let mut prefix = String::from(DOCUMENT);
+    for _ in 1..page_count {
+        prefix.push_str(PAGE_SEP);
+    }
+    prefix.push_str(DOCUMENT_END);
+    prefix
+}
+
 fn multimodal_labels_and_mask(
     text_tokens: &[u32],
     target_start_idx: usize,
     media: MediaLayout,
 ) -> Result<(Vec<u32>, Vec<u32>)> {
-    let (placeholder_id, separator_id, frame_count, patch_count) = match media {
+    let (placeholder_id, separator_id, media_count, patch_count) = match media {
         MediaLayout::Image { patch_count } => (IMAGE_ID, None, 1, patch_count),
         MediaLayout::Video {
             frame_count,
             patch_count,
         } => (VIDEO_ID, Some(FRAME_SEP_ID), frame_count, patch_count),
+        MediaLayout::Document {
+            page_count,
+            patch_count,
+        } => (DOCUMENT_ID, Some(PAGE_SEP_ID), page_count, patch_count),
     };
     let mut items = Vec::new();
-    let mut inserted_frames = 0usize;
+    let mut inserted_media = 0usize;
     for (idx, token) in text_tokens.iter().enumerate() {
         if *token == placeholder_id {
             items.extend(std::iter::repeat_n((None, idx), patch_count));
-            inserted_frames = 1;
+            inserted_media = 1;
         } else {
             items.push((Some(*token), idx));
             if separator_id == Some(*token) {
                 items.extend(std::iter::repeat_n((None, idx), patch_count));
-                inserted_frames += 1;
+                inserted_media += 1;
             }
         }
     }
-    if inserted_frames != frame_count {
+    if inserted_media != media_count {
         return Err(AarambhError::Shape(format!(
-            "expected {frame_count} expanded media frames, found {inserted_frames}"
+            "expected {media_count} expanded media items, found {inserted_media}"
         )));
     }
     let mut labels = Vec::with_capacity(items.len());
@@ -1067,5 +1468,24 @@ mod tests {
         )
         .unwrap();
         assert_eq!(mask, vec![0, 0, 0, 0, 0, 0, 1, 1, 0]);
+    }
+
+    #[test]
+    fn document_prefix_and_loss_mask_expand_pages() {
+        assert_eq!(
+            document_marker_prefix(3),
+            format!("{DOCUMENT}{PAGE_SEP}{PAGE_SEP}{DOCUMENT_END}")
+        );
+        let text = vec![DOCUMENT_ID, PAGE_SEP_ID, 20, 21, ENDOFTEXT_ID];
+        let (_, mask) = multimodal_labels_and_mask(
+            &text,
+            3,
+            MediaLayout::Document {
+                page_count: 2,
+                patch_count: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(mask, vec![0, 0, 0, 0, 0, 1, 1, 0]);
     }
 }

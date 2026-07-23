@@ -18,6 +18,7 @@ aarambh-ai-core = { path = "../aarambh-ai-core" }
 candle-core     = { workspace = true }
 candle-nn       = { workspace = true }
 image           = { workspace = true }
+hayro           = { workspace = true }
 serde           = { workspace = true }
 serde_json      = { workspace = true }
 csv             = { workspace = true }

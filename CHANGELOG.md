@@ -1,5 +1,37 @@
 # Changelog
 
+## [3.0.0-alpha.8] - 2026-07-23
+
+### Added
+
+- **Phase 36 Native Document Understanding**
+  - Added resource-bounded PDF rendering through pinned pure-Rust Hayro 0.4,
+    ordered scanned-page ingestion, aspect-preserving white-pad preprocessing,
+    explicit page selection, and detached frozen-encoder feature caching.
+  - Added learned or sinusoidal 2D row/column layout projection, canonical
+    `<document>`/`<document_end>`/`<page_sep>` fusion, and deterministic
+    tokenizer/SafeTensors vocabulary migration for IDs 12-14.
+  - Added document DoRA/QDoRA instruction tuning through the shared VLM
+    trainer, saved layout artifacts, CLI PDF inference with streaming safety,
+    and `document-qa`/`docvqa` evaluation with ANLS, exact match, and optional
+    table-subset metrics.
+  - Added DocVQA-style JSONL normalization, a dependency-free four-PDF fixture,
+    smoke configs, a complete end-to-end smoke script, and a Phase 36 runbook.
+
+### Changed
+
+- Image, video, and document instruction tuning now share optimizer
+  accumulation, clipping, masking, artifact cadence, and DoRA model updates.
+- The workspace version is now `3.0.0-alpha.8`.
+
+### Verified
+
+- CPU compile coverage includes PDF rendering, multimodal fusion, training,
+  inference, and ANLS evaluation paths. Focused tests cover page bounds,
+  2D positions, document token migration, page separators, masking, and ANLS.
+- The smoke workflow validates mechanism and artifact plumbing only; useful
+  document-answering quality requires real training and is not claimed.
+
 ## [3.0.0-alpha.7] - 2026-07-19
 
 ### Added

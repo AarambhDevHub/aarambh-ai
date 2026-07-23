@@ -12,9 +12,9 @@ construction, training, inference, quantization, adapter tuning, alignment,
 evaluation, multimodal input, safety, and an OpenAI-compatible server.
 
 The production source release is **v2.0.0**. Current mainline development is
-**v3.0.0-alpha.7**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
+**v3.0.0-alpha.8**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
 fine-grained MoE with shared experts, Multi-Token Prediction (MTP), on-policy
-distillation, native quantization-aware training, and native video input.
+distillation, native quantization-aware training, and native video/document input.
 
 > [!IMPORTANT]
 > This is a source and engineering project. It does not publish crates to
@@ -31,8 +31,8 @@ distillation, native quantization-aware training, and native video input.
 | Fine-tuning | SFT, LoRA, QLoRA, DoRA, QDoRA, VLM adapters, GRPO, DPO, QDPO, tool-call tuning |
 | Inference | Greedy/sampled decoding, streaming, thinking budgets, external or one-checkpoint MTP speculation, tool grammar |
 | Model formats | SafeTensors, INT8, GPTQ/AWQ INT4, GGUF, Hugging Face conversion, quantized KV cache |
-| Evaluation | Perplexity, MMLU-lite, HellaSwag, GSM8K, HumanEval-lite, preference, recall, vision, and tool scorecards |
-| Vision | Frozen CLIP-style encoder, image/video fusion, temporal encoding, VQA and video-QA tuning |
+| Evaluation | Perplexity, MMLU-lite, HellaSwag, GSM8K, HumanEval-lite, preference, recall, vision, document ANLS, and tool scorecards |
+| Vision | Frozen CLIP-style encoder, image/video/document fusion, temporal and 2D layout encoding, multimodal DoRA/QDoRA tuning |
 | Runtime | CPU SIMD, Rayon attention, optional custom CUDA PTX kernels, Axum 0.8.9 HTTP/SSE server |
 | Guardrails | Prompt-injection checks, jailbreak checks, PII redaction, output scanning, streaming token safety, audit logs |
 | Self-learning | Opt-in critique, replay buffer, verifier rewards, deferred CPU updates, CUDA vision mode |
@@ -178,6 +178,8 @@ Useful inference options include:
 - `--image <path>` for vision-language inference
 - `--video <path>` with `--frames` and `--frame-sampling uniform|scene-aware`
   for visual-only H.264 MP4 inference
+- `--document <pdf-or-image>` with optional comma-separated `--pages 1,3`
+  for page-rendered document inference
 - `--speculative` for one-checkpoint MTP, or add draft-model options for the
   external path
 - `--tools <schema.json>` for grammar-constrained function calls
@@ -220,6 +222,40 @@ target/release/aarambh-ai infer \
 
 See [the Phase 35 guide](docs/phase35_video.md) for fixture generation,
 training, NExT-QA evaluation, supported formats, and memory controls.
+
+### Understand Documents
+
+Phase 36 renders PDFs or scanned page images through the same frozen vision
+encoder, then adds learned or sinusoidal row/column patch positions. It does
+not invoke OCR or an external table parser.
+
+Video-era tokenizers and SafeTensors checkpoints need one deterministic
+three-row expansion before document tuning:
+
+```sh
+target/release/aarambh-ai convert \
+  --config configs/video_qa_smoke.toml \
+  --input checkpoints/video_smoke/model.safetensors \
+  --output checkpoints/document_smoke/model.safetensors \
+  --tokenizer checkpoints/video_smoke/tokenizer.json \
+  --output-tokenizer checkpoints/document_smoke/tokenizer.json \
+  --upgrade-document-vocab
+
+target/release/aarambh-ai infer \
+  --config configs/document_qa_smoke_infer.toml \
+  --model checkpoints/document_qa_smoke_merged/model.safetensors \
+  --tokenizer checkpoints/document_smoke/tokenizer.json \
+  --document data/document_smoke/documents/red_invoice.pdf \
+  --pages 1 \
+  --prompt "What color fills the first page?" \
+  --max-tokens 8 --greedy --safety none
+```
+
+Run `python3 scripts/phase36_make_document_smoke_fixture.py` to create the
+four local PDFs, or `scripts/phase36_smoke.sh` for the complete migration,
+two-step tuning, inference, and ANLS-evaluation workflow. See
+[the Phase 36 guide](docs/phase36_document.md) for the JSONL schema,
+resource limits, official dataset import, and commands.
 
 ### Serve An OpenAI-Compatible API
 
@@ -495,7 +531,7 @@ aarambh-ai-inference   Sampling, caching, thinking, MTP/external speculation, to
 aarambh-ai-safety      Input, output, streaming, PII, and audit policies
 aarambh-ai-selflearn   Critique, replay, verifiers, and persistent update state
 aarambh-ai-eval        Evaluation tasks, scorecards, and comparisons
-aarambh-ai-vision      Image/video decode, preprocessing, encoder, temporal fusion
+aarambh-ai-vision      Image/video/document decode, preprocessing, temporal/layout fusion
 aarambh-ai-distill     On-policy rollouts, teacher scoring, losses, and resume
 aarambh-ai-serve       Axum HTTP/SSE serving and continuous batching
 aarambh-ai             Command-line application
@@ -541,6 +577,7 @@ CUDA checks require a CUDA-capable environment and are intentionally opt-in.
 | [docs/phase33_distillation_results.md](docs/phase33_distillation_results.md) | On-policy distillation design, smoke proof, and comparison method |
 | [docs/phase34_qat.md](docs/phase34_qat.md) | Native QAT configuration, continuation, export, and robustness validation |
 | [docs/phase35_video.md](docs/phase35_video.md) | Video migration, decoding, tuning, inference, and NExT-QA evaluation |
+| [docs/phase36_document.md](docs/phase36_document.md) | PDF/page ingestion, layout tuning, inference, and DocVQA ANLS evaluation |
 | [RELEASE.md](RELEASE.md) | Source-release process and artifact policy |
 | [CHANGELOG.md](CHANGELOG.md) | Versioned implementation history |
 
@@ -561,6 +598,9 @@ CUDA checks require a CUDA-capable environment and are intentionally opt-in.
 - Video understanding is visual-only and currently accepts H.264 MP4 input;
   audio, other containers/codecs, server upload, and video self-learning are
   outside Phase 35.
+- Document understanding is pixel-based: no OCR/table parser is bundled.
+  Document server upload, self-learning, speculative decoding, and tool calling
+  remain outside Phase 36.
 - HumanEval-style code execution requires explicit opt-in.
 
 Additional exclusions and future work are tracked in the versioned roadmaps,

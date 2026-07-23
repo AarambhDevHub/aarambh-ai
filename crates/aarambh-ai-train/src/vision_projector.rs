@@ -5,9 +5,9 @@ use aarambh_ai_core::{AarambhError, ModelConfig, Result, TokenizerLike, TrainCon
 use aarambh_ai_model::AarambhModel;
 use aarambh_ai_tokenizer::{BpeTokenizer, ENDOFTEXT_ID, IMAGE, IMAGE_END, IMAGE_END_ID, IMAGE_ID};
 use aarambh_ai_vision::{
-    ClipVisionEncoder, FrameSamplingStrategy, ImagePreprocessor, ProjectorConfig,
-    TemporalEncodingKind, VisionEncoderConfig, VisionPreprocessConfig, VisionProjector,
-    interleave_image_tokens,
+    ClipVisionEncoder, FrameSamplingStrategy, ImagePreprocessor, LayoutEncodingKind,
+    ProjectorConfig, TemporalEncodingKind, VisionEncoderConfig, VisionPreprocessConfig,
+    VisionProjector, interleave_image_tokens,
 };
 use candle_core::backprop::GradStore;
 use candle_core::{DType, Tensor};
@@ -46,6 +46,8 @@ pub struct VisionTrainingConfig {
     pub max_samples: Option<usize>,
     /// Optional native video understanding configuration.
     pub video: Option<VideoTrainingConfig>,
+    /// Optional native document understanding configuration.
+    pub document: Option<DocumentTrainingConfig>,
 }
 
 impl Default for VisionTrainingConfig {
@@ -62,6 +64,7 @@ impl Default for VisionTrainingConfig {
             max_caption_tokens: 128,
             max_samples: None,
             video: None,
+            document: None,
         }
     }
 }
@@ -71,6 +74,9 @@ impl VisionTrainingConfig {
     pub fn validate(&self) -> Result<()> {
         if let Some(video) = &self.video {
             video.validate()?;
+        }
+        if let Some(document) = &self.document {
+            document.validate()?;
         }
         match self.mode.as_str() {
             "disabled" | "" => Ok(()),
@@ -130,6 +136,59 @@ impl VisionTrainingConfig {
                 "unsupported vision.mode '{other}', expected disabled|projector_pretrain|vlm_instruction"
             ))),
         }
+    }
+}
+
+/// Native document rasterization, layout projection, batching, and cache configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct DocumentTrainingConfig {
+    /// Root directory used to resolve relative document and page-image paths.
+    pub document_root: PathBuf,
+    /// PDF rendering resolution in dots per inch.
+    pub target_dpi: u32,
+    /// Maximum number of pages consumed from one document.
+    pub max_pages_per_document: usize,
+    /// Maximum decoded or rendered pixels accepted for one page.
+    pub max_page_pixels: usize,
+    /// Maximum number of pages passed through CLIP in one forward call.
+    pub encoder_page_batch_size: usize,
+    /// Number of detached pre-projector document features cached in memory.
+    pub feature_cache_entries: usize,
+    /// Learned or sinusoidal row/column layout positions.
+    pub layout_encoding: LayoutEncodingKind,
+    /// Optional learned layout checkpoint for inference or continued training.
+    pub layout_path: Option<PathBuf>,
+}
+
+impl Default for DocumentTrainingConfig {
+    fn default() -> Self {
+        Self {
+            document_root: PathBuf::from("."),
+            target_dpi: 150,
+            max_pages_per_document: 16,
+            max_page_pixels: 32_000_000,
+            encoder_page_batch_size: 4,
+            feature_cache_entries: 8,
+            layout_encoding: LayoutEncodingKind::Learned,
+            layout_path: None,
+        }
+    }
+}
+
+impl DocumentTrainingConfig {
+    /// Validate document resource limits and layout configuration.
+    pub fn validate(&self) -> Result<()> {
+        if self.target_dpi == 0
+            || self.max_pages_per_document == 0
+            || self.max_page_pixels == 0
+            || self.encoder_page_batch_size == 0
+        {
+            return Err(AarambhError::Config(
+                "vision.document target_dpi, page limits, max_page_pixels, and encoder_page_batch_size must be non-zero".into(),
+            ));
+        }
+        Ok(())
     }
 }
 

@@ -1005,6 +1005,15 @@ pub struct PageRasterizer {
 }
 ```
 
+The implementation pins pure-Rust `hayro = 0.4.0` with JPEG2000 support and
+parses each PDF once per rasterization request. Page selection is 1-based and
+ordered; duplicates and out-of-range pages are rejected. Implicit selection
+uses the first `max_pages_per_document` pages and reports truncation. A
+`max_page_pixels` limit is enforced before rendered buffers are accepted.
+Training can cache bounded, detached frozen-encoder page features keyed by
+canonical source metadata, selected pages, rasterizer settings, and encoder
+signature.
+
 Born-digital PDFs and scanned/photographed pages are both handled the
 same way at this layer — both become a sequence of page-images before
 anything downstream sees them, so the rest of the pipeline (encoder,
@@ -1054,7 +1063,10 @@ was deliberately built to avoid.
 ```
 
 New reserved tokens `<document>`, `<document_end>`, `<page_sep>` follow
-the same contiguous-ID-block convention as §44's video tokens.
+the same contiguous-ID-block convention as §44's video tokens at IDs 12, 13,
+and 14. Existing learned IDs at 12 and above shift by three. SafeTensors
+embedding and untied LM-head rows are migrated in lockstep, seeding the new
+rows from compatible image/end/separator rows.
 
 ### 45.4 Fine-tuning
 
@@ -1065,6 +1077,19 @@ visual modalities, differentiated only by which JSONL schema
 (`VqaExample`, `VideoQaExample`, `DocQaExample`) feeds it and which
 projector (`Projector` vs `LayoutAwareProjector`) sits between the frozen
 encoder and the fusion step.
+
+`DocQaExample` accepts either one `document_path` (PDF or raster image) or an
+ordered `page_paths` array, one or more accepted answers, optional 1-based page
+selection, optional thinking targets, and tags such as `table`. The trainer
+uses the first accepted answer; evaluation uses all accepted answers.
+
+Inference exposes `--document`, `--pages`, `--document-dpi`, and
+`--max-document-pages`. Multimodal prefill still feeds the existing generation
+engine, including token-by-token streaming safety. `document-qa`/`docvqa`
+evaluation reports ANLS as its primary metric, exact match as a secondary
+metric, and table-subset ANLS when records carry a `table` tag. OCR, separate
+table parsing, server upload, document self-learning, speculative document
+decoding, and document tool calling are explicitly outside Phase 36.
 
 ---
 
@@ -1401,7 +1426,7 @@ crates in the same or lower layer, enforced by `Cargo.toml`.
 | Dependency | Allowed crates | Reason |
 |---|---|---|
 | `mp4` + bundled `openh264` | `aarambh-ai-vision` | Native H.264 MP4 frame extraction only, no network calls or runtime FFmpeg |
-| PDF/document rasterisation crate | `aarambh-ai-vision` | Page-to-image rendering only, no network calls |
+| `hayro = 0.4.0` | `aarambh-ai-vision` | Pure-Rust PDF page-to-image rendering only, no network calls |
 
 **Still forbidden everywhere, unchanged from v1/v2:** PyTorch bindings
 (`tch-rs`), ONNX Runtime (`ort`), Python FFI, `llama.cpp` as a backend.
