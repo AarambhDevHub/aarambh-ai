@@ -83,6 +83,87 @@ impl SafetyGenerator for MtpSpeculativeEngine {
     }
 }
 
+impl SafetyGenerator for () {
+    fn generate(&mut self, _prompt: &str, _config: GenerationConfig) -> Result<GenerationOutput> {
+        Err(AarambhError::Unsupported(
+            "safety inspector does not own a generation engine".into(),
+        ))
+    }
+
+    fn generate_with_callback<F>(
+        &mut self,
+        _prompt: &str,
+        _config: GenerationConfig,
+        _on_step: F,
+    ) -> Result<GenerationOutput>
+    where
+        F: FnMut(&GenerationStep) -> Result<()>,
+    {
+        Err(AarambhError::Unsupported(
+            "safety inspector does not own a generation engine".into(),
+        ))
+    }
+}
+
+#[derive(Debug, Clone)]
+/// Safety-checked input text independent of a generation engine.
+pub struct SafeInput {
+    /// Input text after configured PII redaction.
+    pub text: String,
+    /// Safety verdict for the input.
+    pub verdict: SafetyVerdict,
+    /// Whether configured input redaction changed the text.
+    pub redacted: bool,
+    /// Audit events emitted during inspection.
+    pub events: Vec<SafetyEvent>,
+}
+
+impl SafeInput {
+    /// Return true when policy blocks this input.
+    pub fn is_blocked(&self) -> bool {
+        matches!(self.verdict, SafetyVerdict::Block(_))
+    }
+}
+
+/// Reusable input/output safety inspection without owning a model.
+pub struct SafetyInspector {
+    guard: SafetyGuard<()>,
+}
+
+impl SafetyInspector {
+    /// Create an inspector from an existing policy.
+    pub fn new(policy: SafetyPolicy) -> Self {
+        Self {
+            guard: SafetyGuard::new((), policy),
+        }
+    }
+
+    /// Return the active safety policy.
+    pub fn policy(&self) -> &SafetyPolicy {
+        self.guard.policy()
+    }
+
+    /// Inspect and optionally redact one prompt or caller-provided text fragment.
+    pub fn inspect_input(&self, text: &str) -> Result<SafeInput> {
+        let prompt_hash = hash_prompt(text);
+        let mut events = Vec::new();
+        let checked = self.guard.check_input(text, &prompt_hash, &mut events)?;
+        Ok(SafeInput {
+            text: checked.prompt,
+            verdict: checked.verdict,
+            redacted: checked.redacted,
+            events,
+        })
+    }
+
+    /// Inspect one completed structured or plain-text generation.
+    pub fn inspect_output(&self, prompt: &str, output: GenerationOutput) -> Result<SafeResponse> {
+        let prompt_hash = hash_prompt(prompt);
+        let mut events = Vec::new();
+        self.guard.check_output(output, &prompt_hash, &mut events)
+    }
+}
+
 #[derive(Debug, Clone)]
 /// Safety-checked generation response.
 pub struct SafeResponse {
@@ -567,6 +648,19 @@ mod tests {
             .unwrap();
         assert!(response.is_blocked());
         assert!(response.output.is_none());
+    }
+
+    #[test]
+    fn inspector_checks_input_without_a_generation_engine() {
+        let mut policy = SafetyPolicy::strict();
+        policy.audit_enabled = false;
+        policy.check_prompt_injection = false;
+        policy.check_jailbreak = false;
+        let inspector = SafetyInspector::new(policy);
+        let checked = inspector.inspect_input("email dev@example.com").unwrap();
+        assert!(!checked.is_blocked());
+        assert!(checked.redacted);
+        assert_eq!(checked.text, "email [REDACTED_EMAIL]");
     }
 
     #[test]

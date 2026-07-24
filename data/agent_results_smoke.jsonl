@@ -1,0 +1,3 @@
+{"expected_call":{"name":"lookup_profile","arguments":{"customer_id":"C-17"}},"result":{"call_id":"call_0001","status":"ok","content":{"type":"text","text":"latest_order=O-204; destination=Pune"}}}
+{"expected_call":{"name":"lookup_order","arguments":{"order_id":"O-204"}},"result":{"call_id":"call_0002","status":"ok","content":{"type":"text","text":"weight_kg=2.5"}}}
+{"expected_call":{"name":"shipping_quote","arguments":{"destination":"Pune","weight_kg":2.5}},"result":{"call_id":"call_0003","status":"ok","content":{"type":"text","text":"price_inr=180"}}}

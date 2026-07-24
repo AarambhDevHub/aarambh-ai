@@ -9,7 +9,8 @@ use candle_core::{DType, Device};
 use crate::report::{Scorecard, TaskScore};
 use crate::tasks::{
     AssociativeRecallTask, DocumentQaTask, Gsm8kSubsetTask, HellaSwagTask, HumanEvalLiteTask,
-    ImageCaptionTask, MmluLiteTask, PplTask, PreferenceTask, ToolCallingTask, VideoQaTask, VqaTask,
+    ImageCaptionTask, MmluLiteTask, PplTask, PreferenceTask, ToolCallingTask, ToolChainTask,
+    VideoQaTask, VqaTask,
 };
 
 /// Evaluation run configuration.
@@ -23,6 +24,8 @@ pub struct EvalConfig {
     pub max_examples: Option<usize>,
     /// Maximum generated tokens for generative tasks.
     pub max_new_tokens: usize,
+    /// Maximum caller-result steps for tool-chain evaluation.
+    pub agent_max_steps: usize,
     /// Whether HumanEval-lite may execute generated Python code.
     pub allow_code_exec: bool,
     /// Optional model path stored in scorecards.
@@ -40,6 +43,7 @@ impl Default for EvalConfig {
             data_dir: PathBuf::from("data/eval"),
             max_examples: None,
             max_new_tokens: 128,
+            agent_max_steps: 8,
             allow_code_exec: false,
             model_path: None,
             tokenizer_path: None,
@@ -176,12 +180,14 @@ fn selected_tasks(selectors: &[String], allow_code_exec: bool) -> Result<Vec<Box
             "tool-calling" | "tool_calling" | "function-calling" | "function_calling" => {
                 tasks.push(Box::new(ToolCallingTask));
             }
+            "tool-chain" | "tool_chain" | "agent-chain" | "agent_chain" | "bfcl-multistep"
+            | "bfcl_multistep" => tasks.push(Box::new(ToolChainTask)),
             "associative-recall" | "associative_recall" | "assoc-recall" | "assoc_recall" => {
                 tasks.push(Box::new(AssociativeRecallTask));
             }
             other => {
                 return Err(AarambhError::Config(format!(
-                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,humaneval,preference,image-caption,vqa,video-qa,document-qa,tool-calling,associative-recall,all"
+                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,humaneval,preference,image-caption,vqa,video-qa,document-qa,tool-calling,tool-chain,associative-recall,all"
                 )));
             }
         }

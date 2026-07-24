@@ -1,14 +1,13 @@
 use std::collections::BTreeSet;
 
 use aarambh_ai_core::{AarambhError, Result, TokenizerLike};
-use aarambh_ai_tokenizer::BpeTokenizer;
-use aarambh_ai_tokenizer::{ASSISTANT_ID, BOS_ID, PAD_ID, USER_ID};
+use aarambh_ai_tokenizer::{
+    ASSISTANT_ID, BOS_ID, BpeTokenizer, PAD_ID, USER_ID, VIRTUAL_ASCII_END, tool_json_token_text,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::grammar::{
-    JsonSchema, JsonSchemaGrammar, VIRTUAL_ASCII_END, json_token_text, tool_call_schema,
-};
+use crate::grammar::{JsonSchema, JsonSchemaGrammar, tool_call_schema};
 use crate::thinking::{ThinkingController, ThinkingMode};
 
 /// Marker selecting normal assistant text.
@@ -427,7 +426,7 @@ impl ToolCallController {
     pub(crate) fn token_text(&self, token_id: u32, tokenizer: &BpeTokenizer) -> Result<String> {
         match self.phase_for_next() {
             ToolPhase::Control => Ok(String::new()),
-            ToolPhase::ToolCall => json_token_text(token_id, tokenizer),
+            ToolPhase::ToolCall => tool_json_token_text(token_id, tokenizer),
             ToolPhase::Thinking | ToolPhase::Answer => tokenizer.decode(&[token_id]),
         }
     }

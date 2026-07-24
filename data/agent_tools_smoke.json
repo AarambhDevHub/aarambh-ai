@@ -1,0 +1,39 @@
+[
+  {
+    "name": "lookup_profile",
+    "description": "Look up a customer profile by customer id.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "customer_id": {"type": "string", "minLength": 1, "maxLength": 32}
+      },
+      "required": ["customer_id"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "lookup_order",
+    "description": "Look up one order by order id.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "order_id": {"type": "string", "minLength": 1, "maxLength": 32}
+      },
+      "required": ["order_id"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "shipping_quote",
+    "description": "Calculate a shipping quote for a destination and weight.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "destination": {"type": "string", "minLength": 2, "maxLength": 80},
+        "weight_kg": {"type": "number", "minimum": 0.1, "maximum": 100.0}
+      },
+      "required": ["destination", "weight_kg"],
+      "additionalProperties": false
+    }
+  }
+]

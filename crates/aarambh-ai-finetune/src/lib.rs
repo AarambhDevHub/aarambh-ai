@@ -49,7 +49,10 @@ pub use sft::{
     ChatTemplate, SftBatch, SftDataLoader, SftDataset, SftExample, ThinkingSftExample,
     format_thinking_sft,
 };
-pub use tool_sft::{ToolSftCall, ToolSftDataset, ToolSftDefinition, ToolSftExample};
+pub use tool_sft::{
+    MultiStepToolSftExample, ToolSftCall, ToolSftDataset, ToolSftDefinition, ToolSftExample,
+    ToolSftResult, ToolSftResultContent, ToolSftResultStatus, ToolSftTurn,
+};
 pub use trainer::{
     AdapterSftModel, DoraTrainer, SftRunConfig, SftTrainer, merge_adapter_from_paths,
     merge_dora_from_paths, merge_lora_from_paths, run_dora_from_config, run_sft_from_config,

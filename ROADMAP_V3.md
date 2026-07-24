@@ -924,7 +924,7 @@ than one typed request per turn.
 
 **New crate `aarambh-ai-agent`:**
 ```
-[ ] src/chain.rs
+[x] src/chain.rs
       ToolChain — orchestrates repeated calls into aarambh-ai-inference's
       existing single-call tool-call decoding path (v2 §30), feeding each
       tool's result back into context as the next turn's input
@@ -932,14 +932,14 @@ than one typed request per turn.
       "no further tool needed" detection reusing v2's existing fallback
       path where the model emits a normal (non-tool-call) response
 
-[ ] src/result_ingestion.rs
+[x] src/result_ingestion.rs
       ToolResult — typed wrapper for a tool's returned value, formatted
       back into the model's context in a consistent schema; supports
       text, and (building on Phases 35–36) image/video/document results
       so a chain step can hand back "here is a screenshot" or "here is a
       retrieved PDF page" and have the next step reason over it natively
 
-[ ] src/state.rs
+[x] src/state.rs
       ChainState — the accumulating context across steps (prior calls,
       results, and the running conversation), with an explicit eviction/
       summarisation policy once the chain approaches context-length limits
@@ -949,7 +949,7 @@ than one typed request per turn.
 
 **`aarambh-ai-finetune`:**
 ```
-[ ] Multi-step tool-use SFT: extends v2 Phase 26's tool_sft.rs loss-
+[x] Multi-step tool-use SFT: extends v2 Phase 26's tool_sft.rs loss-
     masking scheme (mask everything except the tool-call spans and final
     response) across multi-turn transcripts, so the model is trained on
     realistic multi-call sequences, not just single-call examples
@@ -957,36 +957,27 @@ than one typed request per turn.
 
 **CLI:**
 ```
-[ ] aarambh-ai agent --config <cfg> --tools tools.json --prompt "..." --max-steps 8
+[x] aarambh-ai agent --config <cfg> --tools tools.json --prompt "..." --max-steps 8
 ```
 
 ### Tests
 
-```rust
-#[test]
-fn tool_chain_stops_when_model_emits_non_tool_call_response() {}
-
-#[test]
-fn tool_chain_respects_max_steps_budget_even_if_model_keeps_requesting_calls() {}
-
-#[test]
-fn tool_result_ingestion_accepts_text_image_video_and_document_results() {}
-
-#[test]
-fn chain_state_eviction_triggers_before_context_length_is_exceeded() {}
-
-#[test]
-fn multi_step_sft_loss_mask_covers_all_tool_call_spans_across_a_transcript() {}
-```
+- [x] Normal final responses stop the chain.
+- [x] Repeated calls cannot exceed the configured `1..=64` call budget.
+- [x] Text/error/image/video/document result envelopes are validated.
+- [x] Context pressure evicts the oldest unprotected exchange.
+- [x] Multi-step SFT supervises every tool-call span and final response while
+      masking prompts, results, and optional thinking context.
+- [x] Scripted replay rejects call-id, call-name, or argument mismatches.
 
 ### Milestone
 ```
-Agent correctly completes a held-out set of multi-step tool-use tasks
-(free/public multi-hop tool-use or agent-benchmark subset) requiring at
-least 3 sequential tool calls with intermediate results feeding later
-decisions, tracked via a new eval-harness task, with a documented ceiling
-on runaway chains (max-steps enforced, no infinite loops observed in
-testing).
+The source implementation now includes `eval --tasks tool-chain` with ordered
+call/schema/argument/final-answer metrics, a checked-in three-call response
+path, and a BFCL v1.3 explicit-response-path normalizer. The max-step ceiling
+is enforced in code. Useful held-out chain success is a checkpoint-quality
+result that must be produced by multi-step training and evaluation; it is not
+claimed by this source-only alpha.
 
 Still an emit/orchestrate boundary consistent with v2 §30's framing: tool
 *execution* itself remains the caller's responsibility (the chain

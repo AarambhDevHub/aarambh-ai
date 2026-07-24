@@ -12,9 +12,10 @@ construction, training, inference, quantization, adapter tuning, alignment,
 evaluation, multimodal input, safety, and an OpenAI-compatible server.
 
 The production source release is **v2.0.0**. Current mainline development is
-**v3.0.0-alpha.8**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
+**v3.0.0-alpha.9**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
 fine-grained MoE with shared experts, Multi-Token Prediction (MTP), on-policy
-distillation, native quantization-aware training, and native video/document input.
+distillation, native quantization-aware training, native video/document input,
+and bounded long-horizon tool-use chains.
 
 > [!IMPORTANT]
 > This is a source and engineering project. It does not publish crates to
@@ -29,7 +30,7 @@ distillation, native quantization-aware training, and native video/document inpu
 | Efficient architecture | YaRN/NTK/linear RoPE scaling, Gated DeltaNet, learned block-sparse DSA, fine-grained MoE, MTP |
 | Training | BPE data pipeline, AdamW, cosine schedule, gradient accumulation/clipping, checkpoint resume, BF16 CUDA, single-node multi-GPU, on-policy distillation, native INT4/INT8 QAT |
 | Fine-tuning | SFT, LoRA, QLoRA, DoRA, QDoRA, VLM adapters, GRPO, DPO, QDPO, tool-call tuning |
-| Inference | Greedy/sampled decoding, streaming, thinking budgets, external or one-checkpoint MTP speculation, tool grammar |
+| Inference | Greedy/sampled decoding, streaming, thinking budgets, external or one-checkpoint MTP speculation, tool grammar, caller-executed chains |
 | Model formats | SafeTensors, INT8, GPTQ/AWQ INT4, GGUF, Hugging Face conversion, quantized KV cache |
 | Evaluation | Perplexity, MMLU-lite, HellaSwag, GSM8K, HumanEval-lite, preference, recall, vision, document ANLS, and tool scorecards |
 | Vision | Frozen CLIP-style encoder, image/video/document fusion, temporal and 2D layout encoding, multimodal DoRA/QDoRA tuning |
@@ -90,6 +91,7 @@ produce useful language quality.
 ```text
 aarambh-ai train       Pretrain or continue a configured model
 aarambh-ai infer       Generate text or answer an image/video-grounded prompt
+aarambh-ai agent       Orchestrate bounded caller-executed tool-use chains
 aarambh-ai eval        Run evaluation tasks and compare scorecards
 aarambh-ai quantise    Calibrate and export INT8/INT4 GGUF checkpoints
 aarambh-ai convert     Convert SafeTensors, GGUF, or Hugging Face layouts
@@ -185,6 +187,41 @@ Useful inference options include:
 - `--tools <schema.json>` for grammar-constrained function calls
 
 Tool calls are emitted and validated but never executed by aarambh-ai.
+
+### Run A Tool-Use Chain
+
+`agent` repeatedly decodes one schema-valid call, reads one caller-executed
+result, and continues until the model emits a normal final response. Interactive
+mode reads one `ToolResult` JSON object per line from stdin:
+
+```sh
+target/release/aarambh-ai agent \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tool_sft/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --tools data/agent_tools_smoke.json \
+  --prompt "Find the shipping price for customer C-17's latest order." \
+  --max-steps 8 --greedy --safety strict
+```
+
+For deterministic replay/evaluation, pass a JSONL response path:
+
+```sh
+target/release/aarambh-ai agent \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tool_sft/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --tools data/agent_tools_smoke.json \
+  --results data/agent_results_smoke.jsonl \
+  --prompt "Find the shipping price for customer C-17's latest order." \
+  --max-steps 8 --jsonl
+```
+
+Results may contain bounded text/errors or an image, video, or document path
+under `--result-root`. Native media is projected for the immediately following
+decision and then retained as text metadata. `drop-oldest` is the default
+context policy; `--eviction summarise` compacts evicted exchanges. Aarambh
+never runs the tool, shell command, network request, or plugin itself.
 
 ### Understand Video
 
@@ -308,6 +345,10 @@ target/release/aarambh-ai eval \
 ```
 
 Generated-code execution is disabled unless `--allow-code-exec` is passed.
+Use `--tasks tool-chain --agent-max-steps 8` for scripted multi-call
+response-path evaluation. The checked-in fixture exercises three ordered calls;
+BFCL v1.3 response paths can be normalized with
+`scripts/phase37_prepare_bfcl_multiturn.py`.
 
 ### Quantize And Convert
 
@@ -485,6 +526,8 @@ Checkpoint retrofit and comparison tooling:
 - `scripts/phase34_compare_qat.sh`
 - `scripts/phase35_make_video_smoke_fixture.py`
 - `scripts/phase35_smoke.sh`
+- `scripts/phase36_smoke.sh`
+- `scripts/phase37_smoke.sh`
 
 The Phase 31 method and result contract are documented in
 [docs/phase31_moe_sweep.md](docs/phase31_moe_sweep.md). Hardware benchmark
@@ -514,7 +557,7 @@ through TOML without changing the base scale definitions.
 
 ## Workspace
 
-The workspace contains 17 internal library crates and one CLI package:
+The workspace contains 18 internal library crates and one CLI package:
 
 ```text
 aarambh-ai-core        Shared config, device, dtype, errors, and traits
@@ -528,6 +571,7 @@ aarambh-ai-quant       INT8/INT4, GPTQ, AWQ, QAT, and KV quantization
 aarambh-ai-train       Optimizer, schedules, MTP loss, checkpoints, distributed train
 aarambh-ai-finetune    Adapters, SFT, GRPO, DPO, VLM, and tool tuning
 aarambh-ai-inference   Sampling, caching, thinking, MTP/external speculation, tools
+aarambh-ai-agent       Bounded tool chains, exact state, and caller-result ingestion
 aarambh-ai-safety      Input, output, streaming, PII, and audit policies
 aarambh-ai-selflearn   Critique, replay, verifiers, and persistent update state
 aarambh-ai-eval        Evaluation tasks, scorecards, and comparisons
@@ -578,6 +622,7 @@ CUDA checks require a CUDA-capable environment and are intentionally opt-in.
 | [docs/phase34_qat.md](docs/phase34_qat.md) | Native QAT configuration, continuation, export, and robustness validation |
 | [docs/phase35_video.md](docs/phase35_video.md) | Video migration, decoding, tuning, inference, and NExT-QA evaluation |
 | [docs/phase36_document.md](docs/phase36_document.md) | PDF/page ingestion, layout tuning, inference, and DocVQA ANLS evaluation |
+| [docs/phase37_agent.md](docs/phase37_agent.md) | Tool-chain protocol, safety, context policy, SFT, and response-path evaluation |
 | [RELEASE.md](RELEASE.md) | Source-release process and artifact policy |
 | [CHANGELOG.md](CHANGELOG.md) | Versioned implementation history |
 
@@ -592,7 +637,8 @@ CUDA checks require a CUDA-capable environment and are intentionally opt-in.
 - MoE dispatch computes every routed expert and applies dense weights. Fine
   granularity changes capacity and routing but is not sparse grouped dispatch.
 - Multi-GPU support is single-node data parallel training.
-- Tool calls are generated but never executed.
+- Tool calls and chains are generated/orchestrated but never executed by the
+  model runtime; callers remain responsible for authorization and execution.
 - The server currently hosts one text model and one generated choice per
   request; vision and self-learning are CLI workflows.
 - Video understanding is visual-only and currently accepts H.264 MP4 input;

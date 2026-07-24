@@ -1,20 +1,11 @@
 use std::collections::BTreeSet;
 
-use aarambh_ai_core::{AarambhError, Result, TokenizerLike};
-use aarambh_ai_tokenizer::BpeTokenizer;
-use aarambh_ai_tokenizer::{
-    ASSISTANT_ID, BOS_ID, ENDOFTEXT_ID, PAD_ID, THINK_END_ID, THINK_START_ID, USER_ID,
-};
+use aarambh_ai_core::{AarambhError, Result};
+use aarambh_ai_tokenizer::{BpeTokenizer, tool_json_token_text};
 use serde_json::{Map, Value};
 
 const MAX_SCHEMA_DEPTH: usize = 32;
 const MAX_SCHEMA_NODES: usize = 4096;
-pub(crate) const VIRTUAL_ASCII_BASE: u32 = 9;
-const VIRTUAL_ASCII_FIRST: u8 = 0x20;
-const VIRTUAL_ASCII_LAST: u8 = 0x7e;
-pub(crate) const VIRTUAL_ASCII_END: u32 =
-    VIRTUAL_ASCII_BASE + (VIRTUAL_ASCII_LAST - VIRTUAL_ASCII_FIRST) as u32;
-
 #[derive(Debug, Clone)]
 /// Compiled practical JSON Schema subset used by function-call decoding.
 pub struct JsonSchema {
@@ -83,7 +74,7 @@ impl JsonSchemaGrammar {
             if piece.is_empty() {
                 continue;
             }
-            let piece = json_token_text(token_id as u32, tokenizer)?;
+            let piece = tool_json_token_text(token_id as u32, tokenizer)?;
             candidate.clear();
             candidate.push_str(&self.text);
             candidate.push_str(&piece);
@@ -121,7 +112,7 @@ impl JsonSchemaGrammar {
         token_id: u32,
         tokenizer: &BpeTokenizer,
     ) -> Result<()> {
-        let text = json_token_text(token_id, tokenizer)?;
+        let text = tool_json_token_text(token_id, tokenizer)?;
         self.accept_token(&text)
     }
 
@@ -165,27 +156,6 @@ impl JsonSchemaGrammar {
         } else {
             PrefixStatus::Invalid
         }
-    }
-}
-
-pub(crate) fn json_token_text(token_id: u32, tokenizer: &BpeTokenizer) -> Result<String> {
-    let structural = match token_id {
-        BOS_ID => Some("{"),
-        PAD_ID => Some("}"),
-        THINK_START_ID => Some("["),
-        THINK_END_ID => Some("]"),
-        USER_ID => Some("\""),
-        ASSISTANT_ID => Some(":"),
-        ENDOFTEXT_ID => Some(","),
-        _ => None,
-    };
-    match structural {
-        Some(text) => Ok(text.to_string()),
-        None if (VIRTUAL_ASCII_BASE..=VIRTUAL_ASCII_END).contains(&token_id) => {
-            let byte = VIRTUAL_ASCII_FIRST + (token_id - VIRTUAL_ASCII_BASE) as u8;
-            Ok(char::from(byte).to_string())
-        }
-        None => tokenizer.decode(&[token_id]),
     }
 }
 

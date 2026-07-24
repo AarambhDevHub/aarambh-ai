@@ -14,7 +14,7 @@ pub mod streaming;
 /// Safety verdict types.
 pub mod verdict;
 
-pub use guard::{SafeResponse, SafetyGenerator, SafetyGuard};
+pub use guard::{SafeInput, SafeResponse, SafetyGenerator, SafetyGuard, SafetyInspector};
 pub use input::{
     InjectionScore, JailbreakScore, PiiFinding, PiiFindings, PiiKind, detect_injection,
     detect_jailbreak, detect_pii, redact_pii,
