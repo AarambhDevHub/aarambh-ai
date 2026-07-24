@@ -7,6 +7,7 @@ use candle_core::{DType, Device as CandleDevice};
 
 use crate::config::SelfLearnConfig;
 use crate::critique::{CritiqueResult, critique_response};
+use crate::forgetting_hook::{ForgettingHook, SelfLearnForgettingSummary};
 use crate::metrics::{LearningMetrics, MetricsEvent};
 use crate::online_grpo::{OnlineGrpo, OnlineGrpoBuildConfig, OnlineUpdate};
 use crate::replay::{ReplayBuffer, ReplayEntry};
@@ -67,6 +68,8 @@ pub struct SelfLearnResponse {
     pub image_ref: Option<PathBuf>,
     /// Human-readable metrics summary.
     pub metrics_summary: String,
+    /// Latest Phase 38 forgetting diagnostics when enabled.
+    pub forgetting: Option<SelfLearnForgettingSummary>,
 }
 
 /// Coordinates online GRPO, critique, replay, and metric state.
@@ -76,6 +79,8 @@ pub struct SelfLearnLoop {
     metrics: LearningMetrics,
     config: SelfLearnConfig,
     last_draft: Option<SelfLearnDraft>,
+    forgetting: Option<ForgettingHook>,
+    last_forgetting: Option<SelfLearnForgettingSummary>,
 }
 
 impl SelfLearnLoop {
@@ -97,12 +102,25 @@ impl SelfLearnLoop {
             dtype: build.dtype,
             seed: build.seed,
         })?;
+        let mut forgetting = build
+            .config
+            .forgetting
+            .clone()
+            .filter(|config| config.enabled)
+            .map(|config| ForgettingHook::new(config, online_grpo.tokenizer().clone()))
+            .transpose()?;
+        let last_forgetting = forgetting
+            .as_mut()
+            .map(|hook| hook.baseline(&online_grpo))
+            .transpose()?;
         Ok(Self {
             online_grpo,
             replay,
             metrics,
             config: build.config,
             last_draft: None,
+            forgetting,
+            last_forgetting,
         })
     }
 
@@ -304,7 +322,10 @@ impl SelfLearnLoop {
         }
         let verifier_score = draft.update.verifier_score;
         let used_grpo = draft.update.used_grpo;
-        let _ = self.online_grpo.commit_update(draft.update)?;
+        let mutation = self.online_grpo.commit_update(draft.update)?;
+        if mutation.is_some() {
+            self.run_forgetting("online")?;
+        }
         self.metrics.record(score, &draft.prompt);
         if self.replay.should_replay(self.online_grpo.step_count()) {
             let _ = self.replay_finetune()?;
@@ -324,6 +345,7 @@ impl SelfLearnLoop {
             used_grpo,
             image_ref: draft.image_ref,
             metrics_summary: self.metrics.summary(),
+            forgetting: self.last_forgetting.clone(),
         })
     }
 
@@ -334,7 +356,11 @@ impl SelfLearnLoop {
 
     /// Apply any pending CPU-mode gradients.
     pub fn flush_pending_gradients(&mut self) -> Result<Option<f64>> {
-        self.online_grpo.flush_pending_gradients()
+        let norm = self.online_grpo.flush_pending_gradients()?;
+        if norm.is_some() {
+            self.run_forgetting("flush")?;
+        }
+        Ok(norm)
     }
 
     /// Run replay fine-tuning from sampled high-quality responses.
@@ -389,7 +415,41 @@ impl SelfLearnLoop {
         if norms.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(norms.iter().sum::<f64>() / norms.len() as f64))
+            let norm = norms.iter().sum::<f64>() / norms.len() as f64;
+            self.run_forgetting("replay")?;
+            Ok(Some(norm))
         }
+    }
+
+    /// Return the latest forgetting summary when diagnostics are enabled.
+    pub fn last_forgetting(&self) -> Option<&SelfLearnForgettingSummary> {
+        self.last_forgetting.as_ref()
+    }
+
+    /// Return the configured forgetting store path.
+    pub fn forgetting_store_path(&self) -> Option<&std::path::Path> {
+        self.forgetting.as_ref().map(ForgettingHook::store_path)
+    }
+
+    fn run_forgetting(&mut self, update_kind: &str) -> Result<()> {
+        let Some(mut hook) = self.forgetting.take() else {
+            return Ok(());
+        };
+        let result = hook.after_update(&self.online_grpo, update_kind);
+        self.forgetting = Some(hook);
+        let summary = result?;
+        let threshold = self
+            .forgetting
+            .as_ref()
+            .map(ForgettingHook::threshold)
+            .unwrap_or(0.02);
+        println!(
+            "[forgetting] current={} forgotten={} skipped={}",
+            summary.current_id,
+            summary.forgotten_count(threshold),
+            summary.skipped.len()
+        );
+        self.last_forgetting = Some(summary);
+        Ok(())
     }
 }

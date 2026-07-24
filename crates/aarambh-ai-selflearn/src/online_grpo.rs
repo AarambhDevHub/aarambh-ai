@@ -82,6 +82,7 @@ pub struct OnlineGrpo {
     state_dir: PathBuf,
     metadata: AdapterMetadata,
     device: CandleDevice,
+    dtype: DType,
     seed: u64,
 }
 
@@ -179,6 +180,7 @@ impl OnlineGrpo {
             state_dir: build.state_dir,
             metadata,
             device: build.device,
+            dtype: build.dtype,
             seed: build.seed,
         };
         this.load_state()?;
@@ -213,6 +215,20 @@ impl OnlineGrpo {
     /// Return the Candle device used by online updates.
     pub fn device(&self) -> &CandleDevice {
         &self.device
+    }
+
+    /// Return the model dtype used by the online adapter.
+    pub fn dtype(&self) -> DType {
+        self.dtype
+    }
+
+    /// Materialize the current merged LoRA model entirely in memory for diagnostics.
+    pub fn merged_eval_model(&self) -> Result<AarambhModel> {
+        let tensors = self.model.merged_tensors()?;
+        AarambhModel::new(
+            self.model.config(),
+            candle_nn::VarBuilder::from_tensors(tensors, self.dtype, &self.device),
+        )
     }
 
     /// Generate text and, when possible, prepare an online GRPO update.

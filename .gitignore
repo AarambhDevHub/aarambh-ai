@@ -30,3 +30,6 @@ data/eval/tool_chain/*
 !data/eval/associative_recall/
 data/eval/associative_recall/*
 !data/eval/associative_recall/data.jsonl
+!data/eval/forgetting/
+data/eval/forgetting/*
+!data/eval/forgetting/probes.json

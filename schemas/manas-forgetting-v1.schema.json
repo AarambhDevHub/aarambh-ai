@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AarambhDevHub/aarambh-ai/schemas/manas-forgetting-v1.schema.json",
+  "title": "Aarambh/Manas Forgetting Delta v1",
+  "description": "One capability- or concept-level score delta between two stable model states.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "capability_or_concept",
+    "baseline_checkpoint_or_session",
+    "current_checkpoint_or_session",
+    "score_before",
+    "score_after",
+    "delta",
+    "significant"
+  ],
+  "properties": {
+    "capability_or_concept": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "baseline_checkpoint_or_session": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "current_checkpoint_or_session": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "score_before": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "score_after": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "delta": {
+      "type": "number",
+      "minimum": -1.0,
+      "maximum": 1.0
+    },
+    "significant": {
+      "type": "boolean"
+    }
+  }
+}

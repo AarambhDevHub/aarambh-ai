@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "suite_id": "aarambh-phase38-v1",
+  "probes": [
+    {
+      "capability": "math",
+      "tasks": ["gsm8k"],
+      "max_examples": 16
+    },
+    {
+      "capability": "code",
+      "tasks": ["humaneval"],
+      "max_examples": 16
+    },
+    {
+      "capability": "reasoning",
+      "tasks": ["hellaswag"],
+      "max_examples": 16
+    },
+    {
+      "capability": "factual",
+      "tasks": ["mmlu"],
+      "max_examples": 16
+    },
+    {
+      "capability": "vision",
+      "tasks": ["vqa"],
+      "max_examples": 4
+    },
+    {
+      "capability": "video",
+      "tasks": ["video-qa"],
+      "max_examples": 4
+    },
+    {
+      "capability": "document",
+      "tasks": ["document-qa"],
+      "max_examples": 4
+    },
+    {
+      "capability": "tool-use",
+      "tasks": ["tool-calling", "tool-chain"],
+      "max_examples": 8
+    }
+  ]
+}

@@ -13,6 +13,7 @@ use crate::config::DsaTrainingConfig;
 use crate::distributed::DistributedContext;
 use crate::loss::cross_entropy_loss;
 use crate::mtp_loss::{combine_mtp_losses, mtp_head_loss};
+use crate::observer::{TrainingObserver, TrainingObserverEvent, TrainingObserverSnapshot};
 use crate::optim::{AdamW, AdamWConfig, GradMap, clip_gradients};
 use crate::schedule::CosineScheduleWithWarmup;
 
@@ -75,6 +76,7 @@ pub struct Trainer {
     train_config: TrainConfig,
     dsa_training_config: DsaTrainingConfig,
     device: candle_core::Device,
+    dtype: DType,
     state: TrainState,
     pending_grads: GradMap,
     last_loss: Option<f64>,
@@ -90,6 +92,8 @@ pub struct Trainer {
     last_expert_utilization: Vec<f32>,
     tokens_since_log: usize,
     last_log_at: Instant,
+    observer: Option<Box<dyn TrainingObserver>>,
+    observer_finished: bool,
 }
 
 impl Trainer {
@@ -158,6 +162,7 @@ impl Trainer {
             train_config,
             dsa_training_config: DsaTrainingConfig::default(),
             device,
+            dtype,
             state: TrainState {
                 qat: model_config.qat.clone(),
                 ..TrainState::default()
@@ -176,6 +181,8 @@ impl Trainer {
             last_expert_utilization: Vec::new(),
             tokens_since_log: 0,
             last_log_at: Instant::now(),
+            observer: None,
+            observer_finished: false,
         })
     }
 
@@ -207,6 +214,27 @@ impl Trainer {
     /// Replace the DSA teacher cadence and loss scaling for this run.
     pub fn set_dsa_training_config(&mut self, config: DsaTrainingConfig) {
         self.dsa_training_config = config;
+    }
+
+    /// Install a read-only live training observer.
+    pub fn set_observer(&mut self, observer: Box<dyn TrainingObserver>) {
+        self.observer = Some(observer);
+        self.observer_finished = false;
+    }
+
+    /// Run the installed observer against the initial model state.
+    pub fn observe_start(&mut self) -> Result<()> {
+        self.run_observer(TrainingObserverEvent::Start)
+    }
+
+    /// Run the installed observer against the final model state once.
+    pub fn finish_observer(&mut self) -> Result<()> {
+        if self.observer_finished {
+            return Ok(());
+        }
+        self.run_observer(TrainingObserverEvent::Finish)?;
+        self.observer_finished = true;
+        Ok(())
     }
 
     /// Load the latest checkpoint if one exists.
@@ -473,6 +501,7 @@ impl Trainer {
     /// Run the full training loop and save a final checkpoint.
     pub fn train(&mut self) -> Result<()> {
         self.train_until(self.train_config.max_steps)?;
+        self.finish_observer()?;
         self.save_checkpoint()
     }
 
@@ -594,7 +623,7 @@ impl Trainer {
 
     fn after_optimizer_step(&mut self, metrics: &TrainingMetrics) -> Result<()> {
         if !self.is_rank0() {
-            return Ok(());
+            return self.run_observer(TrainingObserverEvent::OptimizerStep);
         }
         if self.train_config.log_every_n_steps > 0
             && metrics
@@ -717,6 +746,44 @@ impl Trainer {
         {
             self.checkpoint
                 .save(&self.varmap, &self.optimizer, &self.state)?;
+        }
+        self.run_observer(TrainingObserverEvent::OptimizerStep)?;
+        Ok(())
+    }
+
+    fn run_observer(&mut self, event: TrainingObserverEvent) -> Result<()> {
+        let step = self.state.step;
+        let should_observe = self
+            .observer
+            .as_ref()
+            .is_some_and(|observer| observer.should_observe(event, step));
+        if !should_observe {
+            return Ok(());
+        }
+        if let Some(distributed) = &self.distributed {
+            distributed.barrier()?;
+        }
+        let mut observer_error = None;
+        if self.is_rank0() {
+            let mut observer = self.observer.take().expect("observer checked above");
+            let result = observer.observe(TrainingObserverSnapshot {
+                event,
+                step,
+                model: &self.model,
+                device: &self.device,
+                dtype: self.dtype,
+            });
+            self.observer = Some(observer);
+            observer_error = result.err();
+        }
+        if let Some(distributed) = &self.distributed {
+            if distributed.any_rank_failed(observer_error.is_some())? {
+                return Err(observer_error.unwrap_or_else(|| {
+                    AarambhError::Config("rank-0 training observer failed".into())
+                }));
+            }
+        } else if let Some(error) = observer_error {
+            return Err(error);
         }
         Ok(())
     }

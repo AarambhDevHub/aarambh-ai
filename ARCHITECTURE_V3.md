@@ -1171,67 +1171,62 @@ environments and is not a full BFCL state-machine implementation.
 
 ## 47. Forgetting Diagnostics
 
-Every self-learning phase since v1 (`SELF_LEARNING.md` §8) has protected
-against catastrophic forgetting via gradient orthogonalisation, and v2
-extended those protections to vision-grounded sessions
-(`SELF_LEARNING_V2.md` §17). Neither version has had a *direct
-measurement* of forgetting attached to that defence — its effectiveness
-has only ever been inferred indirectly, by watching for score
-regressions on the existing eval harness after the fact.
+Self-learning has limited catastrophic-forgetting risk through a frozen
+reference model, frozen base weights with low-rank adapter updates, KL
+regularization, small learning rates, and diverse replay
+(`SELF_LEARNING.md` §8). v2 extended the same update boundary to
+vision-grounded sessions (`SELF_LEARNING_V2.md` §17). Neither version had
+a persistent, direct measurement of forgetting attached to those
+safeguards; regressions were visible only through unrelated eval runs.
 
 ### 47.1 Capability probes
 
 ```rust
 pub struct CapabilityProbe {
-    pub capability: Capability, // Math | Code | Reasoning | Factual |
-                                 // Vision | Video | Document | ToolUse
-    pub examples: Vec<ProbeExample>, // small, fixed, held-out — built
-                                      // from the eval harness's EXISTING
-                                      // task subsets (ARCHITECTURE_V2.md
-                                      // §17-adjacent eval crate), not new
-                                      // benchmark data authored for this
-                                      // phase specifically
+    pub capability: Capability,
+    pub tasks: Vec<String>,       // existing eval task selectors
+    pub max_examples: Option<usize>,
 }
 ```
+
+`ProbeManifest` validates that each of the eight capabilities owns only its
+documented task subset. Its SHA-256 fingerprint, the tokenizer fingerprint,
+suite ID, and significance threshold are persisted with the curves, preventing
+incompatible runs from being silently compared. Missing data, visual
+configuration, or code-execution permission is recorded as a typed skip;
+`require_all_probes` converts those skips into a hard failure.
 
 ### 47.2 Tracking forgetting over a sequence, not just before/after
 
 ```rust
 pub struct ForgettingCurve {
-    capability: Capability,
-    /// (checkpoint_or_session_id, score) pairs across an ordered
-    /// sequence of checkpoints or online-learning sessions — not just
-    /// two points. This is what makes gradually-developing forgetting
-    /// visible, as distinct from forgetting caused by one discrete
-    /// event.
-    points: Vec<(String, f64)>,
+    pub capability: Capability,
+    pub points: Vec<ForgettingPoint>,
 }
 
-pub fn forgetting_delta(curve: &ForgettingCurve, baseline_id: &str, current_id: &str) -> Option<ForgettingDelta> {
-    let before = curve.score_at(baseline_id)?;
-    let after = curve.score_at(current_id)?;
-    let delta = after - before;
-    Some(ForgettingDelta {
-        delta,
-        // Below this magnitude, treated as noise rather than real
-        // forgetting — default threshold 0.02 (2 percentage points),
-        // documented and configurable, not a hidden magic number.
-        significant: delta.abs() >= SIGNIFICANCE_THRESHOLD,
-    })
-}
+delta = score_after - score_before
+significant = abs(delta) >= significance_threshold
 ```
+
+Each point retains the stable checkpoint/session ID, aggregate score, example
+count, task scores, timestamp, and optional routing signatures. Recording the
+same ID and payload is idempotent; conflicting reuse is rejected. Stores use
+an atomic temporary-file rename and retain more than two points, making gradual
+regression visible across training or repeated online updates.
 
 ### 47.3 Measurement-only, by design
 
-This diagnostic layer explicitly does not alter training gradients or
-introduce a new defence mechanism of its own — the existing gradient-
-orthogonalisation defence (`SELF_LEARNING.md` §8) remains the actual
-protection. Phase 38's job is entirely to measure whether that existing
-defence is holding, not to replace or supplement it with a second
-mechanism. This separation is deliberate: conflating "measuring
-forgetting" with "preventing forgetting" would make it impossible to
-tell whether an observed improvement came from a better defence or from
-a change in how forgetting was being measured.
+This layer does not alter loss construction, gradients, optimizer state,
+sampling, replay policy, or model parameters. Standard training exposes a
+read-only observer after optimizer commits; self-learning materializes an
+in-memory merged adapter view only after a committed inline, flush, or replay
+update. CPU deferred gradients are not measured until flush. In distributed
+training all ranks synchronize around rank-0 probing so diagnostics cannot
+race the next optimizer step.
+
+Phase 38 measures the safeguards that already exist; it does not claim a new
+anti-forgetting algorithm. This separation keeps score changes attributable
+to model updates rather than the observer.
 
 ### 47.4 Shared export schema — tied to Manas
 
@@ -1247,15 +1242,20 @@ a change in how forgetting was being measured.
 }
 ```
 
-The diagnostics export in this documented schema specifically so that
-aarambh-ai's capability-level forgetting curves and Manas's own
-concept-level forgetting curves (a separate, from-scratch associative-
-memory system with its own anti-forgetting design) can sit in the same
-shape of record — full detail on Manas's side of this connection is in
-`SELF_LEARNING_V3.md` §28. This is a documentation-level convention, not
-a runtime dependency between the two codebases: neither project
-automatically consumes the other's curves, but both are readable in the
-same vocabulary, which is the actual value on offer.
+The exact contract is checked in at
+`schemas/manas-forgetting-v1.schema.json`. Aarambh exports one JSON object per
+line and validates the same seven fields on import. Manas remains a separate
+associative-memory project: Aarambh does not discover `../manas`, link a Manas
+crate, write into its repository, or synchronize automatically. Operators may
+explicitly hand the JSONL file to either system.
+
+### 47.5 MoE routing drift
+
+For MoE checkpoints, probe examples also retain the sorted top-k routed expert
+set for every MoE layer. Baseline/current comparison reports changed examples
+and a drift rate using matched example IDs. This is diagnostic metadata, not a
+capability score and not proof of forgetting by itself. Dense checkpoints
+store no routing signatures and skip this computation.
 
 ---
 

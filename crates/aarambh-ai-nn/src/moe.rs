@@ -26,11 +26,17 @@ pub struct GatingOutput {
 pub struct MoeForwardStats {
     aux_losses: Vec<Tensor>,
     expert_utilization: Vec<f32>,
+    routed_experts_by_layer: Vec<Vec<usize>>,
 }
 
 impl MoeForwardStats {
     /// Add one MoE layer's auxiliary loss and expert-utilization summary.
-    pub fn record(&mut self, aux_loss: Tensor, expert_utilization: &[f32]) -> Result<()> {
+    pub fn record(
+        &mut self,
+        aux_loss: Tensor,
+        expert_utilization: &[f32],
+        top_k: usize,
+    ) -> Result<()> {
         if self.expert_utilization.is_empty() {
             self.expert_utilization = vec![0.0; expert_utilization.len()];
         }
@@ -44,6 +50,24 @@ impl MoeForwardStats {
         {
             *dst += *src;
         }
+        let mut ranked = expert_utilization
+            .iter()
+            .copied()
+            .enumerate()
+            .collect::<Vec<_>>();
+        ranked.sort_by(|left, right| {
+            right
+                .1
+                .total_cmp(&left.1)
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        let mut routed = ranked
+            .into_iter()
+            .take(top_k)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        routed.sort_unstable();
+        self.routed_experts_by_layer.push(routed);
         self.aux_losses.push(aux_loss);
         Ok(())
     }
@@ -74,6 +98,11 @@ impl MoeForwardStats {
     /// Return true when no MoE layers have recorded stats.
     pub fn is_empty(&self) -> bool {
         self.aux_losses.is_empty()
+    }
+
+    /// Return sorted top-routed expert sets for each recorded MoE layer.
+    pub fn routed_experts_by_layer(&self) -> Vec<Vec<usize>> {
+        self.routed_experts_by_layer.clone()
     }
 }
 
@@ -258,7 +287,11 @@ impl MoeFfn {
         let logits = self.router.forward(x)?;
         let gating = top_k_gating(&logits, self.config.top_k)?;
         if let Some(stats) = stats {
-            stats.record(gating.aux_loss.clone(), &gating.expert_utilization)?;
+            stats.record(
+                gating.aux_loss.clone(),
+                &gating.expert_utilization,
+                self.config.top_k,
+            )?;
         }
 
         let mut routed_output = None;

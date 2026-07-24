@@ -15,6 +15,7 @@ use crate::distributed::{
     DistributedConfig, DistributedContext, DistributedRuntime, ResolvedDistributedConfig,
     resolve_runtime,
 };
+use crate::observer::TrainingObserver;
 use crate::trainer::Trainer;
 use crate::vision_projector::{self, VisionTrainingConfig};
 
@@ -77,6 +78,100 @@ pub struct ContextScheduleStage {
     pub until_step: usize,
 }
 
+/// Optional Phase 38 live-training forgetting diagnostics.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ForgettingTrainingConfig {
+    /// Enable diagnostics for this training run.
+    pub enabled: bool,
+    /// Capability probe manifest.
+    pub manifest: PathBuf,
+    /// Existing evaluation dataset root.
+    pub data_dir: PathBuf,
+    /// Persistent forgetting-curve store.
+    pub store: PathBuf,
+    /// Optional seven-field JSONL export.
+    pub jsonl: Option<PathBuf>,
+    /// Optimizer-step cadence.
+    pub every_n_steps: usize,
+    /// Optional example cap per eval task.
+    pub max_examples: Option<usize>,
+    /// Generation budget for generative probes.
+    pub max_new_tokens: usize,
+    /// Agent-call budget for tool-chain probes.
+    pub agent_max_steps: usize,
+    /// Absolute score-change threshold.
+    pub significance_threshold: f64,
+    /// Permit HumanEval-lite subprocess execution.
+    pub allow_code_exec: bool,
+    /// Fail the run instead of recording unavailable probes.
+    pub require_all_probes: bool,
+    /// Optional stable baseline identifier; defaults to the run start.
+    pub baseline_id: Option<String>,
+}
+
+impl Default for ForgettingTrainingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            manifest: PathBuf::from("data/eval/forgetting/probes.json"),
+            data_dir: PathBuf::from("data/eval"),
+            store: PathBuf::from("checkpoints/forgetting/curves.json"),
+            jsonl: None,
+            every_n_steps: 1_000,
+            max_examples: Some(16),
+            max_new_tokens: 64,
+            agent_max_steps: 8,
+            significance_threshold: 0.02,
+            allow_code_exec: false,
+            require_all_probes: false,
+            baseline_id: None,
+        }
+    }
+}
+
+impl ForgettingTrainingConfig {
+    /// Validate paths, cadence, limits, and threshold.
+    pub fn validate(&self) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.manifest.as_os_str().is_empty() || self.store.as_os_str().is_empty() {
+            return Err(AarambhError::Config(
+                "forgetting manifest and store paths must be non-empty".into(),
+            ));
+        }
+        if self.every_n_steps == 0 {
+            return Err(AarambhError::Config(
+                "forgetting.every_n_steps must be non-zero".into(),
+            ));
+        }
+        if self.max_examples == Some(0) || self.max_new_tokens == 0 || self.agent_max_steps == 0 {
+            return Err(AarambhError::Config(
+                "forgetting eval limits must be non-zero".into(),
+            ));
+        }
+        if !self.significance_threshold.is_finite()
+            || !(0.0..=1.0).contains(&self.significance_threshold)
+        {
+            return Err(AarambhError::Config(
+                "forgetting.significance_threshold must be finite and in [0, 1]".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Factory supplied by the binary to avoid a train-to-eval crate dependency.
+pub trait TrainingObserverFactory {
+    /// Build an observer after the effective tokenizer and run config are known.
+    fn build(
+        &mut self,
+        config: &TrainingRunConfig,
+        tokenizer: &BpeTokenizer,
+    ) -> Result<Box<dyn TrainingObserver>>;
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 /// Complete TOML configuration for a training run.
@@ -117,6 +212,8 @@ pub struct TrainingRunConfig {
     pub dsa_training: DsaTrainingConfig,
     /// Optional coarse-to-fine MoE retrofit contract.
     pub moe_retrofit: Option<MoeRetrofitConfig>,
+    /// Optional live-training forgetting diagnostics.
+    pub forgetting: Option<ForgettingTrainingConfig>,
 }
 
 impl Default for TrainingRunConfig {
@@ -140,6 +237,7 @@ impl Default for TrainingRunConfig {
             vision: None,
             dsa_training: DsaTrainingConfig::default(),
             moe_retrofit: None,
+            forgetting: None,
         }
     }
 }
@@ -271,6 +369,9 @@ impl TrainingRunConfig {
             distributed.validate()?;
         }
         self.dsa_training.validate()?;
+        if let Some(forgetting) = &self.forgetting {
+            forgetting.validate()?;
+        }
         self.validate_context_schedule()?;
         Ok(())
     }
@@ -316,6 +417,21 @@ impl TrainingRunConfig {
 
 /// Load a TOML config and execute the training run.
 pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
+    run_training_from_config_inner(path.as_ref(), None)
+}
+
+/// Load a TOML config and execute training with an optional observer factory.
+pub fn run_training_from_config_with_observer(
+    path: impl AsRef<Path>,
+    factory: &mut dyn TrainingObserverFactory,
+) -> Result<()> {
+    run_training_from_config_inner(path.as_ref(), Some(factory))
+}
+
+fn run_training_from_config_inner(
+    path: &Path,
+    mut factory: Option<&mut dyn TrainingObserverFactory>,
+) -> Result<()> {
     let config = TrainingRunConfig::from_toml(path)?;
     config.validate()?;
     if let Some(vision) = &config.vision
@@ -456,6 +572,10 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
     if config.resume && trainer.load_latest_checkpoint()? && trainer.is_rank0() {
         println!("resumed checkpoint at step={}", trainer.state().step);
     }
+    if let Some(factory) = factory.as_mut() {
+        trainer.set_observer(factory.build(&config, &tokenizer)?);
+        trainer.observe_start()?;
+    }
     if config.context_schedule.is_empty() {
         trainer.train()
     } else {
@@ -481,6 +601,7 @@ pub fn run_training_from_config(path: impl AsRef<Path>) -> Result<()> {
             }
             trainer.train_until(stage.until_step)?;
         }
+        trainer.finish_observer()?;
         trainer.save_checkpoint()
     }
 }

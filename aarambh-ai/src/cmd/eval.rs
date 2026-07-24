@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 
 use aarambh_ai_core::TokenizerLike;
 use aarambh_ai_eval::{
-    EvalConfig, EvalContext, QatRobustnessReport, Scorecard, ScorecardComparison, run_all,
+    DEFAULT_SIGNIFICANCE_THRESHOLD, EvalConfig, EvalContext, ForgettingReport, ForgettingStore,
+    ProbeManifest, QatRobustnessReport, Scorecard, ScorecardComparison, run_all,
+    run_capability_probes, tokenizer_fingerprint,
 };
 use aarambh_ai_quant::GgufFormat;
 use aarambh_ai_tokenizer::BpeTokenizer;
@@ -41,6 +43,20 @@ pub struct EvalArgs {
     pub qat_compare: bool,
     #[arg(long, requires = "qat_compare")]
     pub baseline_model: Option<PathBuf>,
+    #[arg(long)]
+    pub forgetting_manifest: Option<PathBuf>,
+    #[arg(long, default_value = "checkpoints/forgetting/curves.json")]
+    pub forgetting_store: PathBuf,
+    #[arg(long, requires = "forgetting_manifest")]
+    pub checkpoint_id: Option<String>,
+    #[arg(long, requires = "forgetting_manifest")]
+    pub baseline_id: Option<String>,
+    #[arg(long, default_value_t = DEFAULT_SIGNIFICANCE_THRESHOLD)]
+    pub significance_threshold: f64,
+    #[arg(long, requires_all = ["forgetting_manifest", "baseline_id"])]
+    pub forgetting_jsonl: Option<PathBuf>,
+    #[arg(long, requires = "forgetting_manifest")]
+    pub require_all_probes: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,6 +88,7 @@ pub fn run(args: EvalArgs) -> anyhow::Result<()> {
 
     let tokenizer = BpeTokenizer::from_pretrained(&tokenizer_path)?;
     tokenizer.validate_special_tokens()?;
+    let tokenizer_sha256 = tokenizer_fingerprint(&tokenizer)?;
     let mut model_config = run_config.model.clone();
     model_config.vocab_size = tokenizer.vocab_size();
     let model =
@@ -89,13 +106,86 @@ pub fn run(args: EvalArgs) -> anyhow::Result<()> {
         config_path: Some(config_path.display().to_string()),
     };
 
-    let scorecard = run_all(&context, &eval_config)?;
+    let scorecard = if let Some(manifest_path) = &args.forgetting_manifest {
+        run_forgetting(
+            &context,
+            &eval_config,
+            &tokenizer_sha256,
+            manifest_path,
+            &args,
+        )?
+    } else {
+        run_all(&context, &eval_config)?
+    };
     write_outputs(
         &scorecard.to_json()?,
         &scorecard.to_markdown(),
         args.out.as_deref(),
         args.markdown.as_deref(),
     )
+}
+
+fn run_forgetting(
+    context: &EvalContext,
+    eval_config: &EvalConfig,
+    tokenizer_sha256: &str,
+    manifest_path: &Path,
+    args: &EvalArgs,
+) -> anyhow::Result<Scorecard> {
+    let checkpoint_id = args
+        .checkpoint_id
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("--checkpoint-id is required with --forgetting-manifest"))?;
+    let manifest = ProbeManifest::from_path(manifest_path)?;
+    let run = run_capability_probes(
+        context,
+        eval_config,
+        &manifest,
+        checkpoint_id,
+        Some(tokenizer_sha256.to_string()),
+        args.require_all_probes,
+    )?;
+    let mut store = ForgettingStore::load_or_new(
+        &args.forgetting_store,
+        &manifest,
+        Some(tokenizer_sha256.to_string()),
+        args.significance_threshold,
+    )?;
+    store.record(&run)?;
+
+    let (deltas, routing_drift) = match args.baseline_id.as_deref() {
+        Some(baseline_id) => {
+            let deltas = store.deltas(baseline_id, checkpoint_id)?;
+            (deltas, store.routing_drift(baseline_id, checkpoint_id))
+        }
+        None => (Vec::new(), Vec::new()),
+    };
+    store.save_atomic(&args.forgetting_store)?;
+    if let (Some(path), Some(baseline_id)) = (&args.forgetting_jsonl, args.baseline_id.as_deref()) {
+        store.export_jsonl(path, baseline_id, checkpoint_id)?;
+    }
+
+    let tasks = run
+        .scores
+        .iter()
+        .flat_map(|score| score.tasks.iter().cloned())
+        .collect();
+    Ok(Scorecard::new(
+        tasks,
+        context.context_len_used(),
+        eval_config.max_new_tokens,
+        eval_config.model_path.clone(),
+        eval_config.tokenizer_path.clone(),
+        eval_config.config_path.clone(),
+    )
+    .with_forgetting(ForgettingReport {
+        baseline_checkpoint_or_session: args.baseline_id.clone(),
+        current_checkpoint_or_session: checkpoint_id.to_string(),
+        significance_threshold: args.significance_threshold,
+        deltas,
+        routing_drift,
+        skipped: run.skipped,
+    }))
 }
 
 fn run_qat_compare(args: &EvalArgs) -> anyhow::Result<()> {
