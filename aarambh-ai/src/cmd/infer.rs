@@ -15,8 +15,8 @@ use aarambh_ai_safety::{
     SafetyVerdict,
 };
 use aarambh_ai_selflearn::{
-    SelfLearnBuildConfig, SelfLearnConfig, SelfLearnLoop, SelfLearnMode, VisionCache,
-    VisionVerifierKind, require_vision_hardware,
+    SelfLearnBuildConfig, SelfLearnConfig, SelfLearnForgettingConfig, SelfLearnLoop, SelfLearnMode,
+    VisionCache, VisionVerifierKind, require_vision_hardware,
 };
 use aarambh_ai_tokenizer::{
     ASSISTANT, BpeTokenizer, DOCUMENT, DOCUMENT_END, DOCUMENT_ID, FRAME_SEP, FRAME_SEP_ID, IMAGE,
@@ -120,6 +120,22 @@ pub struct InferArgs {
     pub self_learn_vision_verifier: String,
     #[arg(long)]
     pub self_learn_ground_truth: Option<String>,
+    #[arg(long)]
+    pub forgetting_manifest: Option<PathBuf>,
+    #[arg(long)]
+    pub forgetting_store: Option<PathBuf>,
+    #[arg(long)]
+    pub forgetting_jsonl: Option<PathBuf>,
+    #[arg(long, default_value_t = 0.02)]
+    pub forgetting_threshold: f64,
+    #[arg(long, default_value_t = 8)]
+    pub forgetting_max_examples: usize,
+    #[arg(long)]
+    pub forgetting_allow_code_exec: bool,
+    #[arg(long)]
+    pub forgetting_require_all_probes: bool,
+    #[arg(long)]
+    pub forgetting_baseline_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1578,6 +1594,29 @@ fn prompt_for_mode(prompt: &str, thinking_mode: ThinkingMode) -> String {
     }
 }
 
+fn attach_forgetting_config(args: &InferArgs, config: SelfLearnConfig) -> SelfLearnConfig {
+    let Some(manifest) = args.forgetting_manifest.clone() else {
+        return config;
+    };
+    let forgetting = SelfLearnForgettingConfig {
+        enabled: true,
+        manifest,
+        config_path: Some(args.config.clone()),
+        store: args
+            .forgetting_store
+            .clone()
+            .unwrap_or_else(|| args.self_learn_state_dir.join("forgetting_curves.json")),
+        jsonl: args.forgetting_jsonl.clone(),
+        max_examples: Some(args.forgetting_max_examples),
+        significance_threshold: args.forgetting_threshold,
+        allow_code_exec: args.forgetting_allow_code_exec,
+        require_all_probes: args.forgetting_require_all_probes,
+        baseline_id: args.forgetting_baseline_id.clone(),
+        ..SelfLearnForgettingConfig::default()
+    };
+    config.with_forgetting(forgetting)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_self_learn_infer(
     args: &InferArgs,
@@ -1605,6 +1644,7 @@ fn run_self_learn_infer(
         .rewrite_max_tokens
         .min(args.max_tokens)
         .max(1);
+    self_config = attach_forgetting_config(args, self_config);
     let reference_path = args
         .self_learn_reference
         .clone()
@@ -1742,6 +1782,7 @@ fn run_vision_self_learn_infer(
         .rewrite_max_tokens
         .min(args.max_tokens)
         .max(1);
+    self_config = attach_forgetting_config(args, self_config);
 
     let runtime = load_vision_runtime(&run_config, &device, dtype)?;
     let prompt = ensure_image_prompt(&prompt);
@@ -1954,6 +1995,15 @@ fn print_self_learn_summary(response: &aarambh_ai_selflearn::SelfLearnResponse) 
             .unwrap_or_else(|| "-".into()),
         response.metrics_summary
     );
+    if let Some(forgetting) = &response.forgetting {
+        eprintln!(
+            "[forgetting] baseline={} current={} capabilities={} skipped={}",
+            forgetting.baseline_id,
+            forgetting.current_id,
+            forgetting.deltas.len(),
+            forgetting.skipped.len()
+        );
+    }
 }
 
 #[derive(Default)]
@@ -2108,6 +2158,14 @@ mod tests {
             self_learn_verifier: "none".into(),
             self_learn_vision_verifier: "none".into(),
             self_learn_ground_truth: None,
+            forgetting_manifest: None,
+            forgetting_store: None,
+            forgetting_jsonl: None,
+            forgetting_threshold: 0.02,
+            forgetting_max_examples: 8,
+            forgetting_allow_code_exec: false,
+            forgetting_require_all_probes: false,
+            forgetting_baseline_id: None,
         }
     }
 

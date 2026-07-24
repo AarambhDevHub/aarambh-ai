@@ -36,9 +36,9 @@ Phase 32 →  Multi-Token Prediction (MTP)                (7–10 days)   [Kaggl
 Phase 33 →  On-policy distillation                      (10–14 days)  [Kaggle] ✅
 Phase 34 →  Native QAT (quantization-aware training)    (7–10 days)   [i3 + Kaggle] ✅
 Phase 35 →  Native video understanding                  (14–18 days)  [Kaggle] ✅
-Phase 36 →  Native document understanding               (10–14 days)  [Kaggle]
-Phase 37 →  Long-horizon tool-use chains                (10–14 days)  [i3 + Kaggle]
-Phase 38 →  Forgetting diagnostics tied to Manas         (7–10 days)   [i3 + Kaggle]
+Phase 36 →  Native document understanding               (10–14 days)  [Kaggle] ✅
+Phase 37 →  Long-horizon tool-use chains                (10–14 days)  [i3 + Kaggle] ✅
+Phase 38 →  Forgetting diagnostics tied to Manas         (7–10 days)   [i3 + Kaggle] ✅
 Phase 39 →  Max thinking mode (5th reasoning depth)      (5–7 days)    [i3 + Kaggle]
 Phase 40 →  crates.io publish (v3.0.0)                   (5–7 days)    [all]
 ```
@@ -995,18 +995,18 @@ git tag v3.0.0-alpha.9
 **Duration:** 7–10 days | **Hardware:** i3 (small scales) + Kaggle (larger)
 
 ### Goal
-A diagnostic toolkit that measures catastrophic forgetting directly
-(rather than only inferring it from eval-score regressions), producing
-per-capability forgetting curves that both aarambh-ai's own self-learning
-loop (`SELF_LEARNING.md` §8, `SELF_LEARNING_V2.md` §17) and Manas v3's
-anti-forgetting design (`SELF_LEARNING_V3.md` in the Manas repo) can
-consume as a shared signal.
+A diagnostic toolkit that measures catastrophic forgetting through
+controlled, fixed capability-probe regressions rather than unrelated
+one-off eval runs, producing persistent per-capability curves that both
+aarambh-ai's own self-learning loop (`SELF_LEARNING.md` §8,
+`SELF_LEARNING_V2.md` §17) and Manas v3's anti-forgetting design
+(`SELF_LEARNING_V3.md` in the Manas repo) can consume as a shared signal.
 
 ### Tasks
 
 **`aarambh-ai-eval` (extends v2's crate):**
 ```
-[ ] src/forgetting.rs
+[x] src/forgetting.rs
       CapabilityProbe — a small, fixed held-out set per capability
       (math, code, reasoning, factual, vision, video, document, tool-use),
       reusing the eval harness's existing task subsets (v2 §17) as probes
@@ -1016,24 +1016,45 @@ consume as a shared signal.
       forgetting_delta() — signed score change per capability between any
       two checkpoints, with a documented significance threshold below
       which noise (not real forgetting) is assumed
+      ProbeManifest — validated, fingerprinted ownership of fixed task
+      subsets; unavailable modality/permission probes are explicit skips
+      unless strict mode is requested
+      ForgettingStore — atomic, restart-safe, idempotent multi-point storage
+      keyed by suite and tokenizer fingerprints
 
-[ ] src/report.rs (extends v2's Scorecard)
+[x] src/report.rs (extends v2's Scorecard)
       Scorecard gains a per-capability forgetting section alongside the
       existing absolute scores, exported to the same markdown/JSON formats
+[x] MoE routing signatures captured per probe example and compared as a
+    separate routing-drift diagnostic; dense checkpoints pay no routing
+    introspection cost
 ```
 
 **`aarambh-ai-selflearn`:**
 ```
-[ ] Forgetting diagnostics wired into the existing self-learning loop
+[x] Forgetting diagnostics wired into the existing self-learning loop
     (`SELF_LEARNING.md` §5, §8): after each online-GRPO update batch, run
     the lightweight capability probes and log forgetting_delta() per
-    capability, extending the existing catastrophic-forgetting protections
-    with a measured signal instead of only the existing gradient-
-    orthogonalisation defence
-[ ] Shared export format: forgetting curves exported in a schema
+    capability. Deferred CPU gradients are measured only when they are
+    flushed; replay is measured after its committed optimizer update.
+[x] Shared export format: forgetting curves exported in a schema
     documented to be directly importable by Manas's associative-memory
     anti-forgetting tracking (cross-project consistency between
     aarambh-ai and Manas's own forgetting-diagnostics work)
+[x] No runtime dependency or filesystem discovery of `../manas`; JSONL is
+    an explicit optional bridge controlled by the caller
+```
+
+**Training and CLI integration:**
+```
+[x] Read-only training observer runs a baseline, configurable optimizer-step
+    probes, and a final probe without checkpoint serialization or parameter
+    mutation; distributed ranks synchronize around rank-0 diagnostics
+[x] `aarambh-ai eval` records named checkpoint/session points and can export
+    JSON/Markdown scorecards plus the seven-field bridge JSONL
+[x] `aarambh-ai selflearn forgetting-report` summarizes persistent curves
+[x] Checked-in probe manifest, JSON Schema, preparation/smoke scripts,
+    smoke training config, and Phase 38 operating guide
 ```
 
 ### Tests
@@ -1051,8 +1072,7 @@ fn forgetting_delta_below_significance_threshold_is_not_flagged() {}
 #[test]
 fn forgetting_diagnostics_do_not_alter_training_gradients_diagnostic_only() {
     // This phase measures forgetting, it does not by itself change how
-    // training proceeds — that stays the existing gradient-orthogonalisation
-    // defence's job.
+    // training proceeds or introduce a new anti-forgetting algorithm.
 }
 
 #[test]
@@ -1061,12 +1081,13 @@ fn forgetting_export_schema_matches_documented_manas_import_format() {}
 
 ### Milestone
 ```
-Forgetting diagnostics run automatically as part of both a standard
-training loop and the self-learning loop, producing per-capability
-forgetting curves across a documented sequence of checkpoints/phases
-(29–37), with the existing gradient-orthogonalisation defence's
-effectiveness now measured directly rather than assumed. Export format
-documented and validated against Manas's own anti-forgetting tracking.
+Opt-in forgetting diagnostics run as part of both a standard training loop
+and the self-learning loop, producing persistent per-capability curves across
+named checkpoints/sessions. Diagnostics are strictly measurement-only: the
+implemented safeguards remain frozen base weights, LoRA/DoRA updates, KL
+regularization, small learning rates, and diverse replay. The exact seven-field
+JSONL bridge is schema-validated and can be imported by Manas without creating
+a source, runtime, or filesystem dependency between the projects.
 
 git commit -m "feat: Phase 38 — forgetting diagnostics tied to Manas"
 git tag v3.0.0-alpha.10
@@ -1229,16 +1250,16 @@ git commit -m "chore: v3.0.0 — crates.io publish, source release"
 
 | # | Phase | Key Deliverable | Hardware | Duration |
 |---|---|---|---|---|
-| 29 | Gated DeltaNet | Hybrid linear attention, retrofit via continued pretraining | Kaggle | 10–14 days |
-| 30 | DSA | Sparse attention for remaining full-attention layers | Kaggle | 10–14 days |
-| 31 | Fine-Grained MoE | DeepSeek-style routing + shared expert, upgrades v2 dense MoE | Kaggle | 10–14 days |
-| 32 | MTP | Multi-token prediction heads, doubles as speculative-decode draft | Kaggle | 7–10 days |
-| 33 | On-Policy Distillation | New `aarambh-ai-distill`, teacher-scored student rollouts | Kaggle | 10–14 days |
+| 29 | Gated DeltaNet | Hybrid linear attention, retrofit via continued pretraining | Kaggle | 10–14 days ✅ |
+| 30 | DSA | Sparse attention for remaining full-attention layers | Kaggle | 10–14 days ✅ |
+| 31 | Fine-Grained MoE | DeepSeek-style routing + shared expert, upgrades v2 dense MoE | Kaggle | 10–14 days ✅ |
+| 32 | MTP | Multi-token prediction heads, doubles as speculative-decode draft | Kaggle | 7–10 days ✅ |
+| 33 | On-Policy Distillation | New `aarambh-ai-distill`, teacher-scored student rollouts | Kaggle | 10–14 days ✅ |
 | 34 | Native QAT | Fake-quantize training, folds INT4/INT8 into the training loop | i3 + Kaggle | 7–10 days ✅ |
-| 35 | Video Understanding | Frame sampling + temporal fusion, extends `aarambh-ai-vision` | Kaggle | 14–18 days |
+| 35 | Video Understanding | Frame sampling + temporal fusion, extends `aarambh-ai-vision` | Kaggle | 14–18 days ✅ |
 | 36 | Document Understanding | Layout-aware projector, shares vision encoder with video | Kaggle | 10–14 days ✅ |
-| 37 | Long-Horizon Tool Chains | New `aarambh-ai-agent`, multi-step tool calls with result ingestion | i3 + Kaggle | 10–14 days |
-| 38 | Forgetting Diagnostics | Per-capability forgetting curves, shared export format for Manas | i3 + Kaggle | 7–10 days |
+| 37 | Long-Horizon Tool Chains | New `aarambh-ai-agent`, multi-step tool calls with result ingestion | i3 + Kaggle | 10–14 days ✅ |
+| 38 | Forgetting Diagnostics | Per-capability forgetting curves, shared export format for Manas | i3 + Kaggle | 7–10 days ✅ |
 | 39 | Max Thinking Mode | 5th reasoning depth, 16,384-token budget, extends `ThinkingController` | i3 + Kaggle | 5–7 days |
 | 40 | crates.io Publish | Source-only 3.0.0 release, zero model artifacts | all | 5–7 days |
 

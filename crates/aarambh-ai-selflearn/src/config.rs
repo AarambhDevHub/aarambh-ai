@@ -95,6 +95,94 @@ pub struct CritiqueConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+/// Phase 38 capability probes attached to online parameter updates.
+pub struct SelfLearnForgettingConfig {
+    /// Enable forgetting diagnostics.
+    pub enabled: bool,
+    /// Capability probe manifest.
+    pub manifest: PathBuf,
+    /// Existing evaluation dataset root.
+    pub data_dir: PathBuf,
+    /// Training/evaluation config used by multimodal probes.
+    pub config_path: Option<PathBuf>,
+    /// Persistent forgetting-curve store.
+    pub store: PathBuf,
+    /// Optional seven-field JSONL export.
+    pub jsonl: Option<PathBuf>,
+    /// Optional per-task example cap.
+    pub max_examples: Option<usize>,
+    /// Generation budget for generative probes.
+    pub max_new_tokens: usize,
+    /// Tool-chain call budget.
+    pub agent_max_steps: usize,
+    /// Absolute score-change significance threshold.
+    pub significance_threshold: f64,
+    /// Permit HumanEval-lite subprocess execution.
+    pub allow_code_exec: bool,
+    /// Fail instead of recording unavailable probes.
+    pub require_all_probes: bool,
+    /// Optional stable baseline session identifier.
+    pub baseline_id: Option<String>,
+}
+
+impl Default for SelfLearnForgettingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            manifest: PathBuf::from("data/eval/forgetting/probes.json"),
+            data_dir: PathBuf::from("data/eval"),
+            config_path: None,
+            store: PathBuf::from("adapters/selflearn/forgetting_curves.json"),
+            jsonl: None,
+            max_examples: Some(8),
+            max_new_tokens: 32,
+            agent_max_steps: 8,
+            significance_threshold: 0.02,
+            allow_code_exec: false,
+            require_all_probes: false,
+            baseline_id: None,
+        }
+    }
+}
+
+impl SelfLearnForgettingConfig {
+    /// Validate paths, limits, and score threshold.
+    pub fn validate(&self) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.manifest.as_os_str().is_empty() || self.store.as_os_str().is_empty() {
+            return Err(AarambhError::Config(
+                "self-learn forgetting manifest and store paths must be non-empty".into(),
+            ));
+        }
+        if self
+            .config_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err(AarambhError::Config(
+                "self-learn forgetting config_path must not be empty".into(),
+            ));
+        }
+        if self.max_examples == Some(0) || self.max_new_tokens == 0 || self.agent_max_steps == 0 {
+            return Err(AarambhError::Config(
+                "self-learn forgetting eval limits must be non-zero".into(),
+            ));
+        }
+        if !self.significance_threshold.is_finite()
+            || !(0.0..=1.0).contains(&self.significance_threshold)
+        {
+            return Err(AarambhError::Config(
+                "self-learn forgetting threshold must be finite and in [0, 1]".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 /// Complete self-learning configuration.
 pub struct SelfLearnConfig {
     /// Runtime mode.
@@ -107,6 +195,9 @@ pub struct SelfLearnConfig {
     pub critique: CritiqueConfig,
     /// Directory for adapter, optimizer, and metrics state.
     pub state_dir: PathBuf,
+    /// Optional Phase 38 forgetting diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forgetting: Option<SelfLearnForgettingConfig>,
 }
 
 impl SelfLearnConfig {
@@ -141,6 +232,7 @@ impl SelfLearnConfig {
                 prompt_template: default_critique_template(),
             },
             state_dir: PathBuf::from("adapters/selflearn"),
+            forgetting: None,
         }
     }
 
@@ -175,6 +267,7 @@ impl SelfLearnConfig {
                 prompt_template: default_critique_template(),
             },
             state_dir: PathBuf::from("adapters/selflearn"),
+            forgetting: None,
         }
     }
 
@@ -204,6 +297,12 @@ impl SelfLearnConfig {
     /// Override the state directory.
     pub fn with_state_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.state_dir = path.into();
+        self
+    }
+
+    /// Attach Phase 38 forgetting diagnostics.
+    pub fn with_forgetting(mut self, config: SelfLearnForgettingConfig) -> Self {
+        self.forgetting = Some(config);
         self
     }
 
@@ -263,6 +362,9 @@ impl SelfLearnConfig {
             return Err(AarambhError::Config(
                 "self-learn critique rewrite_max_tokens must be greater than zero".into(),
             ));
+        }
+        if let Some(forgetting) = &self.forgetting {
+            forgetting.validate()?;
         }
         Ok(())
     }

@@ -12,10 +12,10 @@ construction, training, inference, quantization, adapter tuning, alignment,
 evaluation, multimodal input, safety, and an OpenAI-compatible server.
 
 The production source release is **v2.0.0**. Current mainline development is
-**v3.0.0-alpha.9**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
+**v3.0.0-alpha.10**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
 fine-grained MoE with shared experts, Multi-Token Prediction (MTP), on-policy
 distillation, native quantization-aware training, native video/document input,
-and bounded long-horizon tool-use chains.
+bounded long-horizon tool-use chains, and persistent forgetting diagnostics.
 
 > [!IMPORTANT]
 > This is a source and engineering project. It does not publish crates to
@@ -32,11 +32,11 @@ and bounded long-horizon tool-use chains.
 | Fine-tuning | SFT, LoRA, QLoRA, DoRA, QDoRA, VLM adapters, GRPO, DPO, QDPO, tool-call tuning |
 | Inference | Greedy/sampled decoding, streaming, thinking budgets, external or one-checkpoint MTP speculation, tool grammar, caller-executed chains |
 | Model formats | SafeTensors, INT8, GPTQ/AWQ INT4, GGUF, Hugging Face conversion, quantized KV cache |
-| Evaluation | Perplexity, MMLU-lite, HellaSwag, GSM8K, HumanEval-lite, preference, recall, vision, document ANLS, and tool scorecards |
+| Evaluation | Perplexity, MMLU-lite, HellaSwag, GSM8K, HumanEval-lite, preference, recall, multimodal/tool scorecards, capability forgetting curves, and MoE routing drift |
 | Vision | Frozen CLIP-style encoder, image/video/document fusion, temporal and 2D layout encoding, multimodal DoRA/QDoRA tuning |
 | Runtime | CPU SIMD, Rayon attention, optional custom CUDA PTX kernels, Axum 0.8.9 HTTP/SSE server |
 | Guardrails | Prompt-injection checks, jailbreak checks, PII redaction, output scanning, streaming token safety, audit logs |
-| Self-learning | Opt-in critique, replay buffer, verifier rewards, deferred CPU updates, CUDA vision mode |
+| Self-learning | Opt-in critique, replay, verifier rewards, deferred CPU updates, CUDA vision mode, and post-commit forgetting probes |
 
 The implementation history and proof obligations for each feature live in the
 [roadmaps](#documentation). This README focuses on building and using the
@@ -350,6 +350,27 @@ response-path evaluation. The checked-in fixture exercises three ordered calls;
 BFCL v1.3 response paths can be normalized with
 `scripts/phase37_prepare_bfcl_multiturn.py`.
 
+Track capability regressions between named checkpoints:
+
+```sh
+target/release/aarambh-ai eval \
+  --config configs/tiny_shakespeare.toml \
+  --model checkpoints/tiny_shakespeare/best/model.safetensors \
+  --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
+  --tasks gsm8k \
+  --data-dir data/eval \
+  --forgetting-manifest data/eval/forgetting/probes.json \
+  --forgetting-store checkpoints/forgetting/curves.json \
+  --checkpoint-id current \
+  --baseline-id baseline \
+  --forgetting-jsonl checkpoints/forgetting/manas-v1.jsonl
+```
+
+Record `baseline` first by omitting `--baseline-id` and
+`--forgetting-jsonl`. See [the Phase 38 guide](docs/phase38_forgetting.md)
+for training/self-learning observers, preparation, significance semantics,
+and the optional dependency-free Manas bridge.
+
 ### Quantize And Convert
 
 Create a calibrated Q4 GGUF checkpoint:
@@ -606,13 +627,13 @@ CUDA checks require a CUDA-capable environment and are intentionally opt-in.
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | v1 model, training, inference, safety, and self-learning design |
 | [ARCHITECTURE_V2.md](ARCHITECTURE_V2.md) | v2 long context, vision, MoE, distributed, tools, and serving additions |
-| [ARCHITECTURE_V3.md](ARCHITECTURE_V3.md) | v3 hybrid attention, DSA, fine-grained MoE, MTP, and planned architecture |
+| [ARCHITECTURE_V3.md](ARCHITECTURE_V3.md) | v3 hybrid attention, DSA, fine-grained MoE, MTP, agents, and forgetting diagnostics |
 | [ROADMAP.md](ROADMAP.md) | Completed v1 phases |
 | [ROADMAP_V2.md](ROADMAP_V2.md) | Completed v2 phases through the v2.0.0 release |
 | [ROADMAP_V3.md](ROADMAP_V3.md) | Current v3 delivery plan and status |
 | [SELF_LEARNING.md](SELF_LEARNING.md) | Text self-learning design |
 | [SELF_LEARNING_V2.md](SELF_LEARNING_V2.md) | Vision-aware self-learning design |
-| [SELF_LEARNING_V3.md](SELF_LEARNING_V3.md) | Planned v3 memory and forgetting diagnostics |
+| [SELF_LEARNING_V3.md](SELF_LEARNING_V3.md) | v3 self-learning and forgetting-diagnostic integration |
 | [docs/aarambh-ai-config-toml-guide.md](docs/aarambh-ai-config-toml-guide.md) | Configuration field reference |
 | [docs/aarambh-ai-complete-guide.md](docs/aarambh-ai-complete-guide.md) | Beginner-oriented project walkthrough |
 | [docs/aarambh-ai-math-formulas-guide.md](docs/aarambh-ai-math-formulas-guide.md) | Mathematical foundations and worked examples |
@@ -623,6 +644,7 @@ CUDA checks require a CUDA-capable environment and are intentionally opt-in.
 | [docs/phase35_video.md](docs/phase35_video.md) | Video migration, decoding, tuning, inference, and NExT-QA evaluation |
 | [docs/phase36_document.md](docs/phase36_document.md) | PDF/page ingestion, layout tuning, inference, and DocVQA ANLS evaluation |
 | [docs/phase37_agent.md](docs/phase37_agent.md) | Tool-chain protocol, safety, context policy, SFT, and response-path evaluation |
+| [docs/phase38_forgetting.md](docs/phase38_forgetting.md) | Capability curves, routing drift, training/self-learning hooks, and Manas JSONL |
 | [RELEASE.md](RELEASE.md) | Source-release process and artifact policy |
 | [CHANGELOG.md](CHANGELOG.md) | Versioned implementation history |
 

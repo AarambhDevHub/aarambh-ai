@@ -1,5 +1,47 @@
 # Changelog
 
+## [3.0.0-alpha.10] - 2026-07-24
+
+### Added
+
+- **Phase 38 Forgetting Diagnostics Tied to Manas**
+  - Added a validated eight-capability probe manifest backed by existing
+    math, code, reasoning, factual, vision, video, document, and tool-use
+    evaluation tasks.
+  - Added persistent multi-point forgetting curves with signed deltas,
+    configurable significance, manifest/tokenizer fingerprints, atomic writes,
+    idempotent point recording, and explicit unavailable-probe reporting.
+  - Extended JSON and Markdown scorecards with capability deltas, skipped
+    probes, and per-example MoE routing-drift summaries.
+  - Added a read-only standard-training observer and post-commit
+    self-learning hooks for inline GRPO, deferred-gradient flush, and replay
+    updates.
+  - Added standalone eval flags, `selflearn forgetting-report`, a CPU smoke
+    config, preparation/smoke scripts, and a complete operating guide.
+  - Added the exact seven-field
+    `schemas/manas-forgetting-v1.schema.json` JSONL interchange contract.
+
+### Changed
+
+- Workspace packages now share version `3.0.0-alpha.10` and remain
+  `publish = false`.
+- MoE forwards expose sorted routed-expert sets for diagnostic collection;
+  dense models retain the existing path without routing traces.
+- Distributed training exposes a synchronization barrier so rank-0 probes
+  cannot race subsequent optimizer work.
+- v3 architecture and self-learning docs now describe the implemented
+  adapter/KL/replay safeguards and no longer claim nonexistent gradient
+  orthogonalization.
+
+### Guarantees
+
+- Forgetting probes are measurement-only: they do not alter loss, gradients,
+  optimizer state, replay policy, or persisted model weights.
+- Aarambh-AI has no source, runtime, or filesystem dependency on the sibling
+  Manas project. JSONL transfer is explicit and operator controlled.
+- The alpha ships source code and fixtures only; it includes no pretrained
+  checkpoints and makes no capability-retention quality claim.
+
 ## [3.0.0-alpha.9] - 2026-07-24
 
 ### Added

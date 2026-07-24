@@ -5,6 +5,8 @@
 pub mod config;
 /// Critique parsing and scoring helpers.
 pub mod critique;
+/// Phase 38 forgetting diagnostics attached to online updates.
+pub mod forgetting_hook;
 /// Hardware gating for expensive self-learning modes.
 pub mod gating;
 /// High-level self-learning orchestration.
@@ -20,8 +22,12 @@ pub mod vision_cache;
 /// Grounded verifiers for checkable vision questions.
 pub mod vision_verifier;
 
-pub use config::{CritiqueConfig, OnlineGrpoConfig, ReplayConfig, SelfLearnConfig, SelfLearnMode};
+pub use config::{
+    CritiqueConfig, OnlineGrpoConfig, ReplayConfig, SelfLearnConfig, SelfLearnForgettingConfig,
+    SelfLearnMode,
+};
 pub use critique::{CritiqueResult, critique_response, parse_critique_response};
+pub use forgetting_hook::SelfLearnForgettingSummary;
 pub use gating::{Hardware, require_vision_hardware};
 pub use learning_loop::{SelfLearnBuildConfig, SelfLearnDraft, SelfLearnLoop, SelfLearnResponse};
 pub use metrics::{LearningMetrics, TrendDirection};

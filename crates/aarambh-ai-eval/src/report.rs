@@ -4,6 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use aarambh_ai_core::{AarambhError, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::forgetting::{ForgettingDelta, ProbeSkip, RoutingDrift};
+
 /// Result for one evaluation task.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TaskScore {
@@ -104,6 +106,9 @@ pub struct Scorecard {
     pub max_new_tokens: usize,
     /// UNIX timestamp in seconds.
     pub timestamp_unix: u64,
+    /// Optional Phase 38 forgetting diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forgetting: Option<ForgettingReport>,
 }
 
 impl Scorecard {
@@ -117,7 +122,7 @@ impl Scorecard {
         config_path: Option<String>,
     ) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: 2,
             model_path,
             tokenizer_path,
             config_path,
@@ -128,7 +133,14 @@ impl Scorecard {
                 .duration_since(UNIX_EPOCH)
                 .map(|duration| duration.as_secs())
                 .unwrap_or(0),
+            forgetting: None,
         }
+    }
+
+    /// Attach Phase 38 forgetting diagnostics.
+    pub fn with_forgetting(mut self, forgetting: ForgettingReport) -> Self {
+        self.forgetting = Some(forgetting);
+        self
     }
 
     /// Serialize this scorecard to pretty JSON.
@@ -156,6 +168,110 @@ impl Scorecard {
         out.push_str(&format!(
             "\nContext length used: `{}`  \nMax new tokens: `{}`\n",
             self.context_len_used, self.max_new_tokens
+        ));
+        if let Some(forgetting) = &self.forgetting {
+            out.push('\n');
+            out.push_str(&forgetting.to_markdown());
+        }
+        out
+    }
+}
+
+/// Forgetting diagnostics attached to one evaluation scorecard.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ForgettingReport {
+    /// Optional baseline checkpoint or session identifier.
+    pub baseline_checkpoint_or_session: Option<String>,
+    /// Current checkpoint or session identifier.
+    pub current_checkpoint_or_session: String,
+    /// Absolute score-change threshold used for significance.
+    pub significance_threshold: f64,
+    /// Per-capability score comparisons available for the selected baseline.
+    pub deltas: Vec<ForgettingDelta>,
+    /// Optional MoE routing-drift comparisons.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routing_drift: Vec<RoutingDrift>,
+    /// Capabilities skipped by the current run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<ProbeSkip>,
+}
+
+impl ForgettingReport {
+    /// Return the number of significantly regressed capabilities.
+    pub fn forgotten_count(&self) -> usize {
+        self.deltas
+            .iter()
+            .filter(|delta| delta.delta <= -self.significance_threshold)
+            .count()
+    }
+
+    /// Return the number of significantly improved capabilities.
+    pub fn improved_count(&self) -> usize {
+        self.deltas
+            .iter()
+            .filter(|delta| delta.delta >= self.significance_threshold)
+            .count()
+    }
+
+    /// Render a Markdown forgetting table.
+    pub fn to_markdown(&self) -> String {
+        let mut out = String::new();
+        out.push_str("## Forgetting Diagnostics\n\n");
+        out.push_str(&format!(
+            "Current: `{}`  \nBaseline: `{}`  \nSignificance threshold: `{:.4}`\n\n",
+            self.current_checkpoint_or_session,
+            self.baseline_checkpoint_or_session
+                .as_deref()
+                .unwrap_or("not selected"),
+            self.significance_threshold
+        ));
+        out.push_str("| Capability | Before | After | Delta | Status |\n");
+        out.push_str("|---|---:|---:|---:|---|\n");
+        if self.deltas.is_empty() {
+            out.push_str("| none | - | - | - | baseline recorded |\n");
+        } else {
+            for delta in &self.deltas {
+                let status = if delta.delta <= -self.significance_threshold {
+                    "forgotten"
+                } else if delta.delta >= self.significance_threshold {
+                    "improved"
+                } else {
+                    "stable"
+                };
+                out.push_str(&format!(
+                    "| {} | {:.4} | {:.4} | {:+.4} | {} |\n",
+                    delta.capability_or_concept,
+                    delta.score_before,
+                    delta.score_after,
+                    delta.delta,
+                    status
+                ));
+            }
+        }
+        if !self.routing_drift.is_empty() {
+            out.push_str("\n| Capability | Routing drift | Changed | Compared |\n");
+            out.push_str("|---|---:|---:|---:|\n");
+            for drift in &self.routing_drift {
+                out.push_str(&format!(
+                    "| {} | {:.4} | {} | {} |\n",
+                    drift.capability,
+                    drift.drift_rate,
+                    drift.changed_examples,
+                    drift.compared_examples
+                ));
+            }
+        }
+        if !self.skipped.is_empty() {
+            out.push_str("\nSkipped probes:\n");
+            for skipped in &self.skipped {
+                out.push_str(&format!("- `{}`: {}\n", skipped.capability, skipped.reason));
+            }
+        }
+        out.push_str(&format!(
+            "\nForgotten: `{}` | Improved: `{}` | Skipped: `{}`\n",
+            self.forgotten_count(),
+            self.improved_count(),
+            self.skipped.len()
         ));
         out
     }
@@ -403,6 +519,22 @@ mod tests {
         let comparison = ScorecardComparison::compare(&before, &after);
         assert_eq!(comparison.deltas[0].status, "better");
         assert_eq!(comparison.deltas[0].delta, 0.5);
+    }
+
+    #[test]
+    fn schema_v1_scorecard_without_forgetting_still_loads() {
+        let json = r#"{
+            "schema_version": 1,
+            "model_path": null,
+            "tokenizer_path": null,
+            "config_path": null,
+            "tasks": [],
+            "context_len_used": 0,
+            "max_new_tokens": 0,
+            "timestamp_unix": 0
+        }"#;
+        let scorecard: Scorecard = serde_json::from_str(json).unwrap();
+        assert!(scorecard.forgetting.is_none());
     }
 
     #[test]

@@ -39,6 +39,8 @@ pub struct ModelForwardOutput {
     pub moe_aux_loss: Option<Tensor>,
     /// Average per-expert utilization across active MoE layers.
     pub expert_utilization: Vec<f32>,
+    /// Sorted top-routed expert sets for each active MoE layer.
+    pub routed_experts_by_layer: Vec<Vec<usize>>,
     /// Average periodic DSA indexer teacher loss when requested.
     pub dsa_indexer_loss: Option<Tensor>,
     /// Average top-k block recall against the dense teacher.
@@ -439,6 +441,7 @@ impl AarambhModel {
             final_hidden_states: x,
             moe_aux_loss: stats.aux_loss()?,
             expert_utilization: stats.expert_utilization(),
+            routed_experts_by_layer: stats.routed_experts_by_layer(),
             dsa_indexer_loss: average_dsa_loss(&dsa_teachers)?,
             dsa_top_k_recall: (!dsa_teachers.is_empty()).then(|| {
                 dsa_teachers
@@ -449,6 +452,13 @@ impl AarambhModel {
             }),
             dsa_stats,
         })
+    }
+
+    /// Return per-layer top-routed expert sets for one diagnostic input.
+    pub fn routing_signature(&self, token_ids: &Tensor) -> Result<Vec<Vec<usize>>> {
+        Ok(self
+            .forward_train_with_aux(token_ids)?
+            .routed_experts_by_layer)
     }
 
     /// Capture inputs to linear layers for calibration and quantisation.

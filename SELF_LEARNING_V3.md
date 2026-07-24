@@ -39,9 +39,10 @@ v3.0's architecture changes (`ARCHITECTURE_V3.md` §38–48) touch enough of
 the model that self-learning needs its own design pass again, for
 reasons distinct from why v2 needed one:
 
-- v1's catastrophic-forgetting protection (`SELF_LEARNING.md` §8) has
-  always been a *defence* — gradient orthogonalisation applied during
-  online updates. It has never had a direct *measurement* attached to it.
+- v1's catastrophic-forgetting safeguards (`SELF_LEARNING.md` §8) use a
+  frozen reference/base model, low-rank adapters, KL regularization, small
+  learning rates, and diverse replay. They have never had a persistent
+  direct *measurement* attached to them.
   Once the model has hybrid attention, MoE routing, MTP heads, and three
   visual modalities, "did we forget something" stops being a question
   you can answer by eyeballing eval-score deltas after the fact — you
@@ -58,8 +59,8 @@ reasons distinct from why v2 needed one:
   forgetting failure mode that v1/v2 never had: an online update can
   silently retrain a routing decision as easily as it retrains a weight
   — a token that used to route to Expert 12 might start routing to
-  Expert 3 after a self-learning update, which is a kind of forgetting
-  gradient orthogonalisation on weights alone does not fully cover.
+  Expert 3 after a self-learning update. End-to-end capability probes and
+  routing signatures are both needed to make that change visible.
 
 ## 26. What Changes, What Doesn't
 
@@ -75,11 +76,10 @@ reasons distinct from why v2 needed one:
   image-only users moving to v3.0.
 
 **New, additive only:**
-- Forgetting-diagnostic probes run automatically after each online-GRPO
-  update batch (§27), producing a signal the loop can log and, in a
-  later phase, act on — v3.0 ships the *measurement*, not yet an
-  automatic corrective action beyond the existing orthogonalisation
-  defence.
+- Opt-in forgetting probes run after each committed online-GRPO update,
+  deferred-gradient flush, or replay update (§27), producing a signal the
+  loop can log and, in a later phase, act on. v3.0 ships measurement, not
+  an automatic corrective action.
 - An optional `video_ref` and `document_ref` field on replay entries
   (§29), following the exact caching pattern v2 established for
   `image_ref`.
@@ -116,12 +116,11 @@ significance threshold in the negative direction, flag it in the
 session's summary output (visible to you, not silently swallowed)
 ```
 
-This does **not** change what the existing gradient-orthogonalisation
-defence does (`SELF_LEARNING.md` §8) — that defence still runs exactly as
-before, on the same schedule, with the same math. Phase 38 adds a
-measurement layer *alongside* it, so you can actually tell whether the
-defence is holding, rather than assuming it is because the model still
-"feels fine" on whatever you happened to test by hand.
+This does **not** change update math or the safeguards in
+`SELF_LEARNING.md` §8. Phase 38 observes an in-memory merged adapter view
+after a committed update, so deferred CPU gradients are measured at flush
+time rather than while still pending. The probes never call backward or an
+optimizer.
 
 **Cost.** Capability probes are deliberately small and fixed — the same
 class of cost as v1's existing self-critique overhead, not a new
@@ -132,12 +131,10 @@ frozen visual encoder.
 
 ## 28. The Manas Connection
 
-Manas is a separate project — an associative-memory system, not a
-transformer — with its own from-scratch anti-forgetting design
-(gradient orthogonalisation in weight space, a growing self-expanding
-network, provenance reporting for what it knows). It does not share
-aarambh-ai's architecture, and this document does not attempt to unify
-the two systems technically.
+Manas is a separate associative-memory project, not a transformer. Its
+memory, provenance, and forgetting mechanisms are independent from
+aarambh-ai, and this document does not attempt to unify the two systems
+technically.
 
 What *is* shared is the **measurement schema**. `forgetting_delta()`'s
 export format (`ARCHITECTURE_V3.md` §47) is documented so that a
@@ -157,9 +154,10 @@ shape of record:
 }
 ```
 
-Neither project is required to consume the other's curves automatically
-— this is a documentation-level convention, not a runtime dependency
-between the two codebases. The value is that when you are reasoning
+Neither project consumes the other's curves automatically. Aarambh has no
+runtime dependency, path discovery, or write access to `../manas`; the
+versioned JSON Schema is an optional operator-controlled bridge. The value
+is that when you are reasoning
 about *either* project's forgetting behaviour, you are reasoning in the
 same vocabulary, and any lessons learned tuning aarambh-ai's significance
 threshold or probe design transfer directly to thinking about Manas's
@@ -220,18 +218,16 @@ specifically because online sessions run many turns back-to-back:
   the sequential recurrent form afterward. No special-casing is needed in
   the self-learning loop itself; this is handled entirely at the
   `aarambh-ai-nn` layer.
-- Gradient orthogonalisation (`SELF_LEARNING.md` §8) applies to
-  GatedDeltaNet and DSA layer weights the same way it applies to
-  everything else — the defence is architecture-agnostic by design, and
-  v3.0 does not special-case it here.
+- The self-learning safeguards remain adapter-scoped and therefore do not
+  need a separate Gated DeltaNet/DSA branch. Phase 38 observes the resulting
+  end-to-end model exactly as it observes full-attention models.
 
 ## 31. Self-Learning with Fine-Grained MoE
 
 Fine-grained MoE (`ARCHITECTURE_V3.md` §40) introduces a forgetting
 failure mode v1/v2 never had: **routing drift**. Because routing
 decisions are themselves learned, an online update can shift *which*
-experts a given kind of input activates, even if the experts' own
-weights are well-protected by orthogonalisation. A token that reliably
+experts a given kind of input activates. A token that reliably
 routed to a "math" specialist expert before a self-learning session might
 route somewhere else afterward — the weights for that expert may be
 completely intact and still "know" the material, but the router no longer
@@ -252,8 +248,7 @@ expert(s) changed between baseline and current
 Logged alongside score-based forgetting_delta(); a high routing-drift
 rate with a low score-based delta is itself a signal worth flagging —
 it means the router is moving even though end-to-end quality hasn't
-visibly dropped yet, an early-warning case gradient-orthogonalisation
-alone would not surface
+visibly dropped yet, making it a useful early-warning signal
 ```
 
 The shared expert (`ARCHITECTURE_V3.md` §40) is unaffected by this
@@ -359,8 +354,8 @@ Score -> replay buffer entry (§29's schema, chain-aware per §33 where
 applicable)
         │
         ▼
-Online GRPO update batch (SELF_LEARNING.md §5, gradient orthogonalisation
-per §8, architecture-agnostic per §30)
+Committed online GRPO, deferred-gradient flush, or replay update
+(SELF_LEARNING.md §5 and §8)
         │
         ▼
 Forgetting diagnostics run (§27): capability probes, forgetting_delta(),
@@ -374,14 +369,13 @@ routing drift — surfaced to you, not silently swallowed
 ## 36. CLI Commands (v3)
 
 ```
-[ ] aarambh-ai selflearn --config <cfg> --video --hardware kaggle
-[ ] aarambh-ai selflearn --config <cfg> --document --hardware kaggle
-[ ] aarambh-ai selflearn --config <cfg> --agent --tools tools.json --max-steps 8
-[ ] aarambh-ai selflearn --config <cfg> --forgetting-report
-      # runs a standalone forgetting-diagnostic pass against the current
-      # checkpoint and the documented baseline, without running a live
-      # self-learning session — useful for checking drift between
-      # sessions, not just during one
+[x] aarambh-ai selflearn start ... --forgetting-manifest <manifest>
+      # captures a session baseline and probes each committed update
+[x] aarambh-ai selflearn flush-gradients ... --forgetting-manifest <manifest>
+[x] aarambh-ai selflearn replay ... --forgetting-manifest <manifest>
+[x] aarambh-ai selflearn forgetting-report --forgetting-store <curves.json>
+[x] aarambh-ai eval ... --forgetting-manifest <manifest>
+      # standalone named-checkpoint comparison and optional Manas JSONL export
 ```
 
 ## 37. Crate Structure Additions
@@ -391,16 +385,8 @@ crates/aarambh-ai-selflearn/
 └── src/
     ├── ...v1/v2 modules unchanged (online_grpo.rs, critique.rs,
     │      replay.rs, vision_cache.rs, vision_verifier.rs, gating.rs)...
-    ├── forgetting_hook.rs      ← wires aarambh-ai-eval's CapabilityProbe
-    │                             into the post-update-batch loop
-    ├── routing_drift.rs        ← MoE expert-activation tracking for
-    │                             replayed/probed examples
-    ├── video_verifier.rs       ← extends vision_verifier.rs's split for
-    │                             checkable video-QA types
-    ├── document_verifier.rs    ← extends vision_verifier.rs's split for
-    │                             checkable document-QA types
-    └── chain_replay.rs         ← per-step replay entry construction with
-                                   chain-outcome score weighting (§33)
+    └── forgetting_hook.rs      ← wires capability probes and MoE routing
+                                  drift into the post-update-batch loop
 ```
 
 All new modules are additive to the existing crate — no existing v1/v2
@@ -433,10 +419,8 @@ module is renamed, removed, or restructured.
   routing decision" from "the router forgot a good routing decision"
   requires your judgment, the same way v1's self-critique noise always
   has.
-- The Manas export schema (§28) is a documentation-level convention only
-  in v3.0 — there is no automatic sync between aarambh-ai's forgetting
-  curves and Manas's own tracking; anyone wanting that would need to
-  build the integration themselves.
+- The Manas export schema (§28) is an explicit JSONL interchange contract.
+  There is no automatic sync; a caller must move/import the file.
 - Video/document verification (§32) is only as good as the checkable
   subset of the underlying free/public datasets — purely interpretive
   questions still fall back to self-critique with the same reliability

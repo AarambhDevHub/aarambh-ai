@@ -273,6 +273,7 @@ fn cuda_device_count() -> Option<usize> {
 /// Active distributed training context for a worker process.
 pub struct DistributedContext {
     config: ResolvedDistributedConfig,
+    device: candle_core::Device,
     #[cfg(feature = "cuda")]
     nccl: NcclGradientSync,
 }
@@ -306,10 +307,45 @@ impl DistributedContext {
         self.all_reduce_gradients_impl(grads)
     }
 
+    /// Synchronize all participating ranks.
+    pub fn barrier(&self) -> Result<()> {
+        if self.world_size() <= 1 {
+            return Ok(());
+        }
+        let mut marker = GradMap::new();
+        marker.insert(
+            "barrier".into(),
+            candle_core::Tensor::zeros((1,), candle_core::DType::F32, &self.device)?,
+        );
+        self.all_reduce_gradients(&mut marker)
+    }
+
+    /// Return whether any participating rank reported a local failure.
+    pub fn any_rank_failed(&self, local_failed: bool) -> Result<bool> {
+        if self.world_size() <= 1 {
+            return Ok(local_failed);
+        }
+        let mut marker = GradMap::new();
+        marker.insert(
+            "observer_failure".into(),
+            candle_core::Tensor::new(&[if local_failed { 1.0f32 } else { 0.0 }], &self.device)?,
+        );
+        self.all_reduce_gradients(&mut marker)?;
+        let value = marker
+            .remove("observer_failure")
+            .ok_or_else(|| AarambhError::Config("distributed failure marker disappeared".into()))?
+            .to_vec1::<f32>()?[0];
+        Ok(value > 0.0)
+    }
+
     #[cfg(feature = "cuda")]
     fn init_impl(config: ResolvedDistributedConfig, device: &candle_core::Device) -> Result<Self> {
         let nccl = NcclGradientSync::new(&config, device)?;
-        Ok(Self { config, nccl })
+        Ok(Self {
+            config,
+            device: device.clone(),
+            nccl,
+        })
     }
 
     #[cfg(not(feature = "cuda"))]

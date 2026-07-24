@@ -11,6 +11,8 @@ pub mod distributed;
 pub mod loss;
 /// Multi-token prediction loss alignment and aggregation.
 pub mod mtp_loss;
+/// Read-only live training observer API.
+pub mod observer;
 /// Optimizer and gradient utilities.
 pub mod optim;
 /// Learning-rate schedules.
@@ -22,7 +24,8 @@ pub mod vision_projector;
 
 pub use checkpoint::{CheckpointManager, TrainState};
 pub use config::{
-    DsaTrainingConfig, MoeRetrofitConfig, TrainingRunConfig, run_training_from_config,
+    DsaTrainingConfig, ForgettingTrainingConfig, MoeRetrofitConfig, TrainingObserverFactory,
+    TrainingRunConfig, run_training_from_config, run_training_from_config_with_observer,
 };
 pub use distributed::{
     DistributedBackend, DistributedConfig, DistributedContext, DistributedRuntime,
@@ -30,6 +33,7 @@ pub use distributed::{
 };
 pub use loss::cross_entropy_loss;
 pub use mtp_loss::{MtpHeadLoss, MtpLossOutput, combine_mtp_losses, mtp_head_loss};
+pub use observer::{TrainingObserver, TrainingObserverEvent, TrainingObserverSnapshot};
 pub use optim::{AdamW, AdamWConfig, GradMap, TrainableParameter};
 pub use schedule::CosineScheduleWithWarmup;
 pub use trainer::{MtpHeadMetric, Trainer, TrainingMetrics};

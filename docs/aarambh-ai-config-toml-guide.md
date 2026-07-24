@@ -1331,6 +1331,52 @@ Notice this one is inside an `adapters/` folder rather than `checkpoints/` — a
 
 ---
 
+## 44. `[forgetting]`
+
+**Definition:** An optional, read-only Phase 38 observer that evaluates fixed
+capability probes at the start of training, at a configured optimizer-step
+cadence, and at the final step.
+
+```toml
+[forgetting]
+enabled = true
+manifest = "data/eval/forgetting/probes.json"
+data_dir = "data/eval"
+store = "checkpoints/forgetting/curves.json"
+jsonl = "checkpoints/forgetting/manas-v1.jsonl"
+every_n_steps = 1000
+max_examples = 16
+max_new_tokens = 64
+agent_max_steps = 8
+significance_threshold = 0.02
+allow_code_exec = false
+require_all_probes = false
+# baseline_id = "optional-existing-baseline"
+```
+
+- `enabled` keeps the observer opt-in. A missing table has zero probe overhead.
+- `manifest` maps each capability to existing eval tasks and is fingerprinted.
+- `data_dir` is the normal evaluation-data root; no examples live in the
+  manifest itself.
+- `store` is the atomic multi-point JSON curve store.
+- `jsonl` optionally writes the exact seven-field Manas bridge.
+- `every_n_steps` controls optimizer-step cadence; start and final points are
+  still recorded.
+- `max_examples`, `max_new_tokens`, and `agent_max_steps` bound probe cost.
+- `significance_threshold` is an absolute score delta; `0.02` means two
+  percentage points.
+- `allow_code_exec` explicitly permits HumanEval-lite subprocesses.
+- `require_all_probes` turns unavailable data/modality/permission skips into
+  errors.
+- `baseline_id` compares against an existing compatible store point. When
+  omitted, the run-start observation becomes the baseline.
+
+The observer receives immutable model access and never performs backward or an
+optimizer step. See `configs/forgetting_smoke.toml` and
+`docs/phase38_forgetting.md`.
+
+---
+
 # Quick Reference: Every Config File at a Glance
 
 | Config File | Purpose | Model Size (hidden_dim / layers) | Context | Special Feature |
@@ -1351,6 +1397,7 @@ Notice this one is inside an `adapters/` folder rather than `checkpoints/` — a
 | `vision_vqa_instruct.toml` | Real VQA instruction fine-tune | 384 / 8 | 512 | Full CLIP-B/32, LLaVA-style data |
 | `video_qa_smoke.toml` | Native video-QA training smoke | 384 / 8 | 512 | 2 frames, learned temporal fusion |
 | `video_qa_smoke_infer.toml` | Video inference/eval artifacts | 384 / 8 | 512 | Saved projector + temporal weights |
+| `forgetting_smoke.toml` | Training-observer mechanism smoke | 128 / 2 | 64 | Phase 38 fixed capability probes |
 
 ---
 
@@ -1370,4 +1417,6 @@ Copy the smoke-test version closest to what you want first, get it running succe
 
 ---
 
-*This guide covers every field across all 14 `.toml` configuration files used to train Aarambh-AI — from the smallest CPU-only smoke test through full long-context and vision-language training runs.*
+*This guide covers the shared fields used across Aarambh-AI training
+configurations, from CPU smoke tests through long-context, multimodal, and
+forgetting-observer runs.*
