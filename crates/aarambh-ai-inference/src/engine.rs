@@ -389,12 +389,6 @@ impl InferenceEngine {
         F: FnMut(&GenerationStep) -> Result<()>,
     {
         config.validate()?;
-        if config.tool_calling.is_some() {
-            return Err(AarambhError::Unsupported(
-                "tool calling with precomputed or vision embeddings is not supported in Phase 26"
-                    .into(),
-            ));
-        }
         let dims = prompt_embeddings.dims();
         if dims.len() != 3 || dims[0] != 1 {
             return Err(AarambhError::Shape(format!(
@@ -420,7 +414,13 @@ impl InferenceEngine {
         Ok(prompt_ids)
     }
 
-    fn generate_from_token_ids_with_callback<F>(
+    /// Generate directly from an exact token transcript.
+    ///
+    /// Unlike [`Self::generate_with_callback`], this method does not render
+    /// tool definitions into the prompt. Callers must include the complete
+    /// protocol prefix in `prompt_ids`. Generated ids can therefore be
+    /// appended byte-for-byte across tool-use turns without text round trips.
+    pub fn generate_from_token_ids_with_callback<F>(
         &mut self,
         prompt_ids: Vec<u32>,
         config: GenerationConfig,
@@ -464,6 +464,15 @@ impl InferenceEngine {
             }
         }
         session.into_output()
+    }
+
+    /// Generate directly from an exact token transcript without callbacks.
+    pub fn generate_from_token_ids(
+        &mut self,
+        prompt_ids: Vec<u32>,
+        config: GenerationConfig,
+    ) -> Result<GenerationOutput> {
+        self.generate_from_token_ids_with_callback(prompt_ids, config, |_| Ok(()))
     }
 
     fn generate_from_embeddings_with_callback<F>(
@@ -1189,6 +1198,22 @@ mod tests {
             .unwrap();
         assert_eq!(out1.text, out2.text);
         assert_eq!(out1.token_ids, out2.token_ids);
+    }
+
+    #[test]
+    fn exact_token_generation_matches_text_generation() {
+        let mut text_engine = test_engine();
+        let mut token_engine = test_engine();
+        let prompt_ids = token_engine.encode_prompt("Hello").unwrap();
+        let expected = text_engine
+            .generate("Hello", GenerationConfig::greedy(4))
+            .unwrap();
+        let actual = token_engine
+            .generate_from_token_ids(prompt_ids, GenerationConfig::greedy(4))
+            .unwrap();
+        assert_eq!(actual.token_ids, expected.token_ids);
+        assert_eq!(actual.text, expected.text);
+        assert_eq!(actual.usage, expected.usage);
     }
 
     #[test]

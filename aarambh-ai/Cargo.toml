@@ -8,6 +8,7 @@ rust-version.workspace = true
 [features]
 default = []
 cuda = [
+    "aarambh-ai-agent/cuda",
     "aarambh-ai-core/cuda",
     "aarambh-ai-data/cuda",
     "aarambh-ai-distill/cuda",
@@ -26,6 +27,7 @@ cuda = [
 ]
 
 [dependencies]
+aarambh-ai-agent     = { path = "../crates/aarambh-ai-agent" }
 aarambh-ai-core      = { path = "../crates/aarambh-ai-core" }
 aarambh-ai-data      = { path = "../crates/aarambh-ai-data" }
 aarambh-ai-distill   = { path = "../crates/aarambh-ai-distill" }

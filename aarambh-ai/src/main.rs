@@ -18,6 +18,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    Agent(Box<cmd::agent::AgentArgs>),
     Train(cmd::train::TrainArgs),
     Infer(Box<cmd::infer::InferArgs>),
     Eval(cmd::eval::EvalArgs),
@@ -32,6 +33,7 @@ enum Command {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::Agent(args) => cmd::agent::run(*args),
         Command::Train(args) => cmd::train::run(args),
         Command::Infer(args) => cmd::infer::run(*args),
         Command::Eval(args) => cmd::eval::run(args),

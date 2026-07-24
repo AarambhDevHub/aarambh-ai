@@ -11,6 +11,7 @@ members = [
     "crates/aarambh-ai-train",
     "crates/aarambh-ai-finetune",
     "crates/aarambh-ai-inference",
+    "crates/aarambh-ai-agent",
     "crates/aarambh-ai-safety",
     "crates/aarambh-ai-selflearn",
     "crates/aarambh-ai-eval",
@@ -22,7 +23,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "3.0.0-alpha.8"
+version = "3.0.0-alpha.9"
 edition = "2024"
 rust-version = "1.89"
 

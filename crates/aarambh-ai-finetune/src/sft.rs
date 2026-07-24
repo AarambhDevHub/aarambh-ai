@@ -166,52 +166,51 @@ impl SftDataset {
         })
     }
 
-    pub(crate) fn from_id_sequences(
-        pairs: &[(Vec<u32>, Vec<u32>)],
+    pub(crate) fn from_masked_id_sequences(
+        sequences: &[(Vec<u32>, Vec<u32>)],
         max_seq_len: usize,
-        strict: bool,
     ) -> Result<Self> {
         if max_seq_len == 0 {
             return Err(AarambhError::Config("max_seq_len must be non-zero".into()));
         }
-        let mut sequences = Vec::with_capacity(pairs.len());
-        for (prefix, target) in pairs {
-            if target.is_empty() {
-                return Err(AarambhError::Config(
-                    "SFT target encoded to zero tokens".into(),
-                ));
-            }
-            let total = prefix.len() + target.len();
-            if strict && total > max_seq_len + 1 {
+        let mut encoded = Vec::with_capacity(sequences.len());
+        for (ids, token_mask) in sequences {
+            if ids.len() != token_mask.len() {
                 return Err(AarambhError::Config(format!(
-                    "tool SFT sequence has {total} tokens and would truncate at max_seq_len {max_seq_len}"
+                    "masked SFT ids length {} does not match token mask length {}",
+                    ids.len(),
+                    token_mask.len()
                 )));
             }
-            let mut ids = prefix.clone();
-            ids.extend_from_slice(target);
-            ids.truncate(max_seq_len + 1);
+            if ids.len() > max_seq_len + 1 {
+                return Err(AarambhError::Config(format!(
+                    "multi-step tool SFT sequence has {} tokens and would truncate at max_seq_len {max_seq_len}",
+                    ids.len()
+                )));
+            }
             if ids.len() < 2 {
                 return Err(AarambhError::Config(
-                    "SFT sequence must contain at least two tokens".into(),
+                    "masked SFT sequence must contain at least two tokens".into(),
                 ));
             }
-            let prefix_len = prefix.len();
-            let input_ids = ids[..ids.len() - 1].to_vec();
-            let labels = ids[1..].to_vec();
-            let loss_mask = build_loss_mask(prefix_len, ids.len());
-            sequences.push(SftSequence {
-                input_ids,
-                labels,
-                loss_mask,
+            if token_mask[1..].iter().all(|value| *value == 0) {
+                return Err(AarambhError::Config(
+                    "masked SFT sequence has no supervised assistant tokens".into(),
+                ));
+            }
+            encoded.push(SftSequence {
+                input_ids: ids[..ids.len() - 1].to_vec(),
+                labels: ids[1..].to_vec(),
+                loss_mask: token_mask[1..].to_vec(),
             });
         }
-        if sequences.is_empty() {
+        if encoded.is_empty() {
             return Err(AarambhError::Config(
-                "SFT dataset must contain at least one example".into(),
+                "masked SFT dataset must contain at least one example".into(),
             ));
         }
         Ok(Self {
-            sequences,
+            sequences: encoded,
             max_seq_len,
         })
     }

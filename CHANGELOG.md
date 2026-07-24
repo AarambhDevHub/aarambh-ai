@@ -1,5 +1,39 @@
 # Changelog
 
+## [3.0.0-alpha.9] - 2026-07-24
+
+### Added
+
+- **Phase 37 Long-Horizon Tool-Use Chains**
+  - Added `aarambh-ai-agent` with bounded repeated tool decisions, exact-token
+    transcript state, explicit stop/max-step behavior, drop-oldest and
+    summarising context policies, typed result validation, stdin ingestion,
+    and deterministic replay.
+  - Added `aarambh-ai agent` with strict safety by default, human and JSONL
+    events, caller-controlled result roots, and immediate-next-turn native
+    image/video/document result projection.
+  - Added multi-step tool SFT masking across every call and the final answer,
+    plus `tool-chain`/`agent-chain`/`bfcl-multistep` response-path evaluation.
+  - Added three-call SFT/replay/eval fixtures, a source-only smoke script, a
+    BFCL v1.3 explicit-response-path normalizer, and a complete runbook.
+
+### Changed
+
+- Virtual JSON tool tokens are encoded by one shared tokenizer protocol used
+  by inference and fine-tuning.
+- Inference accepts exact token transcripts and tool-constrained multimodal
+  embedding prefixes for chain continuation.
+- The workspace contains 19 non-publishable packages and is versioned
+  `3.0.0-alpha.9`.
+
+### Verified
+
+- Focused tests cover stopping, max-step enforcement, replay mismatch,
+  context eviction, result validation, shared virtual JSON, multi-step masks,
+  and evaluation normalization.
+- The fixture proves protocol and metric plumbing only. Held-out multi-step
+  success requires a trained checkpoint and is not claimed by this alpha.
+
 ## [3.0.0-alpha.8] - 2026-07-23
 
 ### Added

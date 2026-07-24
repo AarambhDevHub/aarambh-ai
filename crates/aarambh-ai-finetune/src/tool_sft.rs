@@ -4,7 +4,7 @@ use std::path::Path;
 use aarambh_ai_core::{AarambhError, Result, TokenizerLike};
 use aarambh_ai_tokenizer::{
     ASSISTANT, ASSISTANT_ID, BOS_ID, ENDOFTEXT, ENDOFTEXT_ID, PAD_ID, THINK_END, THINK_END_ID,
-    THINK_START, THINK_START_ID, USER, USER_ID,
+    THINK_START, THINK_START_ID, USER, USER_ID, VIRTUAL_ASCII_END, encode_virtual_json,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -14,9 +14,6 @@ use crate::sft::SftDataset;
 const FINAL_MARKER: &str = "<final>";
 const TOOL_CALL_START: &str = "<tool_call>";
 const TOOL_CALL_END: &str = "</tool_call>";
-const VIRTUAL_ASCII_BASE: u32 = 9;
-const VIRTUAL_ASCII_FIRST: u8 = 0x20;
-const VIRTUAL_ASCII_END: u32 = VIRTUAL_ASCII_BASE + (0x7e - VIRTUAL_ASCII_FIRST) as u32;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// Tool definition embedded in a tool-SFT training example.
@@ -37,6 +34,182 @@ pub struct ToolSftCall {
     pub name: String,
     /// Function arguments.
     pub arguments: Value,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+/// Outcome of an externally executed tool in a multi-step SFT trace.
+pub enum ToolSftResultStatus {
+    /// Tool execution succeeded.
+    Ok,
+    /// Tool execution failed.
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+/// Supported text-only result content for tool-chain supervision.
+pub enum ToolSftResultContent {
+    /// Bounded UTF-8 tool output.
+    Text {
+        /// Tool-produced text.
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// One tool result in a multi-step SFT trace.
+pub struct ToolSftResult {
+    /// Successful or failed execution status.
+    pub status: ToolSftResultStatus,
+    /// Text content required for successful results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<ToolSftResultContent>,
+    /// Error text required for failed results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl ToolSftResult {
+    fn validate(&self) -> Result<()> {
+        match (&self.status, &self.content, &self.error) {
+            (
+                ToolSftResultStatus::Ok,
+                Some(ToolSftResultContent::Text { text }),
+                None,
+            ) if text.len() <= 64 * 1024 => Ok(()),
+            (ToolSftResultStatus::Error, None, Some(error))
+                if !error.trim().is_empty() && error.len() <= 64 * 1024 =>
+            {
+                Ok(())
+            }
+            _ => Err(AarambhError::Config(
+                "multi-step tool result requires bounded text content for ok or a bounded non-empty error for error status"
+                    .into(),
+            )),
+        }
+    }
+
+    fn text(&self) -> String {
+        match (&self.status, &self.content, &self.error) {
+            (ToolSftResultStatus::Ok, Some(ToolSftResultContent::Text { text }), None) => {
+                text.clone()
+            }
+            (ToolSftResultStatus::Error, None, Some(error)) => format!("error: {error}"),
+            _ => "invalid tool result".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// One assistant call and caller result in a multi-step SFT trace.
+pub struct ToolSftTurn {
+    /// Expected schema-valid assistant call.
+    pub tool_call: ToolSftCall,
+    /// Caller-provided text or error result.
+    pub tool_result: ToolSftResult,
+    /// Optional hidden reasoning context, excluded from loss.
+    #[serde(default)]
+    pub thinking: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Long-horizon function-calling supervised example.
+pub struct MultiStepToolSftExample {
+    /// Initial user request.
+    pub instruction: String,
+    /// Tools available throughout the trace.
+    pub tools: Vec<ToolSftDefinition>,
+    /// Ordered call/result interactions.
+    pub turns: Vec<ToolSftTurn>,
+    /// Final assistant answer after all tool results.
+    pub response: String,
+    /// Optional hidden final reasoning context, excluded from loss.
+    #[serde(default)]
+    pub final_thinking: Option<String>,
+}
+
+impl MultiStepToolSftExample {
+    /// Validate call schemas, result protocol, and bounded chain length.
+    pub fn validate(&self) -> Result<()> {
+        if self.instruction.trim().is_empty()
+            || self.response.trim().is_empty()
+            || self.tools.is_empty()
+        {
+            return Err(AarambhError::Config(
+                "multi-step tool SFT requires instruction, tools, and final response".into(),
+            ));
+        }
+        if self.turns.is_empty() || self.turns.len() > 64 {
+            return Err(AarambhError::Config(
+                "multi-step tool SFT requires 1..=64 turns".into(),
+            ));
+        }
+        for turn in &self.turns {
+            let definition = self
+                .tools
+                .iter()
+                .find(|tool| tool.name == turn.tool_call.name)
+                .ok_or_else(|| {
+                    AarambhError::Config(format!(
+                        "multi-step tool SFT call references unknown tool {:?}",
+                        turn.tool_call.name
+                    ))
+                })?;
+            validate_schema_value(
+                &definition.parameters,
+                &turn.tool_call.arguments,
+                "$.arguments",
+            )?;
+            turn.tool_result.validate()?;
+        }
+        Ok(())
+    }
+
+    fn masked_ids(&self, tokenizer: &dyn TokenizerLike) -> Result<(Vec<u32>, Vec<u32>)> {
+        require_virtual_vocabulary(tokenizer)?;
+        let legacy = ToolSftExample {
+            instruction: self.instruction.clone(),
+            tools: self.tools.clone(),
+            tool_call: None,
+            response: "prefix".into(),
+            thinking: None,
+        };
+        let mut ids = tokenizer.encode(&legacy.prompt()?)?;
+        let mut mask = vec![0; ids.len()];
+        for (index, turn) in self.turns.iter().enumerate() {
+            if let Some(thinking) = &turn.thinking {
+                append_masked(
+                    &mut ids,
+                    &mut mask,
+                    tokenizer.encode(&format!("{THINK_START}\n{thinking}\n{THINK_END}\n"))?,
+                    0,
+                );
+            }
+            let call = serde_json::to_string(&turn.tool_call)?;
+            append_masked(&mut ids, &mut mask, vec![USER_ID, USER_ID], 1);
+            append_masked(&mut ids, &mut mask, encode_virtual_json(&call), 1);
+            append_masked(&mut ids, &mut mask, vec![BOS_ID, PAD_ID], 1);
+            let result = format!(
+                "{USER}\nTool result call_{:04}: {}\n{ASSISTANT}\n",
+                index + 1,
+                turn.tool_result.text()
+            );
+            append_masked(&mut ids, &mut mask, tokenizer.encode(&result)?, 0);
+        }
+        if let Some(thinking) = &self.final_thinking {
+            append_masked(
+                &mut ids,
+                &mut mask,
+                tokenizer.encode(&format!("{THINK_START}\n{thinking}\n{THINK_END}\n"))?,
+                0,
+            );
+        }
+        append_masked(&mut ids, &mut mask, vec![ASSISTANT_ID, ASSISTANT_ID], 1);
+        append_masked(&mut ids, &mut mask, tokenizer.encode(&self.response)?, 1);
+        append_masked(&mut ids, &mut mask, vec![ENDOFTEXT_ID], 1);
+        Ok((ids, mask))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -148,33 +321,56 @@ impl ToolSftDataset {
     ) -> Result<Self> {
         let path = path.as_ref();
         let content = fs::read_to_string(path)?;
-        let mut pairs = Vec::new();
+        let mut legacy_pairs = Vec::new();
+        let mut masked = Vec::new();
         for (line_index, line) in content.lines().enumerate() {
             let line = line.trim();
             if line.is_empty() {
                 continue;
             }
-            let example: ToolSftExample = serde_json::from_str(line).map_err(|error| {
+            let value: Value = serde_json::from_str(line).map_err(|error| {
                 AarambhError::Config(format!(
                     "invalid tool SFT JSONL at {} line {}: {error}",
                     path.display(),
                     line_index + 1
                 ))
             })?;
-            example.validate().map_err(|error| {
-                AarambhError::Config(format!(
-                    "invalid tool SFT example at {} line {}: {error}",
-                    path.display(),
-                    line_index + 1
-                ))
-            })?;
-            pairs.push((
-                tokenizer.encode(&example.prompt()?)?,
-                example.target_ids(tokenizer)?,
-            ));
+            if value.get("turns").is_some() {
+                let example: MultiStepToolSftExample =
+                    serde_json::from_value(value).map_err(|error| {
+                        AarambhError::Config(format!(
+                            "invalid multi-step tool SFT example at {} line {}: {error}",
+                            path.display(),
+                            line_index + 1
+                        ))
+                    })?;
+                example.validate()?;
+                masked.push(example.masked_ids(tokenizer)?);
+            } else {
+                let example: ToolSftExample = serde_json::from_value(value).map_err(|error| {
+                    AarambhError::Config(format!(
+                        "invalid tool SFT example at {} line {}: {error}",
+                        path.display(),
+                        line_index + 1
+                    ))
+                })?;
+                example.validate()?;
+                legacy_pairs.push((
+                    tokenizer.encode(&example.prompt()?)?,
+                    example.target_ids(tokenizer)?,
+                ));
+            }
+        }
+        for (prefix, target) in legacy_pairs {
+            let mut ids = prefix;
+            let prefix_len = ids.len();
+            ids.extend(target);
+            let mut mask = vec![0; prefix_len];
+            mask.resize(ids.len(), 1);
+            masked.push((ids, mask));
         }
         Ok(Self {
-            inner: SftDataset::from_id_sequences(&pairs, max_seq_len, true)?,
+            inner: SftDataset::from_masked_id_sequences(&masked, max_seq_len)?,
         })
     }
 
@@ -185,11 +381,7 @@ impl ToolSftDataset {
 
 impl ToolSftExample {
     fn target_ids(&self, tokenizer: &dyn TokenizerLike) -> Result<Vec<u32>> {
-        if tokenizer.vocab_size() <= VIRTUAL_ASCII_END as usize {
-            return Err(AarambhError::Tokenizer(format!(
-                "tool SFT requires vocabulary size greater than {VIRTUAL_ASCII_END}"
-            )));
-        }
+        require_virtual_vocabulary(tokenizer)?;
         let mut ids = Vec::new();
         if let Some(thinking) = &self.thinking {
             ids.push(THINK_START_ID);
@@ -210,34 +402,18 @@ impl ToolSftExample {
     }
 }
 
-fn encode_virtual_json(text: &str) -> Vec<u32> {
-    let mut ids = Vec::new();
-    for character in text.chars() {
-        if character.is_ascii() && (' '..='~').contains(&character) {
-            ids.push(virtual_ascii_id(character));
-        } else {
-            for escaped in json_unicode_escape(character).chars() {
-                ids.push(virtual_ascii_id(escaped));
-            }
-        }
+fn require_virtual_vocabulary(tokenizer: &dyn TokenizerLike) -> Result<()> {
+    if tokenizer.vocab_size() <= VIRTUAL_ASCII_END as usize {
+        return Err(AarambhError::Tokenizer(format!(
+            "tool SFT requires vocabulary size greater than {VIRTUAL_ASCII_END}"
+        )));
     }
-    ids
+    Ok(())
 }
 
-fn virtual_ascii_id(character: char) -> u32 {
-    VIRTUAL_ASCII_BASE + (character as u8 - VIRTUAL_ASCII_FIRST) as u32
-}
-
-fn json_unicode_escape(character: char) -> String {
-    let code = character as u32;
-    if code <= 0xffff {
-        format!("\\u{code:04x}")
-    } else {
-        let adjusted = code - 0x1_0000;
-        let high = 0xd800 + (adjusted >> 10);
-        let low = 0xdc00 + (adjusted & 0x3ff);
-        format!("\\u{high:04x}\\u{low:04x}")
-    }
+fn append_masked(ids: &mut Vec<u32>, mask: &mut Vec<u32>, tokens: Vec<u32>, value: u32) {
+    mask.extend(std::iter::repeat_n(value, tokens.len()));
+    ids.extend(tokens);
 }
 
 fn validate_schema_value(schema: &Value, value: &Value, path: &str) -> Result<()> {
@@ -366,6 +542,34 @@ fn schema_summary(schema: &Value) -> String {
 mod tests {
     use super::*;
 
+    struct ByteTokenizer;
+
+    impl TokenizerLike for ByteTokenizer {
+        fn encode(&self, text: &str) -> Result<Vec<u32>> {
+            Ok(text.bytes().map(|byte| byte as u32 + 100).collect())
+        }
+
+        fn decode(&self, ids: &[u32]) -> Result<String> {
+            Ok(ids
+                .iter()
+                .filter_map(|id| u8::try_from(id.saturating_sub(100)).ok())
+                .map(char::from)
+                .collect())
+        }
+
+        fn vocab_size(&self) -> usize {
+            512
+        }
+
+        fn eos_token_id(&self) -> u32 {
+            ENDOFTEXT_ID
+        }
+
+        fn bos_token_id(&self) -> Option<u32> {
+            Some(BOS_ID)
+        }
+    }
+
     #[test]
     fn formats_tool_and_direct_targets() {
         let tool = ToolSftDefinition {
@@ -398,5 +602,56 @@ mod tests {
             thinking: None,
         };
         assert_eq!(direct.target().unwrap(), "<final>Hi<|endoftext|>");
+    }
+
+    #[test]
+    fn multi_step_mask_supervises_each_call_and_final_only() {
+        let tool = ToolSftDefinition {
+            name: "lookup".into(),
+            description: "Lookup".into(),
+            parameters: serde_json::json!({
+                "type":"object",
+                "properties":{"key":{"type":"string"}},
+                "required":["key"]
+            }),
+        };
+        let result = ToolSftResult {
+            status: ToolSftResultStatus::Ok,
+            content: Some(ToolSftResultContent::Text {
+                text: "value".into(),
+            }),
+            error: None,
+        };
+        let example = MultiStepToolSftExample {
+            instruction: "Find two values".into(),
+            tools: vec![tool],
+            turns: vec![
+                ToolSftTurn {
+                    tool_call: ToolSftCall {
+                        name: "lookup".into(),
+                        arguments: serde_json::json!({"key":"one"}),
+                    },
+                    tool_result: result.clone(),
+                    thinking: Some("first".into()),
+                },
+                ToolSftTurn {
+                    tool_call: ToolSftCall {
+                        name: "lookup".into(),
+                        arguments: serde_json::json!({"key":"two"}),
+                    },
+                    tool_result: result,
+                    thinking: None,
+                },
+            ],
+            response: "Both found".into(),
+            final_thinking: Some("combine".into()),
+        };
+        example.validate().unwrap();
+        let (ids, mask) = example.masked_ids(&ByteTokenizer).unwrap();
+        assert_eq!(ids.len(), mask.len());
+        let transitions = mask.windows(2).filter(|pair| pair[0] != pair[1]).count();
+        assert_eq!(transitions, 5);
+        assert_eq!(mask.first(), Some(&0));
+        assert_eq!(mask.last(), Some(&1));
     }
 }

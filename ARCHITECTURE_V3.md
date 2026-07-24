@@ -1104,81 +1104,43 @@ to a later phase.
 
 ### 46.1 Chain orchestration
 
-```rust
-// aarambh-ai-agent/src/chain.rs
-pub struct ToolChain<'a> {
-    inference: &'a InferenceSession,   // v2's existing single-call
-                                        // decoding path, unmodified
-    tools: Vec<ToolDefinition>,        // v2's existing type, unmodified
-    max_steps: usize,                  // explicit budget, default 8
-}
+`aarambh-ai-agent::ToolChain<D, P>` is generic over a `ChainDecoder` and a
+`ToolResultProvider`. The decoder wraps the existing grammar-constrained
+single-call inference path; the provider reads caller-produced results from
+stdin JSONL or a deterministic replay file. A normal generation with no
+`tool_call` is the final answer. A generated call after the configured budget
+returns `AgentError::MaxSteps`.
 
-pub enum ChainStep {
-    ToolCall(ToolCall),
-    FinalResponse(String),
-}
-
-impl<'a> ToolChain<'a> {
-    pub fn run(&self, initial_prompt: &str, state: &mut ChainState) -> Result<String> {
-        for _ in 0..self.max_steps {
-            let step = self.inference.decode_next_step(state.context())?; // v2's path, called repeatedly
-            match step {
-                ChainStep::FinalResponse(text) => return Ok(text),
-                ChainStep::ToolCall(call) => {
-                    let result = state.await_caller_supplied_result(&call)?; // caller executes; see boundary note below
-                    state.ingest(call, result)?;
-                }
-            }
-        }
-        Err(ChainError::MaxStepsExceeded)
-    }
-}
-```
-
-Each step reuses `aarambh-ai-inference`'s existing single-call tool-call
-decoding path *completely unmodified* — `ToolChain` is purely an
-orchestration loop around a primitive v2 already validated, not a
-reimplementation of tool-call decoding.
+The initial prompt is rendered once with `ToolCallingConfig`. Later decisions
+use `InferenceEngine::generate_from_token_ids`, preserving the exact virtual
+JSON token ids emitted by earlier calls. Result turns are encoded as user
+messages ending at the assistant role. This avoids decode/re-encode drift in
+structured call spans.
 
 ### 46.2 Typed, multimodal tool results
 
-```rust
-pub enum ToolResult {
-    Text(String),
-    Image(Tensor),      // routes through v2's existing image fusion path
-    Video(Vec<Tensor>), // routes through §44's video fusion path
-    Document(Vec<Tensor>), // routes through §45's document fusion path
-}
-```
+`ToolResult` is a JSON envelope containing `call_id`, `status`, and exactly one
+of successful `content` or `error`. `ToolResultContent` is tagged as `text`,
+`image`, `video`, or `document`. Text/error payloads are limited to 64 KiB,
+media descriptions to 4 KiB, and document pages are unique one-based values.
+The CLI canonicalizes every media path and rejects paths outside
+`--result-root`.
 
-Building directly on §44–45, a chain step can hand back a screenshot or
-a retrieved PDF page and have the *next* step reason over it using the
-same multimodal fusion path the rest of the model already uses — not a
-text-only summary of it. This is the reason Phase 37 is sequenced after
-Phases 35–36 in `ROADMAP_V3.md`: multimodal tool results are only
-useful once the fusion machinery to actually consume them exists.
+Image/video/document content uses the Phase 19/35/36 projection and fusion
+paths for exactly the next model decision. After that decision, its native
+marker is replaced in active chain state by bounded path/description/page
+metadata. This bounds visual context growth while preserving provenance.
 
 ### 46.3 Context management
 
-```rust
-pub struct ChainState {
-    history: Vec<(ToolCall, ToolResult)>,
-    eviction_policy: EvictionPolicy,
-}
-
-pub enum EvictionPolicy {
-    /// Drop the oldest tool-call/result pairs once context approaches
-    /// a configured token budget, keeping the most recent N steps in
-    /// full.
-    DropOldest { keep_recent_steps: usize },
-    /// Summarise dropped steps into a short text digest (via a
-    /// dedicated summarisation prompt) rather than discarding them
-    /// entirely — a real concern even with §38–39's improved
-    /// long-context attention stack, since long-horizon chains can
-    /// still exceed any practical ceiling.
-    Summarise { keep_recent_steps: usize },
-}
-```
+`ChainState` stores the prompt, tool definitions, prefix ids, completed typed
+exchanges, optional summary, and eviction count. Before each decision the
+runtime reserves 32 tokens and compares the materialized transcript with model
+context. `DropOldest` removes the oldest exchange outside `keep_recent`
+(default 4). `Summarise` additionally asks the decoder for a bounded summary
+(default 128 tokens) and rebuilds the tool-aware prefix. If the base prefix plus
+protected recent turns still cannot fit, the chain fails instead of truncating
+an active call/result pair.
 
 ### 46.4 The boundary stays where v2 drew it
 
@@ -1191,14 +1153,19 @@ not.
 
 ### 46.5 Multi-step SFT
 
-```
-Extends v2 Phase 26's tool_sft.rs loss-masking scheme (mask everything
-except tool-call spans and the final response) across full multi-turn
-transcripts rather than single-call examples — the model is trained on
-realistic sequences of "call tool → receive result → decide whether
-another call is needed" rather than only ever seeing one call per
-example, which is what actually teaches it when to stop.
-```
+`ToolSftDataset` auto-detects records containing `turns`. It validates every
+call against the named schema and accepts text/error results only for training.
+Its arbitrary token mask supervises every action marker, virtual JSON call, and
+the final marker/answer/EOS. Initial prompts, caller results, and optional
+thinking context are masked. Multi-step sequences are rejected when they would
+exceed `max_seq_len + 1`; they are never silently truncated.
+
+`eval --tasks tool-chain|agent-chain|bfcl-multistep` uses scripted caller
+results and reports response-path success, schema validity, ordered name and
+argument accuracy, final normalized match, three-plus-call success, average
+calls, max-step failures, and safety pass rate. The BFCL v1.3 importer keeps
+only explicit multi-turn response paths. It does not execute benchmark
+environments and is not a full BFCL state-machine implementation.
 
 ---
 

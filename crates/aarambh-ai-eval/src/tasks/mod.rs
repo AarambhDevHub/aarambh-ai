@@ -24,6 +24,8 @@ pub mod ppl_task;
 pub mod preference;
 /// Grammar-constrained function-selection task.
 pub mod tool_calling;
+/// Scripted caller-response long-horizon tool-chain task.
+pub mod tool_chain;
 /// Native video question-answering task.
 pub mod video_qa;
 /// Vision-question-answering task.
@@ -39,6 +41,7 @@ pub use mmlu_lite::MmluLiteTask;
 pub use ppl_task::PplTask;
 pub use preference::PreferenceTask;
 pub use tool_calling::ToolCallingTask;
+pub use tool_chain::ToolChainTask;
 pub use video_qa::VideoQaTask;
 pub use vqa::VqaTask;
 

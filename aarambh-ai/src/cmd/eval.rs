@@ -27,6 +27,8 @@ pub struct EvalArgs {
     pub max_examples: Option<usize>,
     #[arg(long, default_value_t = 128)]
     pub max_new_tokens: usize,
+    #[arg(long, default_value_t = 8)]
+    pub agent_max_steps: usize,
     #[arg(long)]
     pub allow_code_exec: bool,
     #[arg(long)]
@@ -80,6 +82,7 @@ pub fn run(args: EvalArgs) -> anyhow::Result<()> {
         data_dir: args.data_dir.clone(),
         max_examples: args.max_examples,
         max_new_tokens: args.max_new_tokens,
+        agent_max_steps: args.agent_max_steps,
         allow_code_exec: args.allow_code_exec,
         model_path: Some(model_path.display().to_string()),
         tokenizer_path: Some(tokenizer_path.display().to_string()),
@@ -215,6 +218,7 @@ fn evaluate_checkpoint(
             data_dir: args.data_dir.clone(),
             max_examples: args.max_examples,
             max_new_tokens: args.max_new_tokens,
+            agent_max_steps: args.agent_max_steps,
             allow_code_exec: args.allow_code_exec,
             model_path: Some(model_path.display().to_string()),
             tokenizer_path: Some(tokenizer_path.display().to_string()),

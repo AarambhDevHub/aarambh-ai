@@ -11,6 +11,9 @@ data/*
 !data/dpo_tiny_preferences.jsonl
 !data/tool_sft_tiny.jsonl
 !data/tools_smoke.json
+!data/agent_tools_smoke.json
+!data/agent_chain_smoke.jsonl
+!data/agent_results_smoke.jsonl
 !data/distill_smoke_prompts.jsonl
 !data/distill_smoke_teacher.jsonl
 !data/eval/
@@ -21,6 +24,9 @@ data/eval/preference/*
 !data/eval/tool_calling/
 data/eval/tool_calling/*
 !data/eval/tool_calling/data.jsonl
+!data/eval/tool_chain/
+data/eval/tool_chain/*
+!data/eval/tool_chain/data.jsonl
 !data/eval/associative_recall/
 data/eval/associative_recall/*
 !data/eval/associative_recall/data.jsonl

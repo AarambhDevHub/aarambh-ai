@@ -621,6 +621,17 @@ fn load_tool_calling_config(
         )
         .into());
     }
+    let definitions = load_tool_definitions(path)?;
+    let choice = match args.tool_choice.trim() {
+        value if value.eq_ignore_ascii_case("auto") => ToolChoice::Auto,
+        value if value.eq_ignore_ascii_case("none") => ToolChoice::None,
+        value if value.eq_ignore_ascii_case("required") => ToolChoice::Required,
+        value => ToolChoice::Named(value.to_string()),
+    };
+    Ok(Some(ToolCallingConfig::new(definitions, choice)?))
+}
+
+pub(super) fn load_tool_definitions(path: &Path) -> anyhow::Result<Vec<ToolDefinition>> {
     let metadata = fs::metadata(path)?;
     if metadata.len() > 1024 * 1024 {
         return Err(AarambhError::Config(
@@ -645,13 +656,7 @@ fn load_tool_calling_config(
             ))),
         })
         .collect::<aarambh_ai_core::Result<Vec<_>>>()?;
-    let choice = match args.tool_choice.trim() {
-        value if value.eq_ignore_ascii_case("auto") => ToolChoice::Auto,
-        value if value.eq_ignore_ascii_case("none") => ToolChoice::None,
-        value if value.eq_ignore_ascii_case("required") => ToolChoice::Required,
-        value => ToolChoice::Named(value.to_string()),
-    };
-    Ok(Some(ToolCallingConfig::new(definitions, choice)?))
+    Ok(definitions)
 }
 
 fn print_generation_stats(
@@ -1076,21 +1081,21 @@ fn parse_frame_sampling(value: &str) -> anyhow::Result<FrameSamplingStrategy> {
     }
 }
 
-struct VisionRuntime {
+pub(super) struct VisionRuntime {
     model: VisionModel,
     preprocess: ImagePreprocessor,
     temporal: Option<TemporalEncoder>,
     cache_salt: String,
 }
 
-struct DocumentRuntime {
+pub(super) struct DocumentRuntime {
     vision: VisionRuntime,
     layout: LayoutAwareProjector,
     rasterizer_config: PageRasterizerConfig,
     encoder_page_batch_size: usize,
 }
 
-fn load_vision_runtime(
+pub(super) fn load_vision_runtime(
     run_config: &TrainingRunConfig,
     device: &candle_core::Device,
     dtype: candle_core::DType,
@@ -1162,7 +1167,7 @@ fn load_vision_runtime(
     })
 }
 
-fn load_document_runtime(
+pub(super) fn load_document_runtime(
     run_config: &TrainingRunConfig,
     device: &candle_core::Device,
     dtype: candle_core::DType,
@@ -1243,7 +1248,7 @@ fn build_vision_prompt_embeddings(
     interleave_image_tokens(&prompt_ids, &text_embeddings, &image_tokens, IMAGE_ID)
 }
 
-fn project_image_tokens(
+pub(super) fn project_image_tokens(
     runtime: &VisionRuntime,
     image_path: &Path,
     device: &candle_core::Device,
@@ -1278,7 +1283,7 @@ fn build_document_prompt_embeddings(
     )
 }
 
-fn project_document_tokens(
+pub(super) fn project_document_tokens(
     runtime: &DocumentRuntime,
     document_path: &Path,
     selected_pages: Option<&[usize]>,
@@ -1370,7 +1375,7 @@ fn build_video_prompt_embeddings(
     )
 }
 
-fn project_video_tokens(
+pub(super) fn project_video_tokens(
     runtime: &VisionRuntime,
     video_path: &Path,
     device: &candle_core::Device,
@@ -1514,7 +1519,7 @@ fn tokenizer_path(args: &InferArgs, run_config: &TrainingRunConfig) -> PathBuf {
         .unwrap_or_else(|| run_config.train.checkpoint_dir.join("tokenizer.json"))
 }
 
-fn default_model_path(checkpoint_dir: &Path) -> anyhow::Result<PathBuf> {
+pub(super) fn default_model_path(checkpoint_dir: &Path) -> anyhow::Result<PathBuf> {
     for pointer_name in ["latest.json", "best.json"] {
         let pointer_path = checkpoint_dir.join(pointer_name);
         if pointer_path.exists() {
@@ -1529,7 +1534,7 @@ fn default_model_path(checkpoint_dir: &Path) -> anyhow::Result<PathBuf> {
     ))
 }
 
-fn parse_thinking_mode(value: &str) -> anyhow::Result<ThinkingMode> {
+pub(super) fn parse_thinking_mode(value: &str) -> anyhow::Result<ThinkingMode> {
     match value.trim().to_ascii_lowercase().as_str() {
         "none" => Ok(ThinkingMode::None),
         "low" => Ok(ThinkingMode::Low),
@@ -1541,7 +1546,7 @@ fn parse_thinking_mode(value: &str) -> anyhow::Result<ThinkingMode> {
     }
 }
 
-fn parse_safety_mode(value: &str) -> anyhow::Result<SafetyMode> {
+pub(super) fn parse_safety_mode(value: &str) -> anyhow::Result<SafetyMode> {
     value.parse::<SafetyMode>().map_err(anyhow::Error::msg)
 }
 
