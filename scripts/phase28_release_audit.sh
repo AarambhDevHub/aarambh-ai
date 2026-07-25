@@ -70,7 +70,7 @@ if rg -n -U '__global__[^\{]+\{\s*\}' crates/aarambh-ai-kernel/kernels -g '*.cu'
   exit 1
 fi
 
-if rg -n '^\s*\[ \]' ROADMAP.md ROADMAP_V2.md; then
+if rg -n '^\s*\[ \]' ROADMAP.md ROADMAP_V2.md ROADMAP_V3.md; then
   echo "roadmap checklists must not contain unfinished tasks" >&2
   exit 1
 fi

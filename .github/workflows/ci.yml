@@ -48,6 +48,9 @@ jobs:
       - name: Documentation
         run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --locked
 
+      - name: Install ripgrep
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+
       - name: Release audit
         run: scripts/phase28_release_audit.sh
 
@@ -63,6 +66,7 @@ jobs:
           target/release/aarambh-ai --help
           target/release/aarambh-ai train --help
           target/release/aarambh-ai infer --help
+          target/release/aarambh-ai agent --help
           target/release/aarambh-ai eval --help
           target/release/aarambh-ai quantise --help
           target/release/aarambh-ai convert --help
@@ -80,6 +84,9 @@ jobs:
           target/release/aarambh-ai finetune dpo --help
           target/release/aarambh-ai finetune qdpo --help
           target/release/aarambh-ai finetune merge --help
+          target/release/aarambh-ai distill --help
+          target/release/aarambh-ai distill train --help
+          target/release/aarambh-ai distill evaluate --help
           target/release/aarambh-ai selflearn --help
           target/release/aarambh-ai selflearn start --help
           target/release/aarambh-ai selflearn flush-gradients --help

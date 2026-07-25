@@ -1,6 +1,6 @@
 # Phase 39 — Max Thinking Mode
 
-**Version:** 3.0.0-alpha.11
+**Version:** 3.0.0
 **Status:** Implemented. Max mode is a fifth `ThinkingMode` variant, not a new
 reasoning algorithm — it reuses every existing reasoning mechanism with a
 larger thinking budget.

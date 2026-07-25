@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - v2.0.0
+      - v3.0.0
 
 permissions:
   contents: write
@@ -15,7 +15,7 @@ env:
 
 jobs:
   release:
-    name: Validate and release v2.0.0 source
+    name: Validate and release v3.0.0 source
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
           components: clippy, rustfmt
 
       - name: Verify release tag
-        run: test "${GITHUB_REF_NAME}" = "v2.0.0"
+        run: test "${GITHUB_REF_NAME}" = "v3.0.0"
 
       - name: Format
         run: cargo fmt --all --check
@@ -45,21 +45,24 @@ jobs:
         run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --locked
 
       - name: Release audit
-        run: AARAMBH_EXPECTED_VERSION=2.0.0 scripts/phase28_release_audit.sh
+        run: scripts/phase28_release_audit.sh
 
       - name: Build release binary
         run: cargo build --release -p aarambh-ai --locked
 
       - name: Verify CLI
         run: |
-          test "$(target/release/aarambh-ai --version)" = "aarambh-ai 2.0.0"
+          test "$(target/release/aarambh-ai --version)" = "aarambh-ai 3.0.0"
+          target/release/aarambh-ai --version
           target/release/aarambh-ai --help
           target/release/aarambh-ai train --help
           target/release/aarambh-ai infer --help
+          target/release/aarambh-ai agent --help
           target/release/aarambh-ai eval --help
           target/release/aarambh-ai quantise --help
           target/release/aarambh-ai convert --help
           target/release/aarambh-ai finetune --help
+          target/release/aarambh-ai distill --help
           target/release/aarambh-ai selflearn --help
           target/release/aarambh-ai serve --help
 
@@ -71,7 +74,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: aarambh-ai v2.0.0
-          body_path: .github/release-notes/v2.0.0.md
+          name: aarambh-ai v3.0.0
+          body_path: .github/release-notes/v3.0.0.md
           generate_release_notes: true
           make_latest: true

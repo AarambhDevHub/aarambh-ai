@@ -1,5 +1,79 @@
 # Changelog
 
+## [3.0.0] - 2026-07-25
+
+### Added
+
+- Completed the v3 engineering roadmap across Phases 29–40:
+  - **Gated DeltaNet + DeepSeek Sparse Attention (29–30):** Hybrid linear attention
+    with decayed delta-rule recurrence and learned block-sparse attention for a
+    mostly-linear, minimally-dense attention stack with zero fully-dense layers
+    by default (dense available as a config fallback).
+  - **Fine-grained MoE with shared expert (31):** Many small experts instead of
+    few large ones plus always-active shared experts, with router warm-start
+    from v2 coarse router weights.
+  - **Multi-Token Prediction (32):** Auxiliary heads predicting multiple future
+    tokens per position; doubles as a free draft source for speculative decoding.
+  - **On-policy distillation (33):** New `aarambh-ai-distill` crate with student
+    rollouts scored by a larger teacher, reducing train/inference distribution
+    mismatch (KL-style and reward-style scoring behind a shared trait).
+  - **Native QAT (34):** Device-native FakeQuantize for INT4/INT8 with identity
+    STE, export parity with Q4_K_M blocks, and QAT-wrapped projections across
+    attention, FFN, MoE, DeltaNet, DSA-indexer, and MTP heads.
+  - **Native video and document understanding (35–36):** H.264 MP4 decoding,
+    temporal fusion, PDF rasterisation, layout-aware projection, and shared VLM
+    DoRA tuning — one training code path, three data types (image, video,
+    document).
+  - **Long-horizon tool-use chains (37):** New `aarambh-ai-agent` crate with
+    multi-step tool orchestration, typed result ingestion (text/image/video/
+    document), explicit step budgets, and multi-step SFT.
+  - **Forgetting diagnostics (38):** Persistent per-capability forgetting curves,
+    probe manifests, routing-drift diagnostics, and a shared JSONL export format
+    directly importable by Manas's anti-forgetting tracking.
+  - **Max thinking mode (39):** Fifth `ThinkingMode::Max` variant with a
+    16,384-token budget, per-mode sampling defaults, and centralised
+    `none|low|medium|high|max` vocabulary across all CLI commands.
+  - **v3.0.0 source release (40):** CHANGELOG, RELEASE.md, release notes,
+    CI extensions, and documentation — `publish = false`, crates.io deferred
+    to v4.
+- Added `.github/release-notes/v3.0.0.md` and an updated release workflow.
+- Added Thinking Modes table to README.md (budget, sampling defaults, use cases).
+- Added `HardProblemsComparison` helper for High-vs-Max accuracy validation.
+- Added regression and structural tests for Max mode (budget, force-close,
+  parser, GRPO rollouts, comparison logic).
+
+### Changed
+
+- Set the complete 19-package workspace to version 3.0.0 through shared
+  package metadata (all remain `publish = false`; crates.io deferred to v4).
+- RELEASE.md updated to v3.0.0 runbook with `agent`, `distill` CLI commands and
+  `scripts/phase40_release_audit.sh`.
+- CI extended to cover `aarambh-ai-agent`, `aarambh-ai-distill`, and the
+  `agent`, `distill` CLI subcommands.
+- `ROADMAP_V3.md` Phase 40 retitled from "crates.io Publish" to "v3.0.0 Source
+  Release" with crates.io tasks removed.
+- Updated architecture and roadmap docs for the completed v3 release line.
+- v3.0.x is now the supported release line; v2.0.x is no longer maintained.
+
+### Guarantees
+
+- All v1/v2 dense model configurations remain valid when v3-only fields are
+  absent.
+- Existing v1/v2 tokenizer IDs, checkpoint paths, and adapter formats remain
+  supported.
+- v3 source release follows the same "no pretrained checkpoints, no model
+  artifacts" policy as v1.0.0 and v2.0.0.
+- Every exported Rust API is documented (`missing_docs` denied at the crate
+  level) and every `unsafe` block has an explicit safety rationale.
+
+### Release Policy
+
+- v3.0.0 is a GitHub application source release only.
+- All 19 workspace packages remain `publish = false`; crates.io publishing is
+  deferred to v4.0.0.
+- No pretrained checkpoints, adapters, tokenizer artifacts, GGUF files,
+  optimizer state, or compiled CPU/CUDA binaries are attached.
+
 ## [3.0.0-alpha.11] - 2026-07-25
 
 ### Added
