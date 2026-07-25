@@ -140,6 +140,7 @@ impl ForgettingHook {
             max_new_tokens: self.config.max_new_tokens,
             agent_max_steps: self.config.agent_max_steps,
             allow_code_exec: self.config.allow_code_exec,
+            thinking_mode: aarambh_ai_inference::ThinkingMode::None,
             model_path: Some(format!("live-selflearn-step-{}", online_grpo.step_count())),
             tokenizer_path: None,
             config_path: self

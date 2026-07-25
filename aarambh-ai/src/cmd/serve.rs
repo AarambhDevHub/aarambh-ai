@@ -36,6 +36,7 @@ pub struct ServeArgs {
     #[arg(long, default_value_t = 2048)]
     max_request_tokens: usize,
     #[arg(long, default_value = "none")]
+    /// Default thinking budget: none, low, medium, high, or max.
     thinking: String,
     #[arg(long)]
     tools: Option<PathBuf>,
@@ -131,15 +132,8 @@ pub fn run(args: ServeArgs) -> anyhow::Result<()> {
 }
 
 fn parse_thinking(value: &str) -> anyhow::Result<ThinkingMode> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "none" => Ok(ThinkingMode::None),
-        "low" => Ok(ThinkingMode::Low),
-        "medium" => Ok(ThinkingMode::Medium),
-        "high" => Ok(ThinkingMode::High),
-        other => Err(anyhow::anyhow!(
-            "invalid thinking mode '{other}', expected none|low|medium|high"
-        )),
-    }
+    use std::str::FromStr;
+    ThinkingMode::from_str(value).map_err(anyhow::Error::msg)
 }
 
 fn load_tools(path: &PathBuf) -> anyhow::Result<Vec<ToolDefinition>> {

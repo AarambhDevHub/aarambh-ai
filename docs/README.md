@@ -48,14 +48,22 @@ training and self-learning observers, standalone checkpoint comparisons,
 significance semantics, routing diagnostics, and the dependency-free Manas
 interchange contract introduced in Phase 38.
 
-### 6. `aarambh-ai-math-formulas-guide.md`
+### 6. `phase39_max_thinking_results.md`
+**Max thinking mode: the 16,384-token budget, sampling defaults, and High-vs-Max comparison.**
+
+This documents the fifth `ThinkingMode` variant (`Max`, 16,384 tokens), the
+centralised `none|low|medium|high|max` parsing/display, the per-mode sampling
+defaults, the deterministic `hard-problems` eval task, the commands, expected
+outputs, and the High-vs-Max comparison table introduced in Phase 39.
+
+### 7. `aarambh-ai-math-formulas-guide.md`
 **The math underneath every phase, explained from zero.**
 
 Once you know *what* each phase does, this file explains the actual formulas doing the work — Dot Product, Matrix Multiplication, Softmax, Scaled Dot-Product Attention, Layer Normalization, GELU Activation, Cross-Entropy Loss, Gradient Descent, Adam Optimizer, RoPE, LoRA Decomposition, Quantization, KL Divergence, and Perplexity.
 
 Every formula comes with a symbol-by-symbol translation (so `Σ`, `∂`, `θ` stop looking scary) and **two fully solved numeric examples** worked by hand, step by step. Read this after the phases guide, whenever you want to understand the actual arithmetic behind a specific phase.
 
-### 7. `ai-ml-dl-dataset-creation-guide.md`
+### 8. `ai-ml-dl-dataset-creation-guide.md`
 **The foundation underneath everything — terminology and where the training data comes from.**
 
 Two parts:
@@ -64,7 +72,7 @@ Two parts:
 
 Read this first if you're completely new to AI in general, or read it alongside the other two whenever data-related phases (like Phase 2, Data Pipeline) come up.
 
-### 8. `aarambh-ai-config-toml-guide.md`
+### 9. `aarambh-ai-config-toml-guide.md`
 **Every field in every `.toml` config file, explained — the practical "turn the dial" layer.**
 
 This walks through the checked-in training and inference configurations in

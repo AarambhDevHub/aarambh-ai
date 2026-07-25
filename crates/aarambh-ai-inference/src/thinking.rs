@@ -1,9 +1,32 @@
+use std::fmt;
+use std::str::FromStr;
+
 use aarambh_ai_tokenizer::{THINK_END_ID, THINK_START_ID};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Canonical lower-case spelling of the `none` thinking mode.
+pub const MODE_NONE: &str = "none";
+/// Canonical lower-case spelling of the `low` thinking mode.
+pub const MODE_LOW: &str = "low";
+/// Canonical lower-case spelling of the `medium` thinking mode.
+pub const MODE_MEDIUM: &str = "medium";
+/// Canonical lower-case spelling of the `high` thinking mode.
+pub const MODE_HIGH: &str = "high";
+/// Canonical lower-case spelling of the `max` thinking mode.
+pub const MODE_MAX: &str = "max";
+
+/// Parse a thinking-mode token (case-insensitive) into a [`ThinkingMode`].
+///
+/// This is the single canonical parser shared by every CLI command and the
+/// serving API so that the accepted vocabulary stays identical everywhere.
+pub fn parse_thinking_mode(value: &str) -> Result<ThinkingMode, String> {
+    ThinkingMode::from_str(value)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 /// Thinking budget mode.
 pub enum ThinkingMode {
     /// Disable thinking markers and budget.
+    #[default]
     None,
     /// Low thinking budget.
     Low,
@@ -11,6 +34,8 @@ pub enum ThinkingMode {
     Medium,
     /// High thinking budget.
     High,
+    /// Max thinking budget (Phase 39).
+    Max,
 }
 
 impl ThinkingMode {
@@ -21,12 +46,58 @@ impl ThinkingMode {
             Self::Low => 256,
             Self::Medium => 1024,
             Self::High => 4096,
+            Self::Max => 16384,
         }
     }
 
     /// Return true when thinking is enabled.
     pub fn is_enabled(self) -> bool {
         !matches!(self, Self::None)
+    }
+
+    /// Return the default `(temperature, top_p)` sampling pair for this mode.
+    ///
+    /// These defaults extend v1's per-mode table (`ARCHITECTURE_V3.md` §48.3).
+    /// They are only applied when the caller does not supply explicit sampling
+    /// parameters and never override user-provided values.
+    pub fn default_sampler(self) -> (f32, f32) {
+        match self {
+            Self::None => (0.70, 0.90),
+            Self::Low => (0.75, 0.92),
+            Self::Medium => (0.80, 0.95),
+            Self::High => (0.80, 0.95),
+            Self::Max => (0.85, 0.97),
+        }
+    }
+}
+
+impl FromStr for ThinkingMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            MODE_NONE => Ok(Self::None),
+            MODE_LOW => Ok(Self::Low),
+            MODE_MEDIUM => Ok(Self::Medium),
+            MODE_HIGH => Ok(Self::High),
+            MODE_MAX => Ok(Self::Max),
+            other => Err(format!(
+                "invalid thinking mode '{other}', expected none|low|medium|high|max"
+            )),
+        }
+    }
+}
+
+impl fmt::Display for ThinkingMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let spelling = match self {
+            Self::None => MODE_NONE,
+            Self::Low => MODE_LOW,
+            Self::Medium => MODE_MEDIUM,
+            Self::High => MODE_HIGH,
+            Self::Max => MODE_MAX,
+        };
+        f.write_str(spelling)
     }
 }
 
@@ -240,5 +311,93 @@ mod tests {
     fn thinking_budgets_increase_by_mode() {
         assert!(ThinkingMode::Medium.budget() > ThinkingMode::Low.budget());
         assert!(ThinkingMode::High.budget() > ThinkingMode::Medium.budget());
+        assert!(ThinkingMode::Max.budget() > ThinkingMode::High.budget());
+    }
+
+    #[test]
+    fn thinking_mode_max_budget_is_16384_tokens() {
+        assert_eq!(ThinkingMode::Max.budget(), 16384);
+        assert!(ThinkingMode::Max.is_enabled());
+    }
+
+    #[test]
+    fn thinking_mode_parser_accepts_all_five_modes_case_insensitively() {
+        assert_eq!("none".parse::<ThinkingMode>().unwrap(), ThinkingMode::None);
+        assert_eq!("LOW".parse::<ThinkingMode>().unwrap(), ThinkingMode::Low);
+        assert_eq!(
+            "Medium".parse::<ThinkingMode>().unwrap(),
+            ThinkingMode::Medium
+        );
+        assert_eq!("high".parse::<ThinkingMode>().unwrap(), ThinkingMode::High);
+        assert_eq!("max".parse::<ThinkingMode>().unwrap(), ThinkingMode::Max);
+        assert_eq!(
+            "  MaX  ".parse::<ThinkingMode>().unwrap(),
+            ThinkingMode::Max
+        );
+    }
+
+    #[test]
+    fn thinking_mode_parser_rejects_unknown_values() {
+        assert!("ultra".parse::<ThinkingMode>().is_err());
+        assert!("higher".parse::<ThinkingMode>().is_err());
+        assert!("".parse::<ThinkingMode>().is_err());
+    }
+
+    #[test]
+    fn thinking_mode_display_outputs_canonical_lower_case() {
+        assert_eq!(ThinkingMode::None.to_string(), "none");
+        assert_eq!(ThinkingMode::Low.to_string(), "low");
+        assert_eq!(ThinkingMode::Medium.to_string(), "medium");
+        assert_eq!(ThinkingMode::High.to_string(), "high");
+        assert_eq!(ThinkingMode::Max.to_string(), "max");
+    }
+
+    #[test]
+    fn thinking_mode_display_round_trips_through_parser() {
+        for mode in [
+            ThinkingMode::None,
+            ThinkingMode::Low,
+            ThinkingMode::Medium,
+            ThinkingMode::High,
+            ThinkingMode::Max,
+        ] {
+            assert_eq!(mode.to_string().parse::<ThinkingMode>().unwrap(), mode);
+        }
+    }
+
+    #[test]
+    fn max_mode_sampling_defaults_are_more_exploratory_than_high_mode() {
+        let (high_temp, high_top_p) = ThinkingMode::High.default_sampler();
+        let (max_temp, max_top_p) = ThinkingMode::Max.default_sampler();
+        assert!(max_temp > high_temp, "max temperature must exceed high");
+        assert!(max_top_p > high_top_p, "max top_p must exceed high");
+        // The full per-mode table from ARCHITECTURE_V3.md §48.3.
+        assert_eq!(ThinkingMode::None.default_sampler(), (0.70, 0.90));
+        assert_eq!(ThinkingMode::Low.default_sampler(), (0.75, 0.92));
+        assert_eq!(ThinkingMode::Medium.default_sampler(), (0.80, 0.95));
+        assert_eq!(ThinkingMode::High.default_sampler(), (0.80, 0.95));
+        assert_eq!(ThinkingMode::Max.default_sampler(), (0.85, 0.97));
+    }
+
+    #[test]
+    fn thinking_controller_force_closes_max_mode_at_budget_exactly_like_other_modes() {
+        // No special-cased logic path for Max — same on_token()/
+        // take_forced_token() mechanism as None/Low/Medium/High.
+        let mut ctrl = ThinkingController::new(ThinkingMode::Max);
+        assert_eq!(ctrl.effective_budget(), 16384);
+        assert_eq!(ctrl.take_forced_token(), Some(ForceToken::ThinkStart));
+        ctrl.on_token(THINK_START_ID);
+        assert!(ctrl.in_thinking_block());
+        // Feed up to (budget - 1) content tokens without force-closing.
+        for _ in 0..(16384 - 1) {
+            assert_eq!(ctrl.on_token(42), None);
+        }
+        // The budget-th content token forces the closing marker.
+        assert_eq!(ctrl.on_token(42), Some(ForceToken::ThinkEnd));
+        assert_eq!(ctrl.take_forced_token(), Some(ForceToken::ThinkEnd));
+        ctrl.on_token(THINK_END_ID);
+        assert!(!ctrl.in_thinking_block());
+        assert!(ctrl.is_closed());
+        assert_eq!(ctrl.tokens_used(), 16384);
     }
 }

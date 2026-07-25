@@ -10,6 +10,8 @@ pub mod associative_recall;
 pub mod document_qa;
 /// GSM8K subset task.
 pub mod gsm8k_subset;
+/// Hard-problems task for Max-mode thinking validation (Phase 39).
+pub mod hard_problems;
 /// HellaSwag task.
 pub mod hellaswag;
 /// HumanEval-lite task.
@@ -34,6 +36,7 @@ pub mod vqa;
 pub use associative_recall::AssociativeRecallTask;
 pub use document_qa::DocumentQaTask;
 pub use gsm8k_subset::Gsm8kSubsetTask;
+pub use hard_problems::HardProblemsTask;
 pub use hellaswag::HellaSwagTask;
 pub use humaneval_lite::HumanEvalLiteTask;
 pub use image_caption::ImageCaptionTask;

@@ -134,6 +134,7 @@ impl TrainingObserver for ForgettingObserver {
             max_new_tokens: self.forgetting.max_new_tokens,
             agent_max_steps: self.forgetting.agent_max_steps,
             allow_code_exec: self.forgetting.allow_code_exec,
+            thinking_mode: aarambh_ai_inference::ThinkingMode::None,
             model_path: Some(format!("live-training-step-{}", snapshot.step)),
             tokenizer_path: None,
             config_path: Some(self.config_path.display().to_string()),

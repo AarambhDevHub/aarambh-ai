@@ -79,6 +79,7 @@ pub struct InferArgs {
     #[arg(long)]
     pub seed: Option<u64>,
     #[arg(long, default_value = "none")]
+    /// Thinking budget: none, low, medium, high, or max.
     pub thinking: String,
     #[arg(long)]
     pub predict_view: bool,
@@ -1551,15 +1552,8 @@ pub(super) fn default_model_path(checkpoint_dir: &Path) -> anyhow::Result<PathBu
 }
 
 pub(super) fn parse_thinking_mode(value: &str) -> anyhow::Result<ThinkingMode> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "none" => Ok(ThinkingMode::None),
-        "low" => Ok(ThinkingMode::Low),
-        "medium" => Ok(ThinkingMode::Medium),
-        "high" => Ok(ThinkingMode::High),
-        other => Err(anyhow::anyhow!(
-            "invalid thinking mode '{other}', expected none|low|medium|high"
-        )),
-    }
+    use std::str::FromStr;
+    ThinkingMode::from_str(value).map_err(anyhow::Error::msg)
 }
 
 pub(super) fn parse_safety_mode(value: &str) -> anyhow::Result<SafetyMode> {

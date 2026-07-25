@@ -454,18 +454,22 @@ fn generation_config(
             ),
         ));
     }
-    let temperature = temperature.unwrap_or(1.0);
-    let top_p = top_p.unwrap_or(1.0);
+    // Resolve the thinking mode first so its per-mode sampling defaults
+    // (ARCHITECTURE_V3.md §48.3) can fill in any sampling parameters the
+    // caller left unspecified. Explicit user parameters are never overridden.
+    let thinking_mode = reasoning_effort
+        .map(parse_thinking)
+        .transpose()?
+        .unwrap_or(state.config.default_thinking);
+    let (default_temp, default_top_p) = thinking_mode.default_sampler();
+    let temperature = temperature.unwrap_or(default_temp);
+    let top_p = top_p.unwrap_or(default_top_p);
     let sampler = if temperature == 0.0 {
         Sampler::greedy()
     } else {
         Sampler::top_k_top_p(temperature, None, Some(top_p), seed)
             .map_err(|error| ApiFailure::param("temperature", error.to_string()))?
     };
-    let thinking_mode = reasoning_effort
-        .map(parse_thinking)
-        .transpose()?
-        .unwrap_or(state.config.default_thinking);
     let config = GenerationConfig {
         max_new_tokens: max_tokens,
         sampler,
@@ -547,16 +551,8 @@ fn build_tools(
 }
 
 fn parse_thinking(value: &str) -> Result<ThinkingMode, ApiFailure> {
-    match value.to_ascii_lowercase().as_str() {
-        "none" => Ok(ThinkingMode::None),
-        "low" => Ok(ThinkingMode::Low),
-        "medium" => Ok(ThinkingMode::Medium),
-        "high" => Ok(ThinkingMode::High),
-        _ => Err(ApiFailure::param(
-            "reasoning_effort",
-            "expected none, low, medium, or high",
-        )),
-    }
+    use std::str::FromStr;
+    ThinkingMode::from_str(value).map_err(|err| ApiFailure::param("reasoning_effort", err))
 }
 
 fn screen_prompt(prompt: &str, policy: Option<&SafetyPolicy>) -> Result<String, ApiFailure> {
@@ -898,6 +894,7 @@ fn submit_failure(error: SubmitError) -> ApiFailure {
     }
 }
 
+#[derive(Debug)]
 struct ApiFailure {
     status: StatusCode,
     body: ErrorResponse,
@@ -1145,6 +1142,79 @@ mod tests {
         assert!(constant_time_eq(b"secret", b"secret"));
         assert!(!constant_time_eq(b"secret", b"secrex"));
         assert!(!constant_time_eq(b"secret", b"short"));
+    }
+
+    #[test]
+    fn parse_thinking_accepts_max_and_rejects_unknown_values() {
+        assert_eq!(parse_thinking("max").unwrap(), ThinkingMode::Max);
+        assert_eq!(parse_thinking("MAX").unwrap(), ThinkingMode::Max);
+        assert_eq!(parse_thinking("high").unwrap(), ThinkingMode::High);
+        assert!(parse_thinking("ultra").is_err());
+        assert!(parse_thinking("").is_err());
+    }
+
+    fn test_state(max_request_tokens: usize, default_thinking: ThinkingMode) -> AppState {
+        let metrics = Arc::new(ServerMetrics::default());
+        let batcher = BatcherHandle::start(
+            test_engine(),
+            BatcherConfig {
+                max_batch_size: 2,
+                queue_capacity: 8,
+                batch_wait: Duration::from_millis(1),
+                prefill_chunk_size: 8,
+            },
+            None,
+            metrics.clone(),
+        )
+        .unwrap();
+        AppState {
+            config: ServeConfig {
+                max_request_tokens,
+                default_thinking,
+                safety_policy: None,
+                ..ServeConfig::default()
+            },
+            batcher,
+            metrics,
+            model_created: 0,
+        }
+    }
+
+    #[test]
+    fn generation_config_accepts_max_reasoning_effort_and_applies_defaults() {
+        let state = test_state(64, ThinkingMode::None);
+        // No explicit temperature/top_p: the server must still build a valid
+        // sampler using Max's per-mode defaults and report Max as the mode.
+        let config =
+            generation_config(16, None, None, None, Vec::new(), Some("max"), None, &state).unwrap();
+        assert_eq!(config.thinking_mode, ThinkingMode::Max);
+    }
+
+    #[test]
+    fn generation_config_explicit_temperature_is_not_overridden_by_mode_defaults() {
+        let state = test_state(64, ThinkingMode::None);
+        // temperature=0.0 forces greedy decoding regardless of the mode default.
+        let config = generation_config(
+            16,
+            Some(0.0),
+            None,
+            None,
+            Vec::new(),
+            Some("max"),
+            None,
+            &state,
+        )
+        .unwrap();
+        assert!(matches!(config.sampler, Sampler::Greedy));
+        assert_eq!(config.thinking_mode, ThinkingMode::Max);
+    }
+
+    #[test]
+    fn generation_config_falls_back_to_default_thinking_without_reasoning_effort() {
+        let state = test_state(64, ThinkingMode::Max);
+        let config =
+            generation_config(16, None, None, None, Vec::new(), None, None, &state).unwrap();
+        assert_eq!(config.thinking_mode, ThinkingMode::Max);
     }
 
     #[tokio::test]

@@ -1111,7 +1111,7 @@ long-horizon tool-use chain before the first tool call is even made.
 
 **`aarambh-ai-inference`:**
 ```
-[ ] src/thinking.rs (extends v1's existing module)
+[x] src/thinking.rs (extends v1's existing module)
       ThinkingMode gains a fifth variant: None / Low(256) / Medium(1024)
       / High(4096) / Max(16384) — budget chosen as the next step in the
       existing ~4x progression between modes, not an arbitrary number
@@ -1120,11 +1120,13 @@ long-horizon tool-use chain before the first tool call is even made.
       requires no structural change — Max is just another budget value
       flowing through the same mechanism that already handles the other
       four modes
+      (Phase 39 also centralised FromStr/Display on ThinkingMode and added
+      default_sampler() for the per-mode sampling table.)
 ```
 
 **`aarambh-ai-train`:**
 ```
-[ ] Sampling defaults for Max mode, extending v1's existing table
+[x] Sampling defaults for Max mode, extending v1's existing table
     (`ARCHITECTURE.md` §8.2):
       Thinking mode Max: temperature=0.85, top_p=0.97 (most exploratory
       of the five — Max-mode tasks are exactly the ones where premature
@@ -1135,7 +1137,9 @@ long-horizon tool-use chain before the first tool call is even made.
     token budget was previously insufficient to reach a correct answer —
     without such problems in the training mix, the model has no signal
     for when spending up to 16,384 tokens is actually worth it
-[ ] Reuses the existing format verifier and reward shaping unchanged
+    (Optional Kaggle helper: scripts/phase39_kaggle_grpo.sh; requires a
+    trained checkpoint and is not run by CI.)
+[x] Reuses the existing format verifier and reward shaping unchanged
     (correct + concise thinking → high reward; wrong answer → negative
     reward; excessive empty thinking → penalised) — Max mode does not
     get a separate reward function, only a larger budget ceiling within
@@ -1144,19 +1148,23 @@ long-horizon tool-use chain before the first tool call is even made.
 
 **`aarambh-ai-eval`:**
 ```
-[ ] New eval-harness task: a held-out "hard problems" subset specifically
+[x] New eval-harness task: a held-out "hard problems" subset specifically
     selected because they are unsolved (or solved at low accuracy) under
     High-mode budget, scoring Max-mode accuracy against that same set —
     the direct test of whether Max mode earns its larger budget rather
     than just spending more tokens for the same outcome
+    (data/eval/hard_problems/data.jsonl + crates/aarambh-ai-eval/src/tasks/hard_problems.rs;
+    reports accuracy, thinking_tokens, completion_tokens, total_tokens.)
 ```
 
 **CLI:**
 ```
-[ ] aarambh-ai infer --config <cfg> --thinking max --prompt "..."
-[ ] aarambh-ai agent --config <cfg> --thinking max --tools tools.json ...
+[x] aarambh-ai infer --config <cfg> --thinking max --prompt "..."
+[x] aarambh-ai agent --config <cfg> --thinking max --tools tools.json ...
       # pairs naturally with Phase 37's tool chains: Max-budget planning
       # before the first tool call, on the hardest multi-step tasks
+    (serve, finetune grpo, distill train, selflearn start, and eval also
+    accept --thinking max via the same centralised parser.)
 ```
 
 ### Tests
@@ -1186,13 +1194,17 @@ fn existing_none_low_medium_high_modes_are_byte_for_byte_unchanged() {}
 
 ### Milestone
 ```
-Max mode ships as a fifth ThinkingMode variant with zero structural
-changes to ThinkingController — same forced-token mechanism, same
-budget-tracking, same collapse-on-force-close behaviour every existing
-mode already has. Measured accuracy improvement over High mode on a
-held-out set of problems specifically chosen to be High-mode-insufficient,
-documented in docs/phase39_max_thinking_results.md. `aarambh-ai infer
---thinking max` and `aarambh-ai agent --thinking max` both work end to end.
+DONE (3.0.0-alpha.11). Max mode shipped as a fifth ThinkingMode variant with
+zero structural changes to ThinkingController — same forced-token mechanism,
+same budget-tracking, same collapse-on-force-close behaviour every existing
+mode already has. Parsing/display centralised on ThinkingMode; per-mode
+sampling defaults added; hard-problems eval task added; infer/agent/serve/
+finetune grpo/distill train/selflearn start/eval all accept --thinking max.
+Accuracy improvement over High mode on a held-out High-insufficient set is
+documented (schema, no invented numbers) in docs/phase39_max_thinking_results.md;
+the optional Kaggle helper scripts produce the measurement when a trained
+checkpoint is supplied. `aarambh-ai infer --thinking max` and
+`aarambh-ai agent --thinking max` both work end to end.
 
 git commit -m "feat: Phase 39 — Max thinking mode (16,384-token budget)"
 git tag v3.0.0-alpha.11

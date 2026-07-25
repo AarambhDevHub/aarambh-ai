@@ -12,10 +12,11 @@ construction, training, inference, quantization, adapter tuning, alignment,
 evaluation, multimodal input, safety, and an OpenAI-compatible server.
 
 The production source release is **v2.0.0**. Current mainline development is
-**v3.0.0-alpha.10**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
+**v3.0.0-alpha.11**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
 fine-grained MoE with shared experts, Multi-Token Prediction (MTP), on-policy
 distillation, native quantization-aware training, native video/document input,
-bounded long-horizon tool-use chains, and persistent forgetting diagnostics.
+bounded long-horizon tool-use chains, persistent forgetting diagnostics, and
+Max thinking mode (16,384-token budget).
 
 > [!IMPORTANT]
 > This is a source and engineering project. It does not publish crates to
@@ -173,7 +174,8 @@ target/release/aarambh-ai infer \
 Useful inference options include:
 
 - `--greedy` for deterministic argmax decoding
-- `--thinking low|medium|high` for bounded reasoning-token budgets
+- `--thinking none|low|medium|high|max` for bounded reasoning-token budgets
+  (Max = 16,384-token budget, Phase 39)
 - `--predict-view` for next-token probability inspection
 - `--stats` for throughput, cache, sparse-attention, and MoE diagnostics
 - `--safety strict|permissive|research|none` for policy selection

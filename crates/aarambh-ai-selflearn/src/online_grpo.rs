@@ -1388,6 +1388,7 @@ fn thinking_to_grpo(mode: ThinkingMode) -> GrpoThinkingMode {
         ThinkingMode::Low => GrpoThinkingMode::Low,
         ThinkingMode::Medium => GrpoThinkingMode::Medium,
         ThinkingMode::High => GrpoThinkingMode::High,
+        ThinkingMode::Max => GrpoThinkingMode::Max,
     }
 }
 
@@ -1397,6 +1398,7 @@ fn grpo_to_thinking(mode: GrpoThinkingMode) -> ThinkingMode {
         GrpoThinkingMode::Low => ThinkingMode::Low,
         GrpoThinkingMode::Medium => ThinkingMode::Medium,
         GrpoThinkingMode::High => ThinkingMode::High,
+        GrpoThinkingMode::Max => ThinkingMode::Max,
     }
 }
 
@@ -1482,6 +1484,23 @@ mod tests {
         source.insert("x".into(), b);
         merge_grad_maps(&mut target, source).unwrap();
         assert_eq!(target["x"].to_vec1::<f32>().unwrap(), vec![4.0, 6.0]);
+    }
+
+    #[test]
+    fn thinking_grpo_mappings_round_trip_all_five_modes_including_max() {
+        for mode in [
+            ThinkingMode::None,
+            ThinkingMode::Low,
+            ThinkingMode::Medium,
+            ThinkingMode::High,
+            ThinkingMode::Max,
+        ] {
+            let grpo = thinking_to_grpo(mode);
+            assert_eq!(grpo_to_thinking(grpo), mode);
+        }
+        // Max maps to Max and carries the 16,384-token budget through.
+        assert_eq!(thinking_to_grpo(ThinkingMode::Max), GrpoThinkingMode::Max);
+        assert_eq!(GrpoThinkingMode::Max.budget(), 16_384);
     }
 
     #[test]

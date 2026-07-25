@@ -2,21 +2,22 @@ use std::cell::Cell;
 use std::path::PathBuf;
 
 use aarambh_ai_core::{AarambhError, Configurable, Result};
+use aarambh_ai_inference::ThinkingMode;
 use aarambh_ai_model::AarambhModel;
 use aarambh_ai_tokenizer::BpeTokenizer;
 use candle_core::{DType, Device};
 
 use crate::report::{Scorecard, TaskScore};
 use crate::tasks::{
-    AssociativeRecallTask, DocumentQaTask, Gsm8kSubsetTask, HellaSwagTask, HumanEvalLiteTask,
-    ImageCaptionTask, MmluLiteTask, PplTask, PreferenceTask, ToolCallingTask, ToolChainTask,
-    VideoQaTask, VqaTask,
+    AssociativeRecallTask, DocumentQaTask, Gsm8kSubsetTask, HardProblemsTask, HellaSwagTask,
+    HumanEvalLiteTask, ImageCaptionTask, MmluLiteTask, PplTask, PreferenceTask, ToolCallingTask,
+    ToolChainTask, VideoQaTask, VqaTask,
 };
 
 /// Evaluation run configuration.
 #[derive(Debug, Clone)]
 pub struct EvalConfig {
-    /// Task selectors such as `ppl`, `mmlu`, `hellaswag`, `gsm8k`, `preference`, `image-caption`, or `all`.
+    /// Task selectors such as `ppl`, `mmlu`, `hellaswag`, `gsm8k`, `hard-problems`, `humaneval`, `image-caption`, or `all`.
     pub tasks: Vec<String>,
     /// Root directory containing normalized eval data.
     pub data_dir: PathBuf,
@@ -28,6 +29,8 @@ pub struct EvalConfig {
     pub agent_max_steps: usize,
     /// Whether HumanEval-lite may execute generated Python code.
     pub allow_code_exec: bool,
+    /// Thinking mode applied to thinking-aware generative tasks (Phase 39).
+    pub thinking_mode: ThinkingMode,
     /// Optional model path stored in scorecards.
     pub model_path: Option<String>,
     /// Optional tokenizer path stored in scorecards.
@@ -45,6 +48,7 @@ impl Default for EvalConfig {
             max_new_tokens: 128,
             agent_max_steps: 8,
             allow_code_exec: false,
+            thinking_mode: ThinkingMode::None,
             model_path: None,
             tokenizer_path: None,
             config_path: None,
@@ -144,7 +148,14 @@ fn selected_tasks(selectors: &[String], allow_code_exec: bool) -> Result<Vec<Box
         .iter()
         .any(|task| task.eq_ignore_ascii_case("all"))
     {
-        vec!["ppl", "mmlu", "hellaswag", "gsm8k", "humaneval"]
+        vec![
+            "ppl",
+            "mmlu",
+            "hellaswag",
+            "gsm8k",
+            "hard-problems",
+            "humaneval",
+        ]
     } else {
         selectors.iter().map(String::as_str).collect::<Vec<_>>()
     };
@@ -155,6 +166,9 @@ fn selected_tasks(selectors: &[String], allow_code_exec: bool) -> Result<Vec<Box
             "mmlu" | "mmlu-lite" | "mmlu_lite" => tasks.push(Box::new(MmluLiteTask)),
             "hellaswag" => tasks.push(Box::new(HellaSwagTask)),
             "gsm8k" | "gsm8k-subset" | "gsm8k_subset" => tasks.push(Box::new(Gsm8kSubsetTask)),
+            "hard-problems" | "hard_problems" | "hard" => {
+                tasks.push(Box::new(HardProblemsTask));
+            }
             "humaneval" | "humaneval-lite" | "humaneval_lite" => {
                 if !allow_code_exec {
                     return Err(AarambhError::Config(
@@ -187,10 +201,34 @@ fn selected_tasks(selectors: &[String], allow_code_exec: bool) -> Result<Vec<Box
             }
             other => {
                 return Err(AarambhError::Config(format!(
-                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,humaneval,preference,image-caption,vqa,video-qa,document-qa,tool-calling,tool-chain,associative-recall,all"
+                    "unknown eval task '{other}', expected ppl,mmlu,hellaswag,gsm8k,hard-problems,humaneval,preference,image-caption,vqa,video-qa,document-qa,tool-calling,tool-chain,associative-recall,all"
                 )));
             }
         }
     }
     Ok(tasks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_tasks_accepts_hard_problems_under_all_aliases() {
+        for selector in ["hard-problems", "hard_problems", "hard"] {
+            let tasks = selected_tasks(&[selector.into()], false).unwrap();
+            assert_eq!(tasks.len(), 1);
+            assert_eq!(tasks[0].name(), "hard-problems");
+        }
+    }
+
+    #[test]
+    fn selected_tasks_rejects_unknown_selector() {
+        assert!(selected_tasks(&["nope".into()], false).is_err());
+    }
+
+    #[test]
+    fn eval_config_default_thinking_mode_is_none() {
+        assert_eq!(EvalConfig::default().thinking_mode, ThinkingMode::None);
+    }
 }
