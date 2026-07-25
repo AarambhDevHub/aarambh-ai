@@ -7,11 +7,13 @@ use aarambh_ai_eval::{
     ProbeManifest, QatRobustnessReport, Scorecard, ScorecardComparison, run_all,
     run_capability_probes, tokenizer_fingerprint,
 };
+use aarambh_ai_inference::ThinkingMode;
 use aarambh_ai_quant::GgufFormat;
 use aarambh_ai_tokenizer::BpeTokenizer;
 use aarambh_ai_train::TrainingRunConfig;
 use clap::Args;
 use serde::Deserialize;
+use std::str::FromStr;
 
 #[derive(Debug, Args)]
 pub struct EvalArgs {
@@ -29,6 +31,9 @@ pub struct EvalArgs {
     pub max_examples: Option<usize>,
     #[arg(long, default_value_t = 128)]
     pub max_new_tokens: usize,
+    /// Thinking budget: none, low, medium, high, or max (Phase 39).
+    #[arg(long, default_value = "none")]
+    pub thinking: String,
     #[arg(long, default_value_t = 8)]
     pub agent_max_steps: usize,
     #[arg(long)]
@@ -94,6 +99,7 @@ pub fn run(args: EvalArgs) -> anyhow::Result<()> {
     let model =
         aarambh_ai_weights::load_any_model_with_dtype(&model_path, &model_config, &device, dtype)?;
     let context = EvalContext::new(model, tokenizer, device, dtype);
+    let thinking_mode = ThinkingMode::from_str(&args.thinking).map_err(anyhow::Error::msg)?;
     let eval_config = EvalConfig {
         tasks: parse_tasks(&args.tasks),
         data_dir: args.data_dir.clone(),
@@ -101,6 +107,7 @@ pub fn run(args: EvalArgs) -> anyhow::Result<()> {
         max_new_tokens: args.max_new_tokens,
         agent_max_steps: args.agent_max_steps,
         allow_code_exec: args.allow_code_exec,
+        thinking_mode,
         model_path: Some(model_path.display().to_string()),
         tokenizer_path: Some(tokenizer_path.display().to_string()),
         config_path: Some(config_path.display().to_string()),
@@ -310,6 +317,7 @@ fn evaluate_checkpoint(
             max_new_tokens: args.max_new_tokens,
             agent_max_steps: args.agent_max_steps,
             allow_code_exec: args.allow_code_exec,
+            thinking_mode: ThinkingMode::from_str(&args.thinking).map_err(anyhow::Error::msg)?,
             model_path: Some(model_path.display().to_string()),
             tokenizer_path: Some(tokenizer_path.display().to_string()),
             config_path: Some(config_path.display().to_string()),

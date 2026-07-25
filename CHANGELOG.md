@@ -1,5 +1,51 @@
 # Changelog
 
+## [3.0.0-alpha.11] - 2026-07-25
+
+### Added
+
+- **Phase 39 Max Thinking Mode**
+  - Added a fifth `ThinkingMode::Max` variant with a 16,384-token nominal
+    budget — the next step in the existing ~4x progression
+    (0 → 256 → 1,024 → 4,096 → 16,384) and not a new reasoning algorithm.
+  - Centralised thinking-mode parsing and display on `ThinkingMode` itself
+    (`FromStr` + `Display`) so every CLI command, the serving API, GRPO, and
+    distillation share one canonical `none|low|medium|high|max` vocabulary.
+  - Added per-mode sampling defaults
+    (`ThinkingMode::default_sampler()`): None (0.70/0.90), Low (0.75/0.92),
+    Medium (0.80/0.95), High (0.80/0.95), Max (0.85/0.97). The server applies
+    them only when the caller omits `temperature`/`top_p`; explicit parameters
+    are never overridden.
+  - Added `GrpoThinkingMode::Max` and `DistillThinkingMode::Max` mirroring the
+    canonical variant, with no reward-shaping or objective changes.
+  - Added a `thinking_mode` field to `EvalConfig` and an `aarambh-ai eval
+    --thinking max` flag, plus a thinking-aware greedy generation helper in the
+    eval harness that reuses the inference crate's `ThinkingController`.
+  - Added a deterministic `hard-problems` eval task
+    (`data/eval/hard_problems/data.jsonl`) that reports accuracy plus average
+    thinking, completion, and total token counts for High-vs-Max comparison.
+  - Added `scripts/phase39_smoke.sh` (infer/agent/eval High-vs-Max) and three
+    optional Kaggle helper scripts for GRPO, distillation, and comparison.
+  - Added `docs/phase39_max_thinking_results.md`.
+
+### Changed
+
+- `infer`, `agent`, `serve`, `finetune grpo`, `distill train`, `selflearn
+  start`, and `eval` now all accept `--thinking max` through the same parser.
+- The serving API accepts `reasoning_effort: "max"` and rejects unknown values.
+- Runtime budget clamping is unchanged: the effective thinking budget still
+  respects `max_new_tokens`, the answer reserve, and the model `max_seq_len`.
+- Workspace packages now share version `3.0.0-alpha.11` and remain
+  `publish = false`.
+
+### Guarantees
+
+- Max mode introduces zero structural changes to `ThinkingController` — the
+  same `ForceOpen`/`ForceClose` forced-token mechanism, budget tracking, and
+  collapse-on-force-close behaviour every existing mode already has.
+- `None`/`Low`/`Medium`/`High` behaviour is byte-for-byte unchanged after Max
+  is added (covered by regression tests).
+
 ## [3.0.0-alpha.10] - 2026-07-24
 
 ### Added

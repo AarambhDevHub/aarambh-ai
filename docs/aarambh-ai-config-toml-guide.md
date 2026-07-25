@@ -1417,6 +1417,33 @@ Copy the smoke-test version closest to what you want first, get it running succe
 
 ---
 
+## Runtime thinking modes (CLI / API, not TOML)
+
+The `--thinking` flag (on `infer`, `agent`, `serve`, `finetune grpo`, `distill
+train`, `selflearn start`, and `eval`) and the server's `reasoning_effort`
+field accept the same five values everywhere. They are not `.toml` fields —
+they are runtime parameters — but they are configuration knobs that pair with
+the configs above, so they are documented here for completeness (Phase 39):
+
+| Mode     | Nominal thinking budget | Default temperature | Default top-p |
+|----------|------------------------:|--------------------:|-------------:|
+| `none`   | 0                       | 0.70                | 0.90         |
+| `low`    | 256                     | 0.75                | 0.92         |
+| `medium` | 1,024                   | 0.80                | 0.95         |
+| `high`   | 4,096                   | 0.80                | 0.95         |
+| `max`    | 16,384                  | 0.85                | 0.97         |
+
+The nominal budget is clamped at runtime to `min(budget, max_new_tokens −
+reserve)` and to the model's `max_seq_len`, so `max` never exceeds the
+configured generation budget. The per-mode temperature/top-p defaults are
+applied by the server **only** when the caller omits them; explicit
+`temperature`/`top_p` parameters are never overridden. Parsing and display are
+centralised on `ThinkingMode` (`FromStr` + `Display`), so the vocabulary is
+identical across every command and the API. See
+`docs/phase39_max_thinking_results.md` for the full Phase 39 write-up.
+
+---
+
 *This guide covers the shared fields used across Aarambh-AI training
 configurations, from CPU smoke tests through long-context, multimodal, and
 forgetting-observer runs.*

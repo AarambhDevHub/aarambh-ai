@@ -32,7 +32,10 @@ pub use speculative::{
     SpeculativeConfig, SpeculativeEngine, SpeculativeProposalSource, SpeculativeStats,
 };
 pub use stream::StreamEvent;
-pub use thinking::{ForceToken, ThinkingController, ThinkingMode};
+pub use thinking::{
+    ForceToken, MODE_HIGH, MODE_LOW, MODE_MAX, MODE_MEDIUM, MODE_NONE, ThinkingController,
+    ThinkingMode, parse_thinking_mode,
+};
 pub use tool_calling::{
     FINAL_MARKER, TOOL_CALL_END, TOOL_CALL_START, ToolCall, ToolCallController, ToolCallingConfig,
     ToolChoice, ToolDefinition,

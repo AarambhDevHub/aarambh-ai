@@ -100,6 +100,8 @@ pub enum GrpoThinkingMode {
     Medium,
     /// High thinking budget.
     High,
+    /// Max thinking budget (Phase 39).
+    Max,
 }
 
 impl GrpoThinkingMode {
@@ -110,6 +112,7 @@ impl GrpoThinkingMode {
             Self::Low => 256,
             Self::Medium => 1024,
             Self::High => 4096,
+            Self::Max => 16384,
         }
     }
 
@@ -123,13 +126,19 @@ impl std::str::FromStr for GrpoThinkingMode {
     type Err = String;
 
     fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        // GRPO lives below the inference crate in the dependency layering and
+        // therefore keeps its own mirror of the canonical five-mode vocabulary
+        // (none/low/medium/high/max). The ThinkingMode<->GrpoThinkingMode
+        // conversions are owned by the self-learning crate, which depends on
+        // both, so no parsing logic is duplicated across crate boundaries.
         match value.trim().to_ascii_lowercase().as_str() {
             "none" => Ok(Self::None),
             "low" => Ok(Self::Low),
             "medium" => Ok(Self::Medium),
             "high" => Ok(Self::High),
+            "max" => Ok(Self::Max),
             other => Err(format!(
-                "unsupported thinking mode '{other}', expected none, low, medium, or high"
+                "unsupported thinking mode '{other}', expected none, low, medium, high, or max"
             )),
         }
     }

@@ -75,6 +75,9 @@ pub struct StartArgs {
     pub stream: bool,
     #[arg(long)]
     pub greedy: bool,
+    /// Thinking budget: none, low, medium, high, or max (Phase 39).
+    #[arg(long, default_value = "none")]
+    pub thinking: String,
     #[arg(long, default_value = "strict")]
     pub safety: String,
     #[arg(long, default_value = "safety_audit.jsonl")]
@@ -191,7 +194,7 @@ fn run_start(args: StartArgs) -> anyhow::Result<()> {
         top_p: args.top_p,
         top_k: args.top_k,
         seed: args.seed,
-        thinking: "none".into(),
+        thinking: args.thinking,
         predict_view: false,
         stream: args.stream,
         greedy: args.greedy,

@@ -71,7 +71,7 @@ pub struct AgentArgs {
     /// Use greedy decoding.
     #[arg(long)]
     pub greedy: bool,
-    /// Thinking budget: none, low, medium, or high.
+    /// Thinking budget: none, low, medium, high, or max.
     #[arg(long, default_value = "none")]
     pub thinking: String,
     /// Scripted JSONL tool results; stdin JSONL is used when omitted.

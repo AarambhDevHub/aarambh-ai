@@ -42,6 +42,8 @@ pub enum DistillThinkingMode {
     Medium,
     /// Use the high thinking budget.
     High,
+    /// Use the max thinking budget (Phase 39).
+    Max,
 }
 
 impl From<DistillThinkingMode> for ThinkingMode {
@@ -51,6 +53,19 @@ impl From<DistillThinkingMode> for ThinkingMode {
             DistillThinkingMode::Low => Self::Low,
             DistillThinkingMode::Medium => Self::Medium,
             DistillThinkingMode::High => Self::High,
+            DistillThinkingMode::Max => Self::Max,
+        }
+    }
+}
+
+impl From<ThinkingMode> for DistillThinkingMode {
+    fn from(value: ThinkingMode) -> Self {
+        match value {
+            ThinkingMode::None => Self::None,
+            ThinkingMode::Low => Self::Low,
+            ThinkingMode::Medium => Self::Medium,
+            ThinkingMode::High => Self::High,
+            ThinkingMode::Max => Self::Max,
         }
     }
 }
@@ -59,15 +74,9 @@ impl FromStr for DistillThinkingMode {
     type Err = String;
 
     fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "none" => Ok(Self::None),
-            "low" => Ok(Self::Low),
-            "medium" => Ok(Self::Medium),
-            "high" => Ok(Self::High),
-            other => Err(format!(
-                "unsupported distillation thinking mode '{other}', expected none, low, medium, or high"
-            )),
-        }
+        // Delegate to the canonical ThinkingMode parser so the accepted
+        // vocabulary (none/low/medium/high/max) lives in exactly one place.
+        ThinkingMode::from_str(value).map(Self::from)
     }
 }
 
@@ -204,6 +213,10 @@ mod tests {
             DistillThinkingMode::Medium
         );
         assert!(DistillObjective::from_str("reverse-kl").is_err());
-        assert!(DistillThinkingMode::from_str("max").is_err());
+        assert_eq!(
+            DistillThinkingMode::from_str("max").unwrap(),
+            DistillThinkingMode::Max
+        );
+        assert!(DistillThinkingMode::from_str("ultra").is_err());
     }
 }
