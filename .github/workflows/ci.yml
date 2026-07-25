@@ -48,6 +48,9 @@ jobs:
       - name: Documentation
         run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --locked
 
+      - name: Install ripgrep
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+
       - name: Release audit
         run: scripts/phase28_release_audit.sh
 
