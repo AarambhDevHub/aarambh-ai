@@ -1131,7 +1131,7 @@ long-horizon tool-use chain before the first tool call is even made.
       Thinking mode Max: temperature=0.85, top_p=0.97 (most exploratory
       of the five — Max-mode tasks are exactly the ones where premature
       convergence on a wrong early step is most costly)
-[ ] Stage 2 GRPO re-run (`ARCHITECTURE.md` §7.5) extended to include
+[x] Stage 2 GRPO re-run (`ARCHITECTURE.md` §7.5) extended to include
     Max-budget rollouts in the G=8-completions-per-problem sampling, on a
     held-out set of problems specifically hard enough that High's 4,096-
     token budget was previously insufficient to reach a correct answer —
@@ -1139,6 +1139,10 @@ long-horizon tool-use chain before the first tool call is even made.
     for when spending up to 16,384 tokens is actually worth it
     (Optional Kaggle helper: scripts/phase39_kaggle_grpo.sh; requires a
     trained checkpoint and is not run by CI.)
+    GrpoThinkingMode::Max (budget 16,384) is accepted by GrpoConfig.thinking,
+    the GRPO CLI (--thinking max), and the self-learning GRPO loop; the
+    LocalThinkingState in grpo.rs forces start/close markers and tracks the
+    Max budget via the same mechanism as lower modes.
 [x] Reuses the existing format verifier and reward shaping unchanged
     (correct + concise thinking → high reward; wrong answer → negative
     reward; excessive empty thinking → penalised) — Max mode does not

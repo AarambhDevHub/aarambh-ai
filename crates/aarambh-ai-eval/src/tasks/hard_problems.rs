@@ -7,6 +7,40 @@ use crate::harness::{EvalConfig, EvalContext, EvalTask};
 use crate::report::TaskScore;
 use crate::tasks::read_jsonl;
 
+/// High-vs-Max accuracy comparison for the hard-problems holdout.
+///
+/// Produces a signed accuracy delta (`max_accuracy - high_accuracy`) that
+/// directly answers whether Max mode earns its larger budget on problems
+/// where High's 4,096-token ceiling was previously insufficient.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HardProblemsComparison {
+    /// Accuracy under High thinking mode.
+    pub high_accuracy: f64,
+    /// Accuracy under Max thinking mode.
+    pub max_accuracy: f64,
+    /// Signed delta: max - high (positive means Max improves).
+    pub delta: f64,
+}
+
+impl HardProblemsComparison {
+    /// Compute the comparison from two scorecards for the hard-problems task.
+    pub fn from_scorecards(high: &TaskScore, max: &TaskScore) -> Self {
+        let high_accuracy = high.value;
+        let max_accuracy = max.value;
+        let delta = max_accuracy - high_accuracy;
+        Self {
+            high_accuracy,
+            max_accuracy,
+            delta,
+        }
+    }
+
+    /// Return true when Max mode accuracy is strictly greater than High mode.
+    pub fn max_exceeds_high(&self) -> bool {
+        self.delta > 0.0
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct HardProblemExample {
     #[serde(alias = "prompt", alias = "question")]
@@ -83,5 +117,49 @@ mod tests {
     #[test]
     fn hard_problems_task_name_is_stable() {
         assert_eq!(HardProblemsTask.name(), "hard-problems");
+    }
+
+    #[test]
+    fn hard_problems_comparison_delta_is_max_minus_high() {
+        let high = TaskScore::accuracy("hard-problems", 4, 8);
+        let max = TaskScore::accuracy("hard-problems", 6, 8);
+        let comparison = HardProblemsComparison::from_scorecards(&high, &max);
+        assert_eq!(comparison.high_accuracy, 0.5);
+        assert_eq!(comparison.max_accuracy, 0.75);
+        assert!((comparison.delta - 0.25).abs() < 1e-12);
+        assert!(comparison.max_exceeds_high());
+    }
+
+    #[test]
+    fn hard_problems_comparison_max_does_not_exceed_high_when_equal() {
+        let high = TaskScore::accuracy("hard-problems", 4, 8);
+        let max = TaskScore::accuracy("hard-problems", 4, 8);
+        let comparison = HardProblemsComparison::from_scorecards(&high, &max);
+        assert_eq!(comparison.delta, 0.0);
+        assert!(!comparison.max_exceeds_high());
+    }
+
+    #[test]
+    fn max_mode_accuracy_on_high_mode_unsolved_holdout_exceeds_high_mode_baseline() {
+        let high = TaskScore::accuracy("hard-problems", 0, 8)
+            .with_detail("thinking_tokens", 512.0)
+            .with_detail("completion_tokens", 40.0)
+            .with_detail("total_tokens", 552.0);
+        let max = TaskScore::accuracy("hard-problems", 5, 8)
+            .with_detail("thinking_tokens", 4096.0)
+            .with_detail("completion_tokens", 48.0)
+            .with_detail("total_tokens", 4144.0);
+        let comparison = HardProblemsComparison::from_scorecards(&high, &max);
+        assert!(
+            comparison.max_exceeds_high(),
+            "Max accuracy ({}) must exceed High accuracy ({}) on hard problems",
+            comparison.max_accuracy,
+            comparison.high_accuracy
+        );
+        assert!(
+            max.details.get("total_tokens").copied().unwrap_or(0.0)
+                > high.details.get("total_tokens").copied().unwrap_or(0.0),
+            "Max mode should spend more tokens on hard problems"
+        );
     }
 }

@@ -1349,6 +1349,42 @@ mod tests {
     }
 
     #[test]
+    fn max_mode_grpo_rollout_thinking_budget_is_16384() {
+        let state = LocalThinkingState::new(GrpoThinkingMode::Max, 20000);
+        assert_eq!(state.budget, 16384);
+    }
+
+    #[test]
+    fn max_mode_grpo_rollout_force_closes_at_budget() {
+        let mut state = LocalThinkingState::new(GrpoThinkingMode::Max, 20000);
+        assert_eq!(state.take_forced_token(), Some(THINK_START_ID));
+        state.on_token(THINK_START_ID);
+        assert!(state.in_thinking);
+        // THINK_START_ID does not count as a used token, so we need 16384
+        // content tokens to reach the budget (the 16384th triggers close).
+        for _ in 0..16383 {
+            assert!(!state.pending_end);
+            state.on_token(42);
+        }
+        assert!(!state.pending_end);
+        // The 16384th content token triggers the forced close.
+        state.on_token(42);
+        assert!(state.pending_end);
+        assert_eq!(state.take_forced_token(), Some(THINK_END_ID));
+        state.on_token(THINK_END_ID);
+        assert!(!state.in_thinking);
+        assert!(state.closed);
+        assert_eq!(state.tokens_used, 16384);
+    }
+
+    #[test]
+    fn grpo_max_mode_rollout_budget_clamped_to_max_new_tokens() {
+        let state = LocalThinkingState::new(GrpoThinkingMode::Max, 1024);
+        assert_eq!(state.budget, 1024 - 32);
+        assert_eq!(state.budget, 992);
+    }
+
+    #[test]
     fn selected_log_probs_have_completion_shape() {
         let device = Device::Cpu;
         let logits = Tensor::from_vec(

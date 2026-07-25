@@ -46,6 +46,22 @@
 - `None`/`Low`/`Medium`/`High` behaviour is byte-for-byte unchanged after Max
   is added (covered by regression tests).
 
+### Tests (this commit)
+
+- Added `existing_none_low_medium_high_modes_are_byte_for_byte_unchanged`
+  regression test verifying budgets, sampling defaults, controller behaviour,
+  parsing, and display for all four original modes are unaltered.
+- Added `max_mode_accuracy_on_high_mode_unsolved_holdout_exceeds_high_mode_baseline`
+  structural test validating the High-vs-Max accuracy comparison logic with a
+  `HardProblemsComparison` helper.
+- Added `max_mode_grpo_rollout_thinking_budget_is_16384`,
+  `max_mode_grpo_rollout_force_closes_at_budget`, and
+  `grpo_max_mode_rollout_budget_clamped_to_max_new_tokens` tests for GRPO
+  Max-mode rollout thinking budget enforcement.
+- Added `hard_problems_comparison_delta_is_max_minus_high` and
+  `hard_problems_comparison_max_does_not_exceed_high_when_equal` tests for the
+  comparison helper.
+
 ## [3.0.0-alpha.10] - 2026-07-24
 
 ### Added
