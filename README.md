@@ -578,6 +578,28 @@ All standard scales use a 32,000-token vocabulary, RMSNorm epsilon `1e-5`,
 GQA, SwiGLU, and tied embeddings. Long-context and hybrid variants are selected
 through TOML without changing the base scale definitions.
 
+## Thinking Modes
+
+| Mode | Budget (tokens) | Default temperature | Default top-p | Use case |
+|---|---|---|---|---|
+| `none` | 0 | 0.70 | 0.90 | Simple/comparative evals, no reasoning overhead |
+| `low` | 256 | 0.75 | 0.92 | Quick factual recall, short-answer tasks |
+| `medium` | 1,024 | 0.80 | 0.95 | Standard reasoning, multi-step math/code |
+| `high` | 4,096 | 0.80 | 0.95 | Complex multi-step proofs, long analysis |
+| `max` | 16,384 | 0.85 | 0.97 | Hard problems unsolved by High (Phase 39) |
+
+The thinking budget is a ceiling on the number of content tokens emitted inside
+the `<think>` block before the controller force-closes it. The effective budget
+is clamped to `min(mode.budget(), max_new_tokens - reserve)`, so Max never
+exceeds the configured generation limit. Sampling defaults are applied only
+when the caller does not supply explicit sampling parameters.
+
+All five modes share the same `ThinkingController` mechanism — no structural
+changes between modes. Every CLI command (`infer`, `agent`, `serve`, `eval`,
+`finetune grpo`, `distill train`, `selflearn start`) accepts `--thinking` with
+any of `none`, `low`, `medium`, `high`, or `max`. The server also accepts
+`reasoning_effort: "max"` per request.
+
 ## Workspace
 
 The workspace contains 18 internal library crates and one CLI package:

@@ -380,6 +380,50 @@ mod tests {
     }
 
     #[test]
+    fn existing_none_low_medium_high_modes_are_byte_for_byte_unchanged() {
+        for (mode, expected_budget, expected_temp, expected_top_p) in [
+            (ThinkingMode::None, 0usize, 0.70, 0.90),
+            (ThinkingMode::Low, 256, 0.75, 0.92),
+            (ThinkingMode::Medium, 1024, 0.80, 0.95),
+            (ThinkingMode::High, 4096, 0.80, 0.95),
+        ] {
+            assert_eq!(mode.budget(), expected_budget, "{mode} budget unchanged");
+            assert_eq!(
+                mode.default_sampler(),
+                (expected_temp, expected_top_p),
+                "{mode} sampler unchanged"
+            );
+            let mut ctrl = ThinkingController::new(mode);
+            assert_eq!(ctrl.effective_budget(), expected_budget);
+            if mode.is_enabled() {
+                assert!(ctrl.should_force_think_start());
+                assert_eq!(ctrl.take_forced_token(), Some(ForceToken::ThinkStart));
+            } else {
+                assert!(!ctrl.should_force_think_start());
+            }
+        }
+        // Parser and display for the original four modes.
+        for (text, expected) in [
+            ("none", ThinkingMode::None),
+            ("low", ThinkingMode::Low),
+            ("medium", ThinkingMode::Medium),
+            ("high", ThinkingMode::High),
+        ] {
+            assert_eq!(text.parse::<ThinkingMode>().unwrap(), expected);
+            assert_eq!(expected.to_string(), text);
+        }
+        // Round-trip through FromStr and Display for original modes.
+        for mode in [
+            ThinkingMode::None,
+            ThinkingMode::Low,
+            ThinkingMode::Medium,
+            ThinkingMode::High,
+        ] {
+            assert_eq!(mode.to_string().parse::<ThinkingMode>().unwrap(), mode);
+        }
+    }
+
+    #[test]
     fn thinking_controller_force_closes_max_mode_at_budget_exactly_like_other_modes() {
         // No special-cased logic path for Max — same on_token()/
         // take_forced_token() mechanism as None/Low/Medium/High.
