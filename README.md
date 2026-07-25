@@ -11,8 +11,8 @@ Candle. The repository covers the full engineering path: tokenization, model
 construction, training, inference, quantization, adapter tuning, alignment,
 evaluation, multimodal input, safety, and an OpenAI-compatible server.
 
-The production source release is **v2.0.0**. Current mainline development is
-**v3.0.0-alpha.11**, with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
+The production source release is **v3.0.0**,
+with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
 fine-grained MoE with shared experts, Multi-Token Prediction (MTP), on-policy
 distillation, native quantization-aware training, native video/document input,
 bounded long-horizon tool-use chains, persistent forgetting diagnostics, and

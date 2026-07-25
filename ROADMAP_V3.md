@@ -1198,7 +1198,7 @@ fn existing_none_low_medium_high_modes_are_byte_for_byte_unchanged() {}
 
 ### Milestone
 ```
-DONE (3.0.0-alpha.11). Max mode shipped as a fifth ThinkingMode variant with
+DONE (3.0.0). Max mode shipped as a fifth ThinkingMode variant with
 zero structural changes to ThinkingController — same forced-token mechanism,
 same budget-tracking, same collapse-on-force-close behaviour every existing
 mode already has. Parsing/display centralised on ThinkingMode; per-mode
@@ -1216,34 +1216,29 @@ git tag v3.0.0-alpha.11
 
 ---
 
-## Phase 40 — crates.io Publish (v3.0.0 Release)
+## Phase 40 — v3.0.0 Source Release
 
 **Duration:** 5–7 days | **Hardware:** all
 
 ### Goal
-Publish all library crates to crates.io under 3.0.0, exactly mirroring
-v1's and v2's release discipline: **source code only, zero model
-artifacts.** No pretrained checkpoints, adapters, or GGUF files are
-attached to this release either — same policy, two major versions later.
+Ship the v3.0.0 source release: documentation, release artifacts, and CI
+extensions — **source code only, zero model artifacts.** No pretrained
+checkpoints, adapters, or GGUF files are attached to this release. crates.io
+publishing is deferred to v4.0.0.
 
 ### Tasks
 
 ```
-[ ] Package manifests: all 18 library crates + CLI set to version 3.0.0
-[ ] Flip `publish = false` → real crates.io metadata for
-    aarambh-ai-distill and aarambh-ai-agent, plus any v2-era crates that
-    matured enough for semver commitment during v3 development
-[ ] cargo publish --dry-run for every publishable crate, in dependency-
-    layer order (see ARCHITECTURE_V3.md §"Updated Dependency Layers")
-[ ] CHANGELOG.md: v3.0.0 entry summarising Phases 29–39
-[ ] README.md, ARCHITECTURE.md, ROADMAP.md, SELF_LEARNING.md: merge in the
-    v3 additions (or keep _V3 docs as addenda, your call — same option v2
-    documented)
-[ ] RELEASE.md: v3.0.0 checklist, explicitly restating "no pretrained
+[x] CHANGELOG.md: v3.0.0 entry summarising Phases 29–39
+[x] README.md, ARCHITECTURE.md, ROADMAP.md, SELF_LEARNING.md: merge in the
+    v3 additions (or keep _V3 docs as addenda, same option v2 documented)
+[x] RELEASE.md: v3.0.0 checklist, explicitly restating "no pretrained
     checkpoints, no model artifacts" for this release line too
-[ ] .github/release-notes/v3.0.0.md
-[ ] CI: extend existing workflow to cover the 2 new crates + video/document/
-    forgetting-diagnostics eval-harness smoke runs
+[x] .github/release-notes/v3.0.0.md
+[x] CI: extend existing workflow to cover the 2 new crates + agent/eval
+    smoke runs; update release workflow for v3.0.0 tag
+[x] All public APIs documented (cargo doc passes with -D missing_docs)
+[x] All workspace packages set to version 3.0.0, publish = false
 ```
 
 ### Milestone
@@ -1253,11 +1248,10 @@ aarambh-ai --version  → aarambh-ai 3.0.0
 git tag v3.0.0
 git push origin v3.0.0
 
-Crates resolve from crates.io for any published subset; unpublished crates
-remain source-only exactly as documented. No model weights attached to the
-GitHub Release.
+All 19 workspace packages share version 3.0.0 and remain
+publish = false. No model weights attached to the GitHub Release.
 
-git commit -m "chore: v3.0.0 — crates.io publish, source release"
+git commit -m "chore: v3.0.0 — source release"
 ```
 
 ---
@@ -1276,8 +1270,8 @@ git commit -m "chore: v3.0.0 — crates.io publish, source release"
 | 36 | Document Understanding | Layout-aware projector, shares vision encoder with video | Kaggle | 10–14 days ✅ |
 | 37 | Long-Horizon Tool Chains | New `aarambh-ai-agent`, multi-step tool calls with result ingestion | i3 + Kaggle | 10–14 days ✅ |
 | 38 | Forgetting Diagnostics | Per-capability forgetting curves, shared export format for Manas | i3 + Kaggle | 7–10 days ✅ |
-| 39 | Max Thinking Mode | 5th reasoning depth, 16,384-token budget, extends `ThinkingController` | i3 + Kaggle | 5–7 days |
-| 40 | crates.io Publish | Source-only 3.0.0 release, zero model artifacts | all | 5–7 days |
+| 39 | Max Thinking Mode | 5th reasoning depth, 16,384-token budget, extends `ThinkingController` | i3 + Kaggle | 5–7 days ✅ |
+| 40 | v3.0.0 Source Release | CHANGELOG, RELEASE.md, CI, docs, release notes; crates.io deferred to v4 | all | 5–7 days ✅ |
 
 **Total realistic estimate: 105–145 days (~3.5–4.8 months)**
 
