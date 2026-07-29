@@ -19,7 +19,24 @@ v2.0.0 source release. v3 implementation runbooks are listed separately below:
 
 Each phase includes a plain-English definition, a beginner explanation, why it's needed, a worked example, and a diagram. Read this first — it's the map of the whole project.
 
-### 2. `phase35_video.md`
+### 2. `aarambh-ai-complete-guide-v3.md`
+**The v3.0.0 walkthrough — Phases 29-40, explained in the same style.**
+
+Picks up where the v2 complete guide ends, covering:
+- **Phase 29-30:** Gated DeltaNet (hybrid linear attention) + DeepSeek Sparse Attention
+- **Phase 31:** Fine-Grained MoE + Shared Expert
+- **Phase 32:** Multi-Token Prediction (MTP)
+- **Phase 33:** On-Policy Distillation
+- **Phase 34:** Native QAT (Quantization-Aware Training)
+- **Phase 35-36:** Native Video + Document Understanding
+- **Phase 37:** Long-Horizon Tool-Use Chains
+- **Phase 38:** Forgetting Diagnostics
+- **Phase 39:** Max Thinking Mode
+- **Phase 40:** v3.0.0 Source Release
+
+Same format as the v2 guide: plain-English definition, beginner explanation, why we need it, worked example, diagram, and common questions. Read this after the v2 guide to see how the model evolved.
+
+### 3. `phase35_video.md`
 **The native-video implementation and operating guide.**
 
 This documents the H.264 MP4 boundary, frame sampling, tokenizer/checkpoint
@@ -57,13 +74,27 @@ defaults, the deterministic `hard-problems` eval task, the commands, expected
 outputs, and the High-vs-Max comparison table introduced in Phase 39.
 
 ### 7. `aarambh-ai-math-formulas-guide.md`
-**The math underneath every phase, explained from zero.**
+**The math underneath v1-v2 phases, explained from zero.**
 
 Once you know *what* each phase does, this file explains the actual formulas doing the work — Dot Product, Matrix Multiplication, Softmax, Scaled Dot-Product Attention, Layer Normalization, GELU Activation, Cross-Entropy Loss, Gradient Descent, Adam Optimizer, RoPE, LoRA Decomposition, Quantization, KL Divergence, and Perplexity.
 
 Every formula comes with a symbol-by-symbol translation (so `Σ`, `∂`, `θ` stop looking scary) and **two fully solved numeric examples** worked by hand, step by step. Read this after the phases guide, whenever you want to understand the actual arithmetic behind a specific phase.
 
-### 8. `ai-ml-dl-dataset-creation-guide.md`
+### 8. `aarambh-ai-math-formulas-guide-v3.md`
+**The math behind v3 phases (Formulas 15-21).**
+
+Covers the new arithmetic introduced in Phases 29-40:
+- **Formula 15:** Gated DeltaNet Gating + Recurrence
+- **Formula 16:** Top-k Sparse Attention
+- **Formula 17:** Fine-Grained MoE Router (top-2 from 16 experts + shared expert)
+- **Formula 18:** Multi-Token Prediction Loss (3-head joint cross-entropy)
+- **Formula 19:** On-Policy KL Distillation
+- **Formula 20:** Fake Quantization + Straight-Through Estimator
+- **Formula 21:** Forgetting Delta (Probe Accuracy Drop)
+
+Same format as the v2 math guide: symbol-by-symbol translation and two fully solved numeric examples per formula. Read this after the v3 phases guide when you want to see the actual numbers.
+
+### 10. `ai-ml-dl-dataset-creation-guide.md`
 **The foundation underneath everything — terminology and where the training data comes from.**
 
 Two parts:
@@ -72,7 +103,7 @@ Two parts:
 
 Read this first if you're completely new to AI in general, or read it alongside the other two whenever data-related phases (like Phase 2, Data Pipeline) come up.
 
-### 9. `aarambh-ai-config-toml-guide.md`
+### 11. `aarambh-ai-config-toml-guide.md`
 **Every field in every `.toml` config file, explained — the practical "turn the dial" layer.**
 
 This walks through the checked-in training and inference configurations in
@@ -99,19 +130,26 @@ Read this whenever you're about to write a new training config, or want to under
 If you're starting from zero:
 
 ```
-ai-ml-dl-dataset-creation-guide.md   →  understand the terminology + where data comes from
+ai-ml-dl-dataset-creation-guide.md       →  terminology + data origins
             │
             ▼
-aarambh-ai-complete-guide.md         →  understand what Aarambh-AI actually builds, phase by phase
+aarambh-ai-complete-guide.md             →  Aarambh-AI v1-v2 phases
             │
             ▼
-aarambh-ai-math-formulas-guide.md    →  understand the exact math powering each phase
+aarambh-ai-math-formulas-guide.md        →  v1-v2 math (formulas 1-14)
             │
-            ▼
-aarambh-ai-config-toml-guide.md      →  understand how to actually configure and run a training job
+            ├─────────────────────────────
+            │                             │
+            ▼                             ▼
+aarambh-ai-complete-guide-v3.md      aarambh-ai-math-formulas-guide-v3.md
+(v3 phases 29-40)                    (v3 math formulas 15-21)
+            │                             │
+            └──────────┬──────────────────┘
+                       ▼
+        aarambh-ai-config-toml-guide.md   →  how to configure & run training
 ```
 
-If you already know the basics and just want the project-specific details, jump straight to `aarambh-ai-complete-guide.md` and use the other three as reference whenever a term, formula, or config field is unfamiliar.
+If you already know the basics and just want the project-specific details, jump to the guide matching your version — `aarambh-ai-complete-guide.md` for v1-v2, `aarambh-ai-complete-guide-v3.md` for v3.
 
 ---
 
@@ -121,14 +159,14 @@ If you already know the basics and just want the project-specific details, jump 
 - Contributors who want to understand a phase deeply enough to help extend it.
 - Future-me, six months from now, who forgot why a formula was written a certain way.
 
-No prior ML background is assumed anywhere in these three files. If something is still unclear after reading, that's a gap in the doc, not a gap in you — feel free to open an issue.
+No prior ML background is assumed anywhere in these guides. If something is still unclear after reading, that's a gap in the doc, not a gap in you — feel free to open an issue.
 
 ---
 
 ## Keeping these docs updated
 
 The v2 roadmap is complete. v3 changes must update the matching runbook,
-configuration reference, architecture section, and changelog in the same pull request.
+configuration reference, architecture section, changelog, and V3 guides in the same pull request.
 
 ---
 
