@@ -1,4 +1,4 @@
-# SELF_LEARNING_V4.md — aarambh-ai v4.0
+# SELF_LEARNING_V4.md — aarambh-studio v4.0
 
 > Companion to `SELF_LEARNING.md`, `SELF_LEARNING_V2.md`, and
 > `SELF_LEARNING_V3.md`. This document covers **only what v4.0 adds** —
@@ -362,15 +362,15 @@ silently swallowed
 ## 52. CLI Commands (v4)
 
 ```
-[ ] aarambh-ai selflearn --config <cfg> --audio --hardware kaggle
-[ ] aarambh-ai selflearn --config <cfg> --rag --index my_index/
-[ ] aarambh-ai selflearn --config <cfg> --agent --tools tools.json \
+[ ] aarambh-studio selflearn --config <cfg> --audio --hardware kaggle
+[ ] aarambh-studio selflearn --config <cfg> --rag --index my_index/
+[ ] aarambh-studio selflearn --config <cfg> --agent --tools tools.json \
       --execute --sandbox-config sandbox.toml --max-steps 8
-[ ] aarambh-ai selflearn --config <cfg> --orchestrate \
+[ ] aarambh-studio selflearn --config <cfg> --orchestrate \
       --max-sub-agents 4 --max-total-seconds 300
-[ ] aarambh-ai selflearn --config <cfg> --best-of-n 4 \
+[ ] aarambh-studio selflearn --config <cfg> --best-of-n 4 \
       --selection self-consistency
-[ ] aarambh-ai selflearn --config <cfg> --forgetting-report
+[ ] aarambh-studio selflearn --config <cfg> --forgetting-report
       # unchanged from v3 §36 — still runs a standalone diagnostic
       # pass without a live session
 ```
@@ -378,7 +378,7 @@ silently swallowed
 ## 53. Crate Structure Additions
 
 ```
-crates/aarambh-ai-selflearn/
+crates/aarambh-studio-selflearn/
 └── src/
     ├── ...v1/v2/v3 modules unchanged (online_grpo.rs, critique.rs,
     │      replay.rs, vision_cache.rs, vision_verifier.rs, gating.rs,
@@ -482,7 +482,7 @@ adversarial bar than any other execution context in the project.
   judgment call informed by the diagnostic, not automated by it.
 
 **Closing note.** This is the fourth and final self-learning companion
-document planned for aarambh-ai. `ARCHITECTURE_V4.md` §69 explains the
+document planned for aarambh-studio. `ARCHITECTURE_V4.md` §69 explains the
 reasoning for why v4.0 is the project's final planned version in full;
 the same reasoning applies here. Every mechanism documented across
 `SELF_LEARNING.md`, `SELF_LEARNING_V2.md`, `SELF_LEARNING_V3.md`, and

@@ -1,4 +1,4 @@
-# Aarambh-AI: The Complete Math Formula Guide
+# Aarambh Studio: The Complete Math Formula Guide
 
 ### Every formula we use, explained like you've never seen math notation before
 
@@ -7,7 +7,7 @@ This document is for someone coming from a **non-math background** — maybe you
 For every formula, you'll get:
 - **What it's called** (definition)
 - **How to read the symbols** (a beginner "translation" of the notation)
-- **Why we use it in Aarambh-AI** (which phase it belongs to and what job it does)
+- **Why we use it in Aarambh Studio** (which phase it belongs to and what job it does)
 - **The formula itself**
 - **2 fully solved examples**, step by step, with real numbers
 
@@ -784,7 +784,7 @@ DPO loss = -log sigmoid(beta * [
 ])
 ```
 
-The reference ratios provide DPO's connection to KL-regularized reward optimization. Aarambh-AI precomputes those frozen-reference sequence scores once. Its explicit `--reference-free` mode sets the reference log-ratio to zero; that is a lower-memory variant and is not generally identical to standard DPO.
+The reference ratios provide DPO's connection to KL-regularized reward optimization. Aarambh Studio precomputes those frozen-reference sequence scores once. Its explicit `--reference-free` mode sets the reference log-ratio to zero; that is a lower-memory variant and is not generally identical to standard DPO.
 
 **Formula:**
 ```
@@ -915,4 +915,4 @@ Because computers can only manipulate numbers — every one of these formulas is
 
 ---
 
-*This guide covers the core mathematical formulas powering Aarambh-AI, from the basic building block (dot product) all the way to advanced fine-tuning and evaluation math — explained for a complete beginner, with 2 fully worked examples per formula.*
+*This guide covers the core mathematical formulas powering Aarambh Studio, from the basic building block (dot product) all the way to advanced fine-tuning and evaluation math — explained for a complete beginner, with 2 fully worked examples per formula.*

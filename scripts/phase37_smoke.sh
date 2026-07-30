@@ -18,10 +18,10 @@ assert len(evaluation) == 1 and len(evaluation[0]["steps"]) == 3
 print("Phase 37 fixtures: valid")
 PY
 
-cargo test --locked -p aarambh-ai-tokenizer tool_protocol
-cargo test --locked -p aarambh-ai-agent
-cargo test --locked -p aarambh-ai-finetune tool_sft
-cargo test --locked -p aarambh-ai-eval tool_chain
-cargo run --quiet --locked -p aarambh-ai -- agent --help | rg --quiet -- '--max-steps'
+cargo test --locked -p aarambh-studio-tokenizer tool_protocol
+cargo test --locked -p aarambh-studio-agent
+cargo test --locked -p aarambh-studio-finetune tool_sft
+cargo test --locked -p aarambh-studio-eval tool_chain
+cargo run --quiet --locked -p aarambh-studio -- agent --help | rg --quiet -- '--max-steps'
 
 echo "Phase 37 source-only chain smoke completed"

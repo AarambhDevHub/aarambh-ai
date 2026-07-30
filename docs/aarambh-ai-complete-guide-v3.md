@@ -1,4 +1,4 @@
-# Aarambh-AI v3.0.0: The Complete Guide
+# Aarambh Studio v3.0.0: The Complete Guide
 
 ### Everything we built in v3, in plain human language
 
@@ -603,4 +603,4 @@ Same structure as v2.0.0 release (Phase 28): version bumps, CHANGELOG, CI update
 
 ---
 
-*This guide covers Aarambh-AI's completed v3.0.0 roadmap through Phase 40 — extending the from-scratch Rust/Candle LLM with hybrid attention, sparse attention, fine-grained MoE, multi-token prediction, distillation, QAT, video/document understanding, agent chains, forgetting diagnostics, and max thinking.*
+*This guide covers Aarambh Studio's completed v3.0.0 roadmap through Phase 40 — extending the from-scratch Rust/Candle LLM with hybrid attention, sparse attention, fine-grained MoE, multi-token prediction, distillation, QAT, video/document understanding, agent chains, forgetting diagnostics, and max thinking.*

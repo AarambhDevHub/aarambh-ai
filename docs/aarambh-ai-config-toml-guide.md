@@ -1,9 +1,9 @@
-# Aarambh-AI: The Complete Config (.toml) Guide
+# Aarambh Studio: The Complete Config (.toml) Guide
 
 ### Every field in every config file, explained like you've never opened a `.toml` file before
 
 This guide walks through the checked-in config families used to train, tune,
-and test Aarambh-AI. They cover Tiny through Large, CUDA and long-context
+and test Aarambh Studio. They cover Tiny through Large, CUDA and long-context
 smoke runs, MoE, MTP, two-GPU training, vision projection/VQA, and vision-aware
 self-learning.
 
@@ -1444,6 +1444,6 @@ identical across every command and the API. See
 
 ---
 
-*This guide covers the shared fields used across Aarambh-AI training
+*This guide covers the shared fields used across Aarambh Studio training
 configurations, from CPU smoke tests through long-context, multimodal, and
 forgetting-observer runs.*

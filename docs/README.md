@@ -1,17 +1,17 @@
-# Aarambh-AI — Docs
+# Aarambh Studio — Docs
 
-This folder holds the learning material behind Aarambh-AI — a from-scratch decoder-only LLM built in Rust using Candle. If you've ever looked at this repo and wondered *"okay but how does any of this actually work?"*, start here.
+This folder holds the learning material behind Aarambh Studio — a from-scratch decoder-only LLM built in Rust using Candle. If you've ever looked at this repo and wondered *"okay but how does any of this actually work?"*, start here.
 
-These docs aren't API references or code comments. They're written for someone coming in with **zero background in AI/ML** — a beginner who codes but has never touched a neural network before. The goal is that by the end of these guides, you understand not just *what* Aarambh-AI does, but *why* every piece exists and *how* the math underneath it actually works.
+These docs aren't API references or code comments. They're written for someone coming in with **zero background in AI/ML** — a beginner who codes but has never touched a neural network before. The goal is that by the end of these guides, you understand not just *what* Aarambh Studio does, but *why* every piece exists and *how* the math underneath it actually works.
 
 ---
 
 ## What's in this folder
 
-### 1. `aarambh-ai-complete-guide.md`
+### 1. `aarambh-studio-complete-guide.md`
 **The full project walkthrough — every phase, explained.**
 
-This covers the 28 production phases of Aarambh-AI, from v1.0.0 through the
+This covers the 28 production phases of Aarambh Studio, from v1.0.0 through the
 v2.0.0 source release. v3 implementation runbooks are listed separately below:
 
 - **v1 (Phases 1–13):** Tokenizer, Data Pipeline, Neural Network Primitives, Full Model Forward Pass, Custom Kernels (CPU SIMD + GPU prep), Training Loop, Inference Engine + CLI, Thinking Engine, Quantization Stack, Fine-Tuning (LoRA/QLoRA/SFT), GRPO Reinforcement Learning, Safety Layer, Self-Learning.
@@ -19,7 +19,7 @@ v2.0.0 source release. v3 implementation runbooks are listed separately below:
 
 Each phase includes a plain-English definition, a beginner explanation, why it's needed, a worked example, and a diagram. Read this first — it's the map of the whole project.
 
-### 2. `aarambh-ai-complete-guide-v3.md`
+### 2. `aarambh-studio-complete-guide-v3.md`
 **The v3.0.0 walkthrough — Phases 29-40, explained in the same style.**
 
 Picks up where the v2 complete guide ends, covering:
@@ -73,14 +73,14 @@ centralised `none|low|medium|high|max` parsing/display, the per-mode sampling
 defaults, the deterministic `hard-problems` eval task, the commands, expected
 outputs, and the High-vs-Max comparison table introduced in Phase 39.
 
-### 7. `aarambh-ai-math-formulas-guide.md`
+### 7. `aarambh-studio-math-formulas-guide.md`
 **The math underneath v1-v2 phases, explained from zero.**
 
 Once you know *what* each phase does, this file explains the actual formulas doing the work — Dot Product, Matrix Multiplication, Softmax, Scaled Dot-Product Attention, Layer Normalization, GELU Activation, Cross-Entropy Loss, Gradient Descent, Adam Optimizer, RoPE, LoRA Decomposition, Quantization, KL Divergence, and Perplexity.
 
 Every formula comes with a symbol-by-symbol translation (so `Σ`, `∂`, `θ` stop looking scary) and **two fully solved numeric examples** worked by hand, step by step. Read this after the phases guide, whenever you want to understand the actual arithmetic behind a specific phase.
 
-### 8. `aarambh-ai-math-formulas-guide-v3.md`
+### 8. `aarambh-studio-math-formulas-guide-v3.md`
 **The math behind v3 phases (Formulas 15-21).**
 
 Covers the new arithmetic introduced in Phases 29-40:
@@ -103,7 +103,7 @@ Two parts:
 
 Read this first if you're completely new to AI in general, or read it alongside the other two whenever data-related phases (like Phase 2, Data Pipeline) come up.
 
-### 11. `aarambh-ai-config-toml-guide.md`
+### 11. `aarambh-studio-config-toml-guide.md`
 **Every field in every `.toml` config file, explained — the practical "turn the dial" layer.**
 
 This walks through the checked-in training and inference configurations in
@@ -133,29 +133,29 @@ If you're starting from zero:
 ai-ml-dl-dataset-creation-guide.md       →  terminology + data origins
             │
             ▼
-aarambh-ai-complete-guide.md             →  Aarambh-AI v1-v2 phases
+aarambh-studio-complete-guide.md             →  Aarambh Studio v1-v2 phases
             │
             ▼
-aarambh-ai-math-formulas-guide.md        →  v1-v2 math (formulas 1-14)
+aarambh-studio-math-formulas-guide.md        →  v1-v2 math (formulas 1-14)
             │
             ├─────────────────────────────
             │                             │
             ▼                             ▼
-aarambh-ai-complete-guide-v3.md      aarambh-ai-math-formulas-guide-v3.md
+aarambh-studio-complete-guide-v3.md      aarambh-studio-math-formulas-guide-v3.md
 (v3 phases 29-40)                    (v3 math formulas 15-21)
             │                             │
             └──────────┬──────────────────┘
                        ▼
-        aarambh-ai-config-toml-guide.md   →  how to configure & run training
+        aarambh-studio-config-toml-guide.md   →  how to configure & run training
 ```
 
-If you already know the basics and just want the project-specific details, jump to the guide matching your version — `aarambh-ai-complete-guide.md` for v1-v2, `aarambh-ai-complete-guide-v3.md` for v3.
+If you already know the basics and just want the project-specific details, jump to the guide matching your version — `aarambh-studio-complete-guide.md` for v1-v2, `aarambh-studio-complete-guide-v3.md` for v3.
 
 ---
 
 ## Who this is for
 
-- Anyone reading the Aarambh-AI codebase for the first time and wondering what a given module actually does.
+- Anyone reading the Aarambh Studio codebase for the first time and wondering what a given module actually does.
 - Contributors who want to understand a phase deeply enough to help extend it.
 - Future-me, six months from now, who forgot why a formula was written a certain way.
 
@@ -170,7 +170,7 @@ configuration reference, architecture section, changelog, and V3 guides in the s
 
 ---
 
-## Support Aarambh-AI
+## Support Aarambh Studio
 
 If these docs or the project itself helped you, consider supporting the work:
 

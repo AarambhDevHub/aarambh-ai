@@ -34,7 +34,7 @@ ROLLOUTS="${PHASE39_ROLLOUTS:-4}"
 MAX_NEW_TOKENS="${PHASE39_MAX_NEW_TOKENS:-1024}"
 
 echo "==> Phase 39 distillation with Max thinking budget (optional, Kaggle)"
-cargo run --quiet --locked --release -p aarambh-ai -- distill train \
+cargo run --quiet --locked --release -p aarambh-studio -- distill train \
   --config "$PHASE39_CONFIG" \
   --student "$PHASE39_STUDENT" \
   --tokenizer "$PHASE39_TOKENIZER" \

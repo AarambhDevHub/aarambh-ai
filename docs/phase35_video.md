@@ -30,7 +30,7 @@ their text or merge rank. SafeTensors embedding rows are expanded at the same
 boundary; new rows clone compatible image marker rows.
 
 ```sh
-target/release/aarambh-ai convert \
+target/release/aarambh-studio convert \
   --config configs/vision_vqa_smoke.toml \
   --input checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --output checkpoints/video_smoke/model.safetensors \
@@ -86,7 +86,7 @@ gradients remain fresh.
 ## Training
 
 ```sh
-target/release/aarambh-ai finetune video-dora \
+target/release/aarambh-studio finetune video-dora \
   --config configs/video_qa_smoke.toml \
   --base checkpoints/video_smoke/model.safetensors \
   --tokenizer checkpoints/video_smoke/tokenizer.json \
@@ -104,7 +104,7 @@ answer mask, optimizer schedule, clipping, and artifact format.
 Merge the adapter when ordinary inference should load one model file:
 
 ```sh
-target/release/aarambh-ai finetune merge \
+target/release/aarambh-studio finetune merge \
   --config configs/video_qa_smoke.toml \
   --base checkpoints/video_smoke/model.safetensors \
   --adapter adapters/video_qa_smoke \
@@ -118,7 +118,7 @@ the inference config.
 ## Inference And Evaluation
 
 ```sh
-target/release/aarambh-ai infer \
+target/release/aarambh-studio infer \
   --config configs/video_qa_smoke_infer.toml \
   --model checkpoints/video_qa_smoke_merged/model.safetensors \
   --tokenizer checkpoints/video_smoke/tokenizer.json \
@@ -135,7 +135,7 @@ Streaming uses the existing token-by-token safety path after video prefill.
 `--frames` and `--frame-sampling` are valid only with `--video`.
 
 ```sh
-target/release/aarambh-ai eval \
+target/release/aarambh-studio eval \
   --config configs/video_qa_smoke_infer.toml \
   --model checkpoints/video_qa_smoke_merged/model.safetensors \
   --tokenizer checkpoints/video_smoke/tokenizer.json \
@@ -155,7 +155,7 @@ Build the release binary and ensure the Tiny Shakespeare step-50 checkpoint is
 available, then run:
 
 ```sh
-cargo build --release --locked -p aarambh-ai
+cargo build --release --locked -p aarambh-studio
 scripts/phase35_smoke.sh
 ```
 

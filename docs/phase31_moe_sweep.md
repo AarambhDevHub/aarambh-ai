@@ -47,7 +47,7 @@ The zero shared down projection makes the new path initially neutral.
 Build once, then use a scratch-training config containing `[model.moe]`:
 
 ```sh
-cargo build --release -p aarambh-ai --locked
+cargo build --release -p aarambh-studio --locked
 scripts/phase31_sweep_moe.sh \
   configs/moe_smoke.toml \
   data/eval \

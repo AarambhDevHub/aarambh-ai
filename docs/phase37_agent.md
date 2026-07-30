@@ -44,7 +44,7 @@ The call id must exactly match the pending request.
 Build a checkpoint trained on multi-step tool traces, then run:
 
 ```sh
-target/release/aarambh-ai agent \
+target/release/aarambh-studio agent \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tool_sft/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -59,7 +59,7 @@ The CLI writes each call to stderr. Execute it externally, then enter one result
 line. `--jsonl` emits lifecycle events on stdout. For deterministic replay:
 
 ```sh
-target/release/aarambh-ai agent \
+target/release/aarambh-studio agent \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tool_sft/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -103,7 +103,7 @@ would be truncated are rejected.
 Run the checked-in three-call response path:
 
 ```sh
-target/release/aarambh-ai eval \
+target/release/aarambh-studio eval \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tool_sft/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \

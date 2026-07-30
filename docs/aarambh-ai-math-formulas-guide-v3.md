@@ -1,4 +1,4 @@
-# Aarambh-AI v3: The Complete Math Formula Guide
+# Aarambh Studio v3: The Complete Math Formula Guide
 
 ### Every new formula from Phases 29-40, explained from scratch
 
@@ -552,4 +552,4 @@ Factual knowledge probe:
 
 ---
 
-*This guide covers the new mathematical formulas introduced in Aarambh-AI v3.0.0 (Phases 29-40), building on the v2 formula collection. Every formula is explained from first principles with two fully worked examples.*
+*This guide covers the new mathematical formulas introduced in Aarambh Studio v3.0.0 (Phases 29-40), building on the v2 formula collection. Every formula is explained from first principles with two fully worked examples.*

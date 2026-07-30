@@ -1,6 +1,6 @@
 # v3.0.0 Release Runbook
 
-aarambh-ai v3.0.0 is a GitHub application source release. All workspace
+aarambh-studio v3.0.0 is a GitHub application source release. All workspace
 packages remain `publish = false`. crates.io publishing is deferred to v4.0.0.
 Do not publish crates, upload compiled binaries, or attach pretrained
 checkpoints, adapters, tokenizers, optimizer state, SafeTensors, or GGUF files.
@@ -25,7 +25,7 @@ RUSTDOCFLAGS="-D warnings -D missing_docs" \
   cargo doc --workspace --no-deps --locked
 cargo audit
 scripts/phase40_release_audit.sh
-cargo build --release -p aarambh-ai --locked
+cargo build --release -p aarambh-studio --locked
 ```
 
 RustSec maintenance warnings without a known vulnerability are reviewed as
@@ -35,26 +35,26 @@ release.
 ## Validate The CLI
 
 ```sh
-test "$(target/release/aarambh-ai --version)" = "aarambh-ai 3.0.0"
-target/release/aarambh-ai --help
-target/release/aarambh-ai train --help
-target/release/aarambh-ai infer --help
-target/release/aarambh-ai agent --help
-target/release/aarambh-ai eval --help
-target/release/aarambh-ai quantise --help
-target/release/aarambh-ai convert --help
-target/release/aarambh-ai finetune --help
-target/release/aarambh-ai distill --help
-target/release/aarambh-ai selflearn --help
-target/release/aarambh-ai serve --help
+test "$(target/release/aarambh-studio --version)" = "aarambh-studio 3.0.0"
+target/release/aarambh-studio --help
+target/release/aarambh-studio train --help
+target/release/aarambh-studio infer --help
+target/release/aarambh-studio agent --help
+target/release/aarambh-studio eval --help
+target/release/aarambh-studio quantise --help
+target/release/aarambh-studio convert --help
+target/release/aarambh-studio finetune --help
+target/release/aarambh-studio distill --help
+target/release/aarambh-studio selflearn --help
+target/release/aarambh-studio serve --help
 ```
 
 Verify a clean source installation without changing the user Cargo home:
 
 ```sh
-rm -rf /tmp/aarambh-ai-v3-install
-cargo install --path aarambh-ai --locked --root /tmp/aarambh-ai-v3-install
-/tmp/aarambh-ai-v3-install/bin/aarambh-ai --version
+rm -rf /tmp/aarambh-studio-v3-install
+cargo install --path aarambh-studio --locked --root /tmp/aarambh-studio-v3-install
+/tmp/aarambh-studio-v3-install/bin/aarambh-studio --version
 ```
 
 When a local Tiny checkpoint is available, run the inference-server smoke test:
@@ -70,8 +70,8 @@ available:
 
 ```sh
 cargo check --workspace --all-targets --features cuda --locked
-cargo test -p aarambh-ai-kernel --features cuda --locked
-cargo run --release --locked -p aarambh-ai --features cuda -- train \
+cargo test -p aarambh-studio-kernel --features cuda --locked
+cargo run --release --locked -p aarambh-studio --features cuda -- train \
   --config configs/wikitext103_cuda_smoke.toml
 ```
 
@@ -86,14 +86,14 @@ After the Phase 40 pull request is merged and `main` is current:
 git switch main
 git pull --ff-only origin main
 scripts/phase40_release_audit.sh
-git tag -a v3.0.0 -m "aarambh-ai v3.0.0"
+git tag -a v3.0.0 -m "aarambh-studio v3.0.0"
 git push origin v3.0.0
 ```
 
 The tag triggers `.github/workflows/release.yml`. Verify that the resulting
 GitHub Release:
 
-- is named `aarambh-ai v3.0.0` and marked latest;
+- is named `aarambh-studio v3.0.0` and marked latest;
 - uses `.github/release-notes/v3.0.0.md`;
 - points at the intended `main` commit;
 - contains only GitHub's automatic source archives;

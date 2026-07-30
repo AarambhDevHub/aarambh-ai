@@ -1,4 +1,4 @@
-# SELF_LEARNING_V3.md — aarambh-ai v3.0
+# SELF_LEARNING_V3.md — aarambh-studio v3.0
 
 > Companion to `SELF_LEARNING.md` and `SELF_LEARNING_V2.md`. This document
 > covers **only what v3.0 adds** — forgetting diagnostics, and how the
@@ -86,12 +86,12 @@ reasons distinct from why v2 needed one:
 - MoE-aware replay sampling diagnostics: tracking which experts activate
   for replayed entries, to detect routing drift specifically (§31).
 - A documented export schema so forgetting curves can be consumed outside
-  aarambh-ai entirely — specifically, by Manas (§28).
+  aarambh-studio entirely — specifically, by Manas (§28).
 
 ## 27. Forgetting Diagnostics in the Self-Learning Loop
 
 `ARCHITECTURE_V3.md` §47 defines `CapabilityProbe`, `ForgettingCurve`, and
-`forgetting_delta()` at the `aarambh-ai-eval` crate level. This section
+`forgetting_delta()` at the `aarambh-studio-eval` crate level. This section
 covers how they plug into the *online* self-learning loop specifically,
 where the stakes are different from a one-off training run: self-learning
 runs continuously, on user-driven data the model has no control over the
@@ -133,12 +133,12 @@ frozen visual encoder.
 
 Manas is a separate associative-memory project, not a transformer. Its
 memory, provenance, and forgetting mechanisms are independent from
-aarambh-ai, and this document does not attempt to unify the two systems
+aarambh-studio, and this document does not attempt to unify the two systems
 technically.
 
 What *is* shared is the **measurement schema**. `forgetting_delta()`'s
 export format (`ARCHITECTURE_V3.md` §47) is documented so that a
-capability-level forgetting curve computed by aarambh-ai and a
+capability-level forgetting curve computed by aarambh-studio and a
 concept-level forgetting curve computed by Manas can sit in the same
 shape of record:
 
@@ -159,7 +159,7 @@ runtime dependency, path discovery, or write access to `../manas`; the
 versioned JSON Schema is an optional operator-controlled bridge. The value
 is that when you are reasoning
 about *either* project's forgetting behaviour, you are reasoning in the
-same vocabulary, and any lessons learned tuning aarambh-ai's significance
+same vocabulary, and any lessons learned tuning aarambh-studio's significance
 threshold or probe design transfer directly to thinking about Manas's
 equivalent, and vice versa.
 
@@ -217,7 +217,7 @@ specifically because online sessions run many turns back-to-back:
   (`ARCHITECTURE_V3.md` §38) during the update, and generation reverts to
   the sequential recurrent form afterward. No special-casing is needed in
   the self-learning loop itself; this is handled entirely at the
-  `aarambh-ai-nn` layer.
+  `aarambh-studio-nn` layer.
 - The self-learning safeguards remain adapter-scoped and therefore do not
   need a separate Gated DeltaNet/DSA branch. Phase 38 observes the resulting
   end-to-end model exactly as it observes full-attention models.
@@ -369,19 +369,19 @@ routing drift — surfaced to you, not silently swallowed
 ## 36. CLI Commands (v3)
 
 ```
-[x] aarambh-ai selflearn start ... --forgetting-manifest <manifest>
+[x] aarambh-studio selflearn start ... --forgetting-manifest <manifest>
       # captures a session baseline and probes each committed update
-[x] aarambh-ai selflearn flush-gradients ... --forgetting-manifest <manifest>
-[x] aarambh-ai selflearn replay ... --forgetting-manifest <manifest>
-[x] aarambh-ai selflearn forgetting-report --forgetting-store <curves.json>
-[x] aarambh-ai eval ... --forgetting-manifest <manifest>
+[x] aarambh-studio selflearn flush-gradients ... --forgetting-manifest <manifest>
+[x] aarambh-studio selflearn replay ... --forgetting-manifest <manifest>
+[x] aarambh-studio selflearn forgetting-report --forgetting-store <curves.json>
+[x] aarambh-studio eval ... --forgetting-manifest <manifest>
       # standalone named-checkpoint comparison and optional Manas JSONL export
 ```
 
 ## 37. Crate Structure Additions
 
 ```
-crates/aarambh-ai-selflearn/
+crates/aarambh-studio-selflearn/
 └── src/
     ├── ...v1/v2 modules unchanged (online_grpo.rs, critique.rs,
     │      replay.rs, vision_cache.rs, vision_verifier.rs, gating.rs)...

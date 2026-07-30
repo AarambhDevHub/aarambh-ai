@@ -26,7 +26,7 @@ main LM-head tensor.
 Run the local two-step smoke:
 
 ```sh
-cargo run --release -p aarambh-ai -- train --config configs/mtp_smoke.toml
+cargo run --release -p aarambh-studio -- train --config configs/mtp_smoke.toml
 ```
 
 Training logs report the main loss, the unweighted mean auxiliary loss, its
@@ -59,7 +59,7 @@ Do not interpret a two-step smoke run as evidence of sample-efficiency gains.
 An MTP checkpoint needs no separate draft model:
 
 ```sh
-target/release/aarambh-ai infer \
+target/release/aarambh-studio infer \
   --config configs/mtp_smoke.toml \
   --model checkpoints/mtp_smoke/step_000002/model.safetensors \
   --tokenizer checkpoints/mtp_smoke/tokenizer.json \

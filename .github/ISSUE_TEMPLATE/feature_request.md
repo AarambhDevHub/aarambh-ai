@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an idea for aarambh-ai
+about: Suggest an idea for aarambh-studio
 title: ''
 labels: enhancement
 assignees: ''

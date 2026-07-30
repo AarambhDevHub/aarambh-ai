@@ -18,7 +18,7 @@ What you expected to happen.
 **Environment**
 - OS: [e.g. Ubuntu 24.04]
 - Rust version: `rustc --version`
-- aarambh-ai version / commit
+- aarambh-studio version / commit
 
 **Additional context**
 Add any other context about the problem here.

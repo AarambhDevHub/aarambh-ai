@@ -48,23 +48,23 @@ jobs:
         run: scripts/phase28_release_audit.sh
 
       - name: Build release binary
-        run: cargo build --release -p aarambh-ai --locked
+        run: cargo build --release -p aarambh-studio --locked
 
       - name: Verify CLI
         run: |
-          test "$(target/release/aarambh-ai --version)" = "aarambh-ai 3.0.0"
-          target/release/aarambh-ai --version
-          target/release/aarambh-ai --help
-          target/release/aarambh-ai train --help
-          target/release/aarambh-ai infer --help
-          target/release/aarambh-ai agent --help
-          target/release/aarambh-ai eval --help
-          target/release/aarambh-ai quantise --help
-          target/release/aarambh-ai convert --help
-          target/release/aarambh-ai finetune --help
-          target/release/aarambh-ai distill --help
-          target/release/aarambh-ai selflearn --help
-          target/release/aarambh-ai serve --help
+          test "$(target/release/aarambh-studio --version)" = "aarambh-studio 3.0.0"
+          target/release/aarambh-studio --version
+          target/release/aarambh-studio --help
+          target/release/aarambh-studio train --help
+          target/release/aarambh-studio infer --help
+          target/release/aarambh-studio agent --help
+          target/release/aarambh-studio eval --help
+          target/release/aarambh-studio quantise --help
+          target/release/aarambh-studio convert --help
+          target/release/aarambh-studio finetune --help
+          target/release/aarambh-studio distill --help
+          target/release/aarambh-studio selflearn --help
+          target/release/aarambh-studio serve --help
 
       - name: Dependency audit
         uses: rustsec/audit-check@v2
@@ -74,7 +74,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: aarambh-ai v3.0.0
+          name: aarambh-studio v3.0.0
           body_path: .github/release-notes/v3.0.0.md
           generate_release_notes: true
           make_latest: true

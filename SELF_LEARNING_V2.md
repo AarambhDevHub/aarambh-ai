@@ -1,4 +1,4 @@
-# SELF_LEARNING_V2.md — aarambh-ai v2.0
+# SELF_LEARNING_V2.md — aarambh-studio v2.0
 
 > Companion to `SELF_LEARNING.md`. This document covers **only what v2.0
 > adds** — vision-aware self-learning. Sections continue numbering from
@@ -123,7 +123,7 @@ GRPO's deterministic verifiers and self-critique's fallback role
 
 `VisionVerifier` follows the same trait shape as `MathVerifier` and
 `CodeVerifier` (`ARCHITECTURE.md` §12.1, reused directly in
-`aarambh-ai-eval`'s GSM8K/HumanEval tasks) — it needs ground truth to check
+`aarambh-studio-eval`'s GSM8K/HumanEval tasks) — it needs ground truth to check
 against, which for self-learning means the question set has to come with
 known answers (e.g. counting/colour/presence questions derived from a
 labelled subset, not arbitrary user-uploaded images with no known answer).
@@ -183,7 +183,7 @@ fn require_hardware(hardware: Hardware) -> Result<()> {
 }
 ```
 
-`aarambh-ai selflearn start --mode vision` on i3 fails fast with this
+`aarambh-studio selflearn start --mode vision` on i3 fails fast with this
 message rather than attempting to run. `--mode text` (the default,
 unchanged from v1) is unaffected and continues to work exactly as
 `SELF_LEARNING.md` describes.
@@ -234,7 +234,7 @@ VisionVerifier              Self-critique
 
 ```sh
 # Start one vision-capable self-learning turn (Kaggle only)
-aarambh-ai selflearn start --mode vision \
+aarambh-studio selflearn start --mode vision \
   --config configs/selflearn_vision.toml \
   --prompt "What color is the car?" \
   --image data/llava/images/example.jpg \
@@ -242,10 +242,10 @@ aarambh-ai selflearn start --mode vision \
   --self-learn-ground-truth red
 
 # Text-only session — unchanged from v1, works on i3
-aarambh-ai selflearn start --mode text --config configs/selflearn_cpu.toml
+aarambh-studio selflearn start --mode text --config configs/selflearn_cpu.toml
 
 # Vision-specific stats (extends v1's `selflearn stats` output)
-aarambh-ai selflearn stats --mode vision
+aarambh-studio selflearn stats --mode vision
 # Example output:
 # Replay buffer: 214 / 500 entries  avg score: 0.77
 # Vision (checkable):   ↑ +0.14 (last 50 vs first 50)
@@ -254,7 +254,7 @@ aarambh-ai selflearn stats --mode vision
 # Factual:               → +0.01
 
 # Attempting vision mode on i3 fails clearly:
-$ aarambh-ai selflearn start --mode vision --config configs/selflearn_cpu.toml
+$ aarambh-studio selflearn start --mode vision --config configs/selflearn_cpu.toml
 error: Vision self-learning requires Kaggle GPU. Text-only self-learning
        remains fully supported on i3 — see SELF_LEARNING.md §7.
 ```
@@ -262,7 +262,7 @@ error: Vision self-learning requires Kaggle GPU. Text-only self-learning
 ## 22. Crate Structure Additions
 
 ```
-crates/aarambh-ai-selflearn/
+crates/aarambh-studio-selflearn/
 └── src/
     ├── ...lib.rs, config.rs, learning_loop.rs, online_grpo.rs,
     │     critique.rs, replay.rs, metrics.rs — all unchanged from v1...
@@ -273,13 +273,13 @@ crates/aarambh-ai-selflearn/
     └── gating.rs          ← NEW: require_hardware() guard for vision-mode sessions
 ```
 
-**New dependency (this crate only):** `aarambh-ai-vision`
+**New dependency (this crate only):** `aarambh-studio-vision`
 (`ARCHITECTURE_V2.md` §24), for the frozen encoder + projector used to
 produce image embeddings during generation.
 
-**Still does NOT depend on:** `aarambh-ai-safety`, unchanged from v1 — the
+**Still does NOT depend on:** `aarambh-studio-safety`, unchanged from v1 — the
 safety layer continues to apply at the binary level, not inside
-`aarambh-ai-selflearn`, for vision sessions exactly as it does for text.
+`aarambh-studio-selflearn`, for vision sessions exactly as it does for text.
 
 ## 23. What to Expect (Vision Mode)
 

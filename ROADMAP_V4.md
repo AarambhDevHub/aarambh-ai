@@ -1,10 +1,10 @@
-# ROADMAP_V4.md — aarambh-ai v4.0
+# ROADMAP_V4.md — aarambh-studio v4.0
 
 > Step-by-step build plan for v4.0 — the final planned version of
-> aarambh-ai as an application. Builds on the completed v3.0.0 base
+> aarambh-studio as an application. Builds on the completed v3.0.0 base
 > (Phases 0–40, all ✅). No pretrained checkpoints are released as part
 > of v4.0 — this is a source/engineering release, same policy as v1.0.0,
-> v2.0.0, and v3.0.0. aarambh-ai is an application, not a library: v4.0
+> v2.0.0, and v3.0.0. aarambh-studio is an application, not a library: v4.0
 > ships as a GitHub source release with every crate `publish = false`,
 > **not** a crates.io publish — this corrects the direction implied by
 > v3's own Phase 40 and is the final, confirmed policy going forward.
@@ -143,38 +143,38 @@ limits under a free-tier hardware budget.
 [workspace]
 members = [
     # ...existing v1.0.0 + v2.0.0 + v3.0.0 members unchanged...
-    "crates/aarambh-ai-core",
-    "crates/aarambh-ai-tokenizer",
-    "crates/aarambh-ai-data",
-    "crates/aarambh-ai-nn",
-    "crates/aarambh-ai-kernel",
-    "crates/aarambh-ai-model",
-    "crates/aarambh-ai-weights",
-    "crates/aarambh-ai-quant",
-    "crates/aarambh-ai-train",
-    "crates/aarambh-ai-finetune",
-    "crates/aarambh-ai-inference",
-    "crates/aarambh-ai-safety",
-    "crates/aarambh-ai-selflearn",
-    "crates/aarambh-ai-eval",
-    "crates/aarambh-ai-vision",
-    "crates/aarambh-ai-serve",
-    "crates/aarambh-ai-distill",
-    "crates/aarambh-ai-agent",
+    "crates/aarambh-studio-core",
+    "crates/aarambh-studio-tokenizer",
+    "crates/aarambh-studio-data",
+    "crates/aarambh-studio-nn",
+    "crates/aarambh-studio-kernel",
+    "crates/aarambh-studio-model",
+    "crates/aarambh-studio-weights",
+    "crates/aarambh-studio-quant",
+    "crates/aarambh-studio-train",
+    "crates/aarambh-studio-finetune",
+    "crates/aarambh-studio-inference",
+    "crates/aarambh-studio-safety",
+    "crates/aarambh-studio-selflearn",
+    "crates/aarambh-studio-eval",
+    "crates/aarambh-studio-vision",
+    "crates/aarambh-studio-serve",
+    "crates/aarambh-studio-distill",
+    "crates/aarambh-studio-agent",
 
     # new in v4.0
-    "crates/aarambh-ai-audio",       # Phase 42
-    "crates/aarambh-ai-retrieve",    # Phase 49
+    "crates/aarambh-studio-audio",       # Phase 42
+    "crates/aarambh-studio-retrieve",    # Phase 49
 
-    "aarambh-ai",
+    "aarambh-studio",
 ]
 ```
 
-Two new crates (`aarambh-ai-audio`, `aarambh-ai-retrieve`). Everything
-else extends existing crates — most heavily `aarambh-ai-nn` (MLA, sparse
-dispatch), `aarambh-ai-agent` (execution, orchestration, both already
-scaffolded in v3 §37 for chain orchestration), `aarambh-ai-finetune`
-(RLAIF), `aarambh-ai-inference` (test-time scaling), and `aarambh-ai-
+Two new crates (`aarambh-studio-audio`, `aarambh-studio-retrieve`). Everything
+else extends existing crates — most heavily `aarambh-studio-nn` (MLA, sparse
+dispatch), `aarambh-studio-agent` (execution, orchestration, both already
+scaffolded in v3 §37 for chain orchestration), `aarambh-studio-finetune`
+(RLAIF), `aarambh-studio-inference` (test-time scaling), and `aarambh-studio-
 serve` (public hosting, prefix cache). No new external dependencies
 beyond what each phase's Dependency Policy note allows.
 
@@ -195,7 +195,7 @@ expressiveness.
 
 ### Tasks
 
-**`aarambh-ai-nn`:**
+**`aarambh-studio-nn`:**
 ```
 [ ] src/mla.rs
       down_proj: d_model -> latent_dim (e.g. 512), producing c_kv per
@@ -217,7 +217,7 @@ expressiveness.
       Full and GatedDeltaNet layers completely unchanged from v1/v3
 ```
 
-**`aarambh-ai-model`:**
+**`aarambh-studio-model`:**
 ```
 [ ] Model config's attention_schedule accepts LatentMLA entries
 [ ] Backward compatible: a schedule with zero LatentMLA entries
@@ -227,7 +227,7 @@ expressiveness.
       configs/large_hybrid_mla.toml
 ```
 
-**`aarambh-ai-train`:**
+**`aarambh-studio-train`:**
 ```
 [ ] Continued-pretraining retrofit recipe, same pattern as v3 §29:
     load an existing v3 checkpoint, reinitialise scheduled layers as
@@ -237,19 +237,19 @@ expressiveness.
     same tolerance-band discipline as v3 §29
 ```
 
-**`aarambh-ai-weights`:**
+**`aarambh-studio-weights`:**
 ```
 [ ] Partial-checkpoint loading extended to support MLA-layer weights
     (down_proj, per-head up-projections, rope-half projections)
     alongside the existing Full/GatedDeltaNet partial-load path
 ```
 
-**`aarambh-ai-inference`:**
+**`aarambh-studio-inference`:**
 ```
 [ ] KV cache allocation per layer now depends on AttentionKind — MLA
     layers allocate {latent_dim + rope_half_dim} per token instead of
     {2 × num_kv_heads × head_dim} — measurably smaller at long context
-[ ] Memory report tooling: `aarambh-ai eval --kv-cache-report` prints
+[ ] Memory report tooling: `aarambh-studio eval --kv-cache-report` prints
     bytes/token per attention kind in the active schedule
 ```
 
@@ -314,14 +314,14 @@ rather than reinvented.
 
 ### Tasks
 
-**`aarambh-ai-audio`** *(new crate, Layer 3)*:
+**`aarambh-studio-audio`** *(new crate, Layer 3)*:
 ```
 [ ] src/lib.rs
 [ ] src/encoder.rs
       FrozenAudioEncoder — a small (~40–90M param), permissively-
       licensed, pretrained speech/audio transformer encoder, loaded as
       SafeTensors through candle-core, same loading path
-      aarambh-ai-weights already uses (identical policy to v2 §24's
+      aarambh-studio-weights already uses (identical policy to v2 §24's
       CLIP loading — no PyTorch bindings, no ONNX, no Python FFI)
 [ ] src/preprocess.rs
       Mel-spectrogram extraction from raw audio, using a pure-Rust or
@@ -339,27 +339,27 @@ rather than reinvented.
       AudioQaExample, JSONL schema, mirrors vision's instruct_data.rs
 ```
 
-**`aarambh-ai-tokenizer`:**
+**`aarambh-studio-tokenizer`:**
 ```
 [ ] <audio> / <audio_end> reserved special token strings, IDs,
     validation — same pattern as v2's <image>/<image_end> and v3's
     <video>/<document> tokens
 ```
 
-**`aarambh-ai-finetune`:**
+**`aarambh-studio-finetune`:**
 ```
 [ ] vlm_dora.rs extended to accept audio-token-prefixed sequences —
     same DoRA-adapted-LLM + frozen-encoder two-stage recipe as v2 §25,
     substituting audio for image
 ```
 
-**`aarambh-ai-eval`:**
+**`aarambh-studio-eval`:**
 ```
 [ ] tasks/audio_qa_subset.rs — free, public audio-QA benchmark subset,
     implements the shared EvalTask trait (v2 §22)
 ```
 
-**`aarambh-ai-inference`:**
+**`aarambh-studio-inference`:**
 ```
 [ ] --audio CLI flag on infer, parallel to --image (v2) and
     --video/--document (v3)
@@ -418,7 +418,7 @@ expert computing on every token and being masked afterward.
 
 ### Tasks
 
-**`aarambh-ai-nn`:**
+**`aarambh-studio-nn`:**
 ```
 [ ] src/dispatch.rs (extended)
       Token-to-expert grouping: sort/group tokens by router assignment
@@ -434,13 +434,13 @@ expert computing on every token and being masked afterward.
     only pays off," not silently downgraded
 ```
 
-**`aarambh-ai-model`:**
+**`aarambh-studio-model`:**
 ```
 [ ] MoeConfig gains `dispatch: DispatchKind`, default DenseMasked for
     exact backward compatibility with every existing MoE checkpoint
 ```
 
-**`aarambh-ai-train`:**
+**`aarambh-studio-train`:**
 ```
 [ ] Load-balancing auxiliary loss unchanged — Sparse dispatch changes
     compute path only, not the loss the router is trained against
@@ -501,7 +501,7 @@ because that claim would not be honest.
 
 ### Tasks
 
-**`aarambh-ai-train`:**
+**`aarambh-studio-train`:**
 ```
 [ ] src/distributed.rs (extended)
       Node rank vs local rank distinction (world_size = nodes ×
@@ -563,7 +563,7 @@ sits alongside, not inside, the existing thinking-mode budget system.
 
 ### Tasks
 
-**`aarambh-ai-inference`:**
+**`aarambh-studio-inference`:**
 ```
 [ ] src/best_of_n.rs
       Parallel N-sample generation, reusing the existing sampler and
@@ -583,12 +583,12 @@ sits alongside, not inside, the existing thinking-mode budget system.
       is unavailable (open-ended tasks)
 ```
 
-**`aarambh-ai` CLI:**
+**`aarambh-studio` CLI:**
 ```
 [ ] infer --best-of-n <N> --selection verifier|self-consistency|majority
 ```
 
-**`aarambh-ai-eval`:**
+**`aarambh-studio-eval`:**
 ```
 [ ] eval --compare gains a --best-of-n flag so scorecards can report
     "single-sample" vs "best-of-N" side by side — same measure-don't-
@@ -642,7 +642,7 @@ static human preference dataset is available.
 
 ### Tasks
 
-**`aarambh-ai-finetune`:**
+**`aarambh-studio-finetune`:**
 ```
 [ ] src/rlaif.rs
       Judge prompt template: given a prompt and two candidate
@@ -707,7 +707,7 @@ and is scoped conservatively on purpose.
 
 ### Tasks
 
-**`aarambh-ai-agent`** *(extends the crate v3 §37 already scaffolded for chain orchestration)*:
+**`aarambh-studio-agent`** *(extends the crate v3 §37 already scaffolded for chain orchestration)*:
 ```
 [ ] src/sandbox.rs
       ToolExecutor trait — implementors register one specific,
@@ -785,7 +785,7 @@ orchestration is only as safe as the execution sandbox underneath it.
 
 ### Tasks
 
-**`aarambh-ai-agent`:**
+**`aarambh-studio-agent`:**
 ```
 [ ] src/orchestrator.rs
       DelegationPlan — the orchestrator's own reasoning produces a set
@@ -854,7 +854,7 @@ to reason about.
 
 ### Tasks
 
-**`aarambh-ai-retrieve`** *(new crate, Layer 4)*:
+**`aarambh-studio-retrieve`** *(new crate, Layer 4)*:
 ```
 [ ] src/lib.rs
 [ ] src/embedding.rs
@@ -881,10 +881,10 @@ to reason about.
     prompt; it does not change how the decoder processes it.
 ```
 
-**`aarambh-ai` CLI:**
+**`aarambh-studio` CLI:**
 ```
-[ ] aarambh-ai retrieve build-index --corpus docs/ --output my_index/
-[ ] aarambh-ai infer --rag --index my_index/ --prompt "..."
+[ ] aarambh-studio retrieve build-index --corpus docs/ --output my_index/
+[ ] aarambh-studio infer --rag --index my_index/ --prompt "..."
 ```
 
 ### Tests
@@ -907,7 +907,7 @@ fn chunking_with_overlap_does_not_duplicate_index_entries_incorrectly() {}
 
 ### Milestone
 ```
-`aarambh-ai retrieve build-index` and `infer --rag` work end-to-end on a
+`aarambh-studio retrieve build-index` and `infer --rag` work end-to-end on a
 small local document corpus, with retrieval recall meeting a documented
 floor on a held-out labelled set, and RAG-augmented generation showing a
 measured, reported improvement on a factual eval-harness task versus
@@ -932,7 +932,7 @@ interpolation and task-arithmetic composition.
 
 ### Tasks
 
-**`aarambh-ai-weights`:**
+**`aarambh-studio-weights`:**
 ```
 [ ] src/merge.rs
       Hard shape/schema validation first — merging requires identical
@@ -947,11 +947,11 @@ interpolation and task-arithmetic composition.
       chat-DPO delta) onto one shared base
 ```
 
-**`aarambh-ai` CLI:**
+**`aarambh-studio` CLI:**
 ```
-[ ] aarambh-ai merge --method slerp --inputs a.safetensors,b.safetensors \
+[ ] aarambh-studio merge --method slerp --inputs a.safetensors,b.safetensors \
       --weights 0.5,0.5 --output merged.safetensors
-[ ] aarambh-ai merge --method task-arithmetic --base base.safetensors \
+[ ] aarambh-studio merge --method task-arithmetic --base base.safetensors \
       --deltas math.safetensors,chat.safetensors --scales 1.0,0.5 \
       --output merged.safetensors
 ```
@@ -976,7 +976,7 @@ fn merged_checkpoint_eval_harness_score_is_reported_not_assumed_improved() {
 
 ### Milestone
 ```
-`aarambh-ai merge` produces a valid, loadable SafeTensors checkpoint
+`aarambh-studio merge` produces a valid, loadable SafeTensors checkpoint
 from both SLERP and task-arithmetic paths, with shape-mismatch inputs
 correctly rejected before any output is written, and the merged
 checkpoint's eval-harness scorecard reported honestly against both
@@ -995,7 +995,7 @@ git tag v4.0.0-alpha.10
 ### Goal
 The single biggest scope/risk jump in the v1–v4 history. v2 §27 and
 v3 both stayed local-only deliberately. This phase opens the existing
-`aarambh-ai-serve` (v2 §27) to genuinely multi-tenant, authenticated
+`aarambh-studio-serve` (v2 §27) to genuinely multi-tenant, authenticated
 traffic, and adds prefix caching — the highest-leverage serving
 optimisation for exactly the agentic/tool-chain traffic pattern Phases
 47–48 generate.
@@ -1008,7 +1008,7 @@ product.
 
 ### Tasks
 
-**`aarambh-ai-serve`:**
+**`aarambh-studio-serve`:**
 ```
 [ ] src/auth.rs
       API key issuance/validation, replacing v2 §27's simple
@@ -1086,7 +1086,7 @@ agentic chains and RAG-augmented prompts).
 
 ### Tasks
 
-**`aarambh-ai-tokenizer`:**
+**`aarambh-studio-tokenizer`:**
 ```
 [ ] src/special.rs
       Document `<|system|>` (ID 7, already reserved since v1) as a
@@ -1102,7 +1102,7 @@ agentic chains and RAG-augmented prompts).
     misinterpretation of prompt structure
 ```
 
-**`aarambh-ai-safety`:**
+**`aarambh-studio-safety`:**
 ```
 [ ] Precedence rule, made explicit and tested: system-turn content is
     always operator/application-supplied, never derived from user
@@ -1113,7 +1113,7 @@ agentic chains and RAG-augmented prompts).
     defense; this phase adds and tests the *system-turn-side* half
 ```
 
-**`aarambh-ai-serve`:**
+**`aarambh-studio-serve`:**
 ```
 [ ] /v1/chat/completions system-role mapping, formalized: a request's
     {"role": "system", ...} message maps onto exactly one <|system|>
@@ -1122,7 +1122,7 @@ agentic chains and RAG-augmented prompts).
     original format exactly
 ```
 
-**`aarambh-ai-inference` / `aarambh-ai-agent`:**
+**`aarambh-studio-inference` / `aarambh-studio-agent`:**
 ```
 [ ] src/context_policy.rs
       ContextTruncationPolicy enum: SlidingWindow (drop oldest
@@ -1139,7 +1139,7 @@ agentic chains and RAG-augmented prompts).
       policy referenced by all of them
 ```
 
-**`aarambh-ai-inference` (sampling defaults):**
+**`aarambh-studio-inference` (sampling defaults):**
 ```
 [ ] docs/SAMPLING_DEFAULTS.md — one canonical reference table:
     recommended temperature/top-p/top-k per use case (deterministic
@@ -1198,7 +1198,7 @@ system-role/prompt-injection precedence rule (v4 §52).
 
 ### Tasks
 
-**`aarambh-ai-safety`:**
+**`aarambh-studio-safety`:**
 ```
 [ ] src/redteam/harness.rs
       AdversarialCase — a labelled (input, expected_outcome) pair;
@@ -1216,9 +1216,9 @@ system-role/prompt-injection precedence rule (v4 §52).
       plainly, never silently excluded from the report
 ```
 
-**`aarambh-ai` CLI:**
+**`aarambh-studio` CLI:**
 ```
-[ ] aarambh-ai eval --redteam --report redteam_report.json
+[ ] aarambh-studio eval --redteam --report redteam_report.json
 ```
 
 ### Tests
@@ -1235,7 +1235,7 @@ fn redteam_corpus_sources_are_documented_and_free_public_only() {}
 
 ### Milestone
 ```
-`aarambh-ai eval --redteam` runs the complete adversarial corpus against
+`aarambh-studio eval --redteam` runs the complete adversarial corpus against
 the v4.0 candidate build, producing a report with every case's outcome.
 Any failing case is fixed and re-tested before Phase 55's release audit
 — the release does not proceed with a known, unaddressed red-team
@@ -1261,7 +1261,7 @@ ROADMAP*.md, and README.md.
 
 ### Tasks
 
-**`aarambh-ai-eval`:**
+**`aarambh-studio-eval`:**
 ```
 [ ] src/model_card.rs
       ModelCard — generated from an eval-harness run plus the redteam
@@ -1271,9 +1271,9 @@ ROADMAP*.md, and README.md.
       actual eval numbers
 ```
 
-**`aarambh-ai` CLI:**
+**`aarambh-studio` CLI:**
 ```
-[ ] aarambh-ai eval --generate-model-card --output MODEL_CARD.md
+[ ] aarambh-studio eval --generate-model-card --output MODEL_CARD.md
 ```
 
 **Documentation:**
@@ -1311,10 +1311,10 @@ git tag v4.0.0-alpha.14
 
 ### Goal
 Freeze the complete workspace as application version 4.0.0 — **the
-final planned version of aarambh-ai.** Same discipline as v1 §15, v2
+final planned version of aarambh-studio.** Same discipline as v1 §15, v2
 §28, and v3 §40 in spirit, but with the release *target* corrected: a
 GitHub source release with every crate `publish = false`, not a
-crates.io publish. aarambh-ai is an application, not a library — this
+crates.io publish. aarambh-studio is an application, not a library — this
 is the confirmed, final policy, and it supersedes anything v3 §40
 implied about crates.io.
 
@@ -1324,8 +1324,8 @@ implied about crates.io.
 [ ] Every workspace package inherits version 4.0.0
 [ ] `Cargo.lock` committed, release commands use `--locked`
 [ ] Full production release audit extended to cover every v4 crate
-    surface (aarambh-ai-audio, aarambh-ai-retrieve, extended
-    aarambh-ai-agent, extended aarambh-ai-serve)
+    surface (aarambh-studio-audio, aarambh-studio-retrieve, extended
+    aarambh-studio-agent, extended aarambh-studio-serve)
 [ ] Documentation completion: ARCHITECTURE_V4.md, ROADMAP_V4.md,
     SELF_LEARNING_V4.md finalised; CHANGELOG.md and README.md updated
     with the full v1 → v4 arc
@@ -1338,7 +1338,7 @@ implied about crates.io.
 
 ### Milestone
 ```
-`aarambh-ai --version` reports `aarambh-ai 4.0.0`. The v4.0.0 GitHub
+`aarambh-studio --version` reports `aarambh-studio 4.0.0`. The v4.0.0 GitHub
 Release is tagged from a reviewed main branch, contains only GitHub's
 automatic source archives, and no crate is published to crates.io —
 consistent with every release before it. No pretrained checkpoint,
@@ -1379,8 +1379,8 @@ git push origin v4.0.0
 
 | Dependency | Allowed crates | Reason |
 |---|---|---|
-| Permissively-licensed pure-Rust (or system-library-bound) audio decode crate | `aarambh-ai-audio` | Local mel-spectrogram extraction only, no network calls |
-| Small contrastive text-embedding model, loaded as SafeTensors via `candle-core` | `aarambh-ai-retrieve` | Same local-SafeTensors-loading policy as every other encoder in the project |
+| Permissively-licensed pure-Rust (or system-library-bound) audio decode crate | `aarambh-studio-audio` | Local mel-spectrogram extraction only, no network calls |
+| Small contrastive text-embedding model, loaded as SafeTensors via `candle-core` | `aarambh-studio-retrieve` | Same local-SafeTensors-loading policy as every other encoder in the project |
 
 **Still forbidden everywhere, unchanged from v1/v2/v3:** PyTorch bindings
 (`tch-rs`), ONNX Runtime (`ort`), Python FFI, `llama.cpp` as a backend,
@@ -1408,7 +1408,7 @@ workspace on any `candle-core` upgrade.
 - A general-purpose code-execution sandbox — Phase 47's execution is
   strictly closed-world, named-capability tool execution, never
   arbitrary code or shell execution.
-- Any v5 roadmap. **v4.0.0 is the final planned version of aarambh-ai.**
+- Any v5 roadmap. **v4.0.0 is the final planned version of aarambh-studio.**
   This document does not carry forward an "out of scope, natural next
   version" section the way v2 and v3 did — there is no v5 planned as of
   this release.

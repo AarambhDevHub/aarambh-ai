@@ -12,12 +12,12 @@ HYBRID_CONFIG=$3
 HYBRID_MODEL=$4
 TOKENIZER=$5
 PROMPT=${6:-"Summarize the most important facts in this document."}
-BIN=${AARAMBH_BIN:-target/release/aarambh-ai}
+BIN=${AARAMBH_STUDIO_BIN:-target/release/aarambh-studio}
 RUNS=${RUNS:-3}
 MAX_TOKENS=${MAX_TOKENS:-256}
 
 if [[ ! -x "$BIN" ]]; then
-  echo "missing release binary at $BIN; build with cargo build --release -p aarambh-ai --features cuda" >&2
+  echo "missing release binary at $BIN; build with cargo build --release -p aarambh-studio --features cuda" >&2
   exit 2
 fi
 

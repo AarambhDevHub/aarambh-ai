@@ -9,7 +9,7 @@ fi
 BASE_CONFIG=$1
 DATA_DIR=$2
 OUTPUT_DIR=$3
-BIN=${AARAMBH_BIN:-target/release/aarambh-ai}
+BIN=${AARAMBH_STUDIO_BIN:-target/release/aarambh-studio}
 TASKS=${TASKS:-ppl}
 MAX_EXAMPLES=${MAX_EXAMPLES:-128}
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-64}

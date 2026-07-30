@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/AarambhDevHub/aarambh-ai/schemas/manas-forgetting-v1.schema.json",
+  "$id": "https://github.com/AarambhDevHub/aarambh-studio/schemas/manas-forgetting-v1.schema.json",
   "title": "Aarambh/Manas Forgetting Delta v1",
   "description": "One capability- or concept-level score delta between two stable model states.",
   "type": "object",

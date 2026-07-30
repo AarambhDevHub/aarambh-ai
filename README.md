@@ -1,12 +1,12 @@
-# aarambh-ai
+# aarambh-studio
 
 > Sanskrit: *beginning*. A ground-up language model system in Rust.
 
-[![CI](https://github.com/AarambhDevHub/aarambh-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/AarambhDevHub/aarambh-ai/actions/workflows/ci.yml)
+[![CI](https://github.com/AarambhDevHub/aarambh-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/AarambhDevHub/aarambh-studio/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.89%2B-orange.svg)](https://www.rust-lang.org)
 
-aarambh-ai is a decoder-only language model implementation built with Rust and
+aarambh-studio is a decoder-only language model implementation built with Rust and
 Candle. The repository covers the full engineering path: tokenization, model
 construction, training, inference, quantization, adapter tuning, alignment,
 evaluation, multimodal input, safety, and an OpenAI-compatible server.
@@ -58,27 +58,27 @@ local development; Medium and Large training require suitable GPU memory.
 ## Quick Start
 
 ```sh
-git clone https://github.com/AarambhDevHub/aarambh-ai.git
-cd aarambh-ai
+git clone https://github.com/AarambhDevHub/aarambh-studio.git
+cd aarambh-studio
 
 cargo check --workspace --all-targets --locked
 cargo test --workspace --locked
-cargo build --release --locked -p aarambh-ai
-target/release/aarambh-ai --help
+cargo build --release --locked -p aarambh-studio
+target/release/aarambh-studio --help
 ```
 
 Run a two-step CPU training smoke test using the checked-in Tiny Shakespeare
 fixture:
 
 ```sh
-target/release/aarambh-ai train \
+target/release/aarambh-studio train \
   --config configs/tiny_shakespeare_smoke.toml
 ```
 
 Train the normal Tiny recipe:
 
 ```sh
-target/release/aarambh-ai train \
+target/release/aarambh-studio train \
   --config configs/tiny_shakespeare.toml
 ```
 
@@ -90,19 +90,19 @@ produce useful language quality.
 ## CLI
 
 ```text
-aarambh-ai train       Pretrain or continue a configured model
-aarambh-ai infer       Generate text or answer an image/video-grounded prompt
-aarambh-ai agent       Orchestrate bounded caller-executed tool-use chains
-aarambh-ai eval        Run evaluation tasks and compare scorecards
-aarambh-ai quantise    Calibrate and export INT8/INT4 GGUF checkpoints
-aarambh-ai convert     Convert SafeTensors, GGUF, or Hugging Face layouts
-aarambh-ai finetune    Run SFT, adapters, GRPO, DPO, VLM, or merge workflows
-aarambh-ai distill     Train/evaluate on-policy or offline teacher distillation
-aarambh-ai selflearn   Manage replay and persistent self-learning state
-aarambh-ai serve       Start the OpenAI-compatible HTTP/SSE server
+aarambh-studio train       Pretrain or continue a configured model
+aarambh-studio infer       Generate text or answer an image/video-grounded prompt
+aarambh-studio agent       Orchestrate bounded caller-executed tool-use chains
+aarambh-studio eval        Run evaluation tasks and compare scorecards
+aarambh-studio quantise    Calibrate and export INT8/INT4 GGUF checkpoints
+aarambh-studio convert     Convert SafeTensors, GGUF, or Hugging Face layouts
+aarambh-studio finetune    Run SFT, adapters, GRPO, DPO, VLM, or merge workflows
+aarambh-studio distill     Train/evaluate on-policy or offline teacher distillation
+aarambh-studio selflearn   Manage replay and persistent self-learning state
+aarambh-studio serve       Start the OpenAI-compatible HTTP/SSE server
 ```
 
-Use `aarambh-ai <command> --help` for the complete option set.
+Use `aarambh-studio <command> --help` for the complete option set.
 
 ## Common Workflows
 
@@ -110,22 +110,22 @@ See the phase-specific docs for full walkthroughs with smoke fixtures:
 
 | Workflow | Guide |
 |---|---|
-| Train (CPU/GPU, MTP, MoE, distillation, QAT) | `aarambh-ai train --help` + [configs/](configs/) TOML examples |
-| Inference (text, thinking, image, video, document) | [docs/aarambh-ai-complete-guide.md](docs/aarambh-ai-complete-guide.md) |
+| Train (CPU/GPU, MTP, MoE, distillation, QAT) | `aarambh-studio train --help` + [configs/](configs/) TOML examples |
+| Inference (text, thinking, image, video, document) | [docs/aarambh-studio-complete-guide.md](docs/aarambh-studio-complete-guide.md) |
 | Tool-use agent chains | [docs/phase37_agent.md](docs/phase37_agent.md) |
 | Video understanding | [docs/phase35_video.md](docs/phase35_video.md) |
 | Document understanding | [docs/phase36_document.md](docs/phase36_document.md) |
 | OpenAI-compatible server | [docs/inference-server.md](docs/inference-server.md) |
 | Evaluation & forgetting diagnostics | [docs/phase38_forgetting.md](docs/phase38_forgetting.md) |
 | Quantization (GPTQ, QAT, GGUF) | [docs/phase34_qat.md](docs/phase34_qat.md) |
-| Fine-tuning (SFT, adapters, GRPO, DPO) | `aarambh-ai finetune --help` |
+| Fine-tuning (SFT, adapters, GRPO, DPO) | `aarambh-studio finetune --help` |
 | Self-learning | [SELF_LEARNING_V3.md](SELF_LEARNING_V3.md) |
 
 ```sh
 # Minimal train-smoke → infer flow
-cargo build --release --locked -p aarambh-ai
-target/release/aarambh-ai train --config configs/tiny_shakespeare_smoke.toml
-target/release/aarambh-ai infer --config configs/tiny_shakespeare.toml \
+cargo build --release --locked -p aarambh-studio
+target/release/aarambh-studio train --config configs/tiny_shakespeare_smoke.toml
+target/release/aarambh-studio infer --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_shakespeare_smoke/best/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare_smoke/tokenizer.json \
   --prompt "Hello" --max-tokens 16 --greedy
@@ -171,25 +171,25 @@ any of `none`, `low`, `medium`, `high`, or `max`. The server also accepts
 The workspace contains 18 internal library crates and one CLI package:
 
 ```text
-aarambh-ai-core        Shared config, device, dtype, errors, and traits
-aarambh-ai-tokenizer   BPE tokenizer and reserved special tokens
-aarambh-ai-data        Datasets, preprocessing, sharding, and loaders
-aarambh-ai-kernel      CPU SIMD and optional CUDA kernels
-aarambh-ai-nn          Neural layers, attention, DeltaNet, DSA, MoE, and MTP
-aarambh-ai-model       Full decoder model and cache integration
-aarambh-ai-weights     SafeTensors, GGUF, conversion, and retrofit loading
-aarambh-ai-quant       INT8/INT4, GPTQ, AWQ, QAT, and KV quantization
-aarambh-ai-train       Optimizer, schedules, MTP loss, checkpoints, distributed train
-aarambh-ai-finetune    Adapters, SFT, GRPO, DPO, VLM, and tool tuning
-aarambh-ai-inference   Sampling, caching, thinking, MTP/external speculation, tools
-aarambh-ai-agent       Bounded tool chains, exact state, and caller-result ingestion
-aarambh-ai-safety      Input, output, streaming, PII, and audit policies
-aarambh-ai-selflearn   Critique, replay, verifiers, and persistent update state
-aarambh-ai-eval        Evaluation tasks, scorecards, and comparisons
-aarambh-ai-vision      Image/video/document decode, preprocessing, temporal/layout fusion
-aarambh-ai-distill     On-policy rollouts, teacher scoring, losses, and resume
-aarambh-ai-serve       Axum HTTP/SSE serving and continuous batching
-aarambh-ai             Command-line application
+aarambh-studio-core        Shared config, device, dtype, errors, and traits
+aarambh-studio-tokenizer   BPE tokenizer and reserved special tokens
+aarambh-studio-data        Datasets, preprocessing, sharding, and loaders
+aarambh-studio-kernel      CPU SIMD and optional CUDA kernels
+aarambh-studio-nn          Neural layers, attention, DeltaNet, DSA, MoE, and MTP
+aarambh-studio-model       Full decoder model and cache integration
+aarambh-studio-weights     SafeTensors, GGUF, conversion, and retrofit loading
+aarambh-studio-quant       INT8/INT4, GPTQ, AWQ, QAT, and KV quantization
+aarambh-studio-train       Optimizer, schedules, MTP loss, checkpoints, distributed train
+aarambh-studio-finetune    Adapters, SFT, GRPO, DPO, VLM, and tool tuning
+aarambh-studio-inference   Sampling, caching, thinking, MTP/external speculation, tools
+aarambh-studio-agent       Bounded tool chains, exact state, and caller-result ingestion
+aarambh-studio-safety      Input, output, streaming, PII, and audit policies
+aarambh-studio-selflearn   Critique, replay, verifiers, and persistent update state
+aarambh-studio-eval        Evaluation tasks, scorecards, and comparisons
+aarambh-studio-vision      Image/video/document decode, preprocessing, temporal/layout fusion
+aarambh-studio-distill     On-policy rollouts, teacher scoring, losses, and resume
+aarambh-studio-serve       Axum HTTP/SSE serving and continuous batching
+aarambh-studio             Command-line application
 ```
 
 Packages inherit one workspace version and use `publish = false`.
@@ -224,9 +224,9 @@ CUDA checks require a CUDA-capable environment and are intentionally opt-in.
 | [SELF_LEARNING.md](SELF_LEARNING.md) | Text self-learning design |
 | [SELF_LEARNING_V2.md](SELF_LEARNING_V2.md) | Vision-aware self-learning design |
 | [SELF_LEARNING_V3.md](SELF_LEARNING_V3.md) | v3 self-learning and forgetting-diagnostic integration |
-| [docs/aarambh-ai-config-toml-guide.md](docs/aarambh-ai-config-toml-guide.md) | Configuration field reference |
-| [docs/aarambh-ai-complete-guide.md](docs/aarambh-ai-complete-guide.md) | Beginner-oriented project walkthrough |
-| [docs/aarambh-ai-math-formulas-guide.md](docs/aarambh-ai-math-formulas-guide.md) | Mathematical foundations and worked examples |
+| [docs/aarambh-studio-config-toml-guide.md](docs/aarambh-studio-config-toml-guide.md) | Configuration field reference |
+| [docs/aarambh-studio-complete-guide.md](docs/aarambh-studio-complete-guide.md) | Beginner-oriented project walkthrough |
+| [docs/aarambh-studio-math-formulas-guide.md](docs/aarambh-studio-math-formulas-guide.md) | Mathematical foundations and worked examples |
 | [docs/inference-server.md](docs/inference-server.md) | Server endpoints, SDK usage, auth, safety, and limits |
 | [docs/phase32_mtp.md](docs/phase32_mtp.md) | MTP training, retrofit, exact speculation, and benchmark method |
 | [docs/phase33_distillation_results.md](docs/phase33_distillation_results.md) | On-policy distillation design, smoke proof, and comparison method |
@@ -252,7 +252,7 @@ Full exclusions in the [versioned roadmaps](#documentation).
 ## Contributing And Security
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Use
-[GitHub issues](https://github.com/AarambhDevHub/aarambh-ai/issues) for
+[GitHub issues](https://github.com/AarambhDevHub/aarambh-studio/issues) for
 reproducible bugs and scoped feature requests. Report vulnerabilities through
 [SECURITY.md](SECURITY.md), not a public issue.
 
@@ -260,10 +260,10 @@ reproducible bugs and scoped feature requests. Report vulnerabilities through
 
 ```bibtex
 @software{aarambh_ai_2026,
-  title   = {aarambh-ai: A Ground-Up Language Model System in Rust},
+  title   = {aarambh-studio: A Ground-Up Language Model System in Rust},
   author  = {Aarambh Dev Hub},
   year    = {2026},
-  url     = {https://github.com/AarambhDevHub/aarambh-ai},
+  url     = {https://github.com/AarambhDevHub/aarambh-studio},
   version = {3.0.0},
   license = {Apache-2.0}
 }

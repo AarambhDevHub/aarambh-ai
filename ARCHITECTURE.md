@@ -1,4 +1,4 @@
-# ARCHITECTURE.md — aarambh-ai
+# ARCHITECTURE.md — aarambh-studio
 
 > A modern, from-scratch LLM in Rust using `candle`. Decoder-only transformer with
 > thinking capability, four model scales, quantisation, fine-tuning, safety guardrails,
@@ -25,11 +25,11 @@
 7. [Thinking Engine](#7-thinking-engine)
 8. [KV Cache & Inference](#8-kv-cache--inference)
 9. [Training Pipeline](#9-training-pipeline)
-10. [Custom Kernels](#10-custom-kernels-aarambh-ai-kernel)
-11. [Quantisation](#11-quantisation-aarambh-ai-quant)
-12. [Fine-Tuning](#12-fine-tuning-aarambh-ai-finetune)
-13. [Safety Layer](#13-safety-layer-aarambh-ai-safety)
-14. [Self-Learning Loop](#14-self-learning-loop-aarambh-ai-selflearn)
+10. [Custom Kernels](#10-custom-kernels-aarambh-studio-kernel)
+11. [Quantisation](#11-quantisation-aarambh-studio-quant)
+12. [Fine-Tuning](#12-fine-tuning-aarambh-studio-finetune)
+13. [Safety Layer](#13-safety-layer-aarambh-studio-safety)
+14. [Self-Learning Loop](#14-self-learning-loop-aarambh-studio-selflearn)
     - 14.1 Overview & Design — built in Phase 12, before GPU scale-up
     - 14.2 Online GRPO (uses deterministic verifiers)
     - 14.3 Experience Replay Buffer
@@ -46,7 +46,7 @@
 
 ## 1. Project Overview
 
-**aarambh-ai** (Sanskrit: *beginning*) is a ground-up LLM written entirely in Rust.
+**aarambh-studio** (Sanskrit: *beginning*) is a ground-up LLM written entirely in Rust.
 It is not a wrapper around PyTorch or any Python library. Every layer, every training
 loop, every kernel is implemented from scratch using `candle-core` and `candle-nn`
 as the tensor backend.
@@ -68,7 +68,7 @@ as the tensor backend.
 ### What makes it different
 
 Every other LLM tutorial or project either wraps Python tools in Rust or skips
-the hard parts. aarambh-ai builds everything: the BPE tokeniser, the attention
+the hard parts. aarambh-studio builds everything: the BPE tokeniser, the attention
 mechanism, the optimiser, the quantisation algorithm, the LoRA injector, the
 safety guard — all in one workspace, all in Rust, all explained in this document.
 
@@ -83,7 +83,7 @@ safety guard — all in one workspace, all in Rust, all explained in this docume
 | Thinking out of the box | `<think>` / `</think>` tokens, budget enforcement, three modes |
 | Quantisation-first | Every scale has a quantised variant; INT4 is the deployment target |
 | Efficient fine-tuning | LoRA + QLoRA so Small can be fine-tuned on an i3 laptop |
-| Safety as first-class | `aarambh-ai-safety` wraps inference; not an afterthought |
+| Safety as first-class | `aarambh-studio-safety` wraps inference; not an afterthought |
 | Self-learning loop | Model improves from its own outputs — no human labels needed after SFT |
 | CPU-first development | Tiny trains and generates on i3/8GB; no GPU required for dev |
 | Clean crate boundaries | No sideways dependencies; strict layering enforced by `Cargo.toml` |
@@ -106,7 +106,7 @@ MSRV:     rustup override set 1.89.0
 stable:   rustup override set stable        ← recommended for development
 ```
 
-> **Phase 4 note:** `aarambh-ai-kernel` uses stable `std::arch` intrinsics with
+> **Phase 4 note:** `aarambh-studio-kernel` uses stable `std::arch` intrinsics with
 > cached AVX2/FMA, AVX512, AVX2, and scalar dispatch. No nightly toolchain is
 > required.
 
@@ -133,7 +133,7 @@ criterion      = "0.5"
 ### Tokenizer Strategy (important)
 
 The `tokenizers` crate (HuggingFace) is used for **both loading and training**
-BPE tokenizer files. `aarambh-ai-tokenizer` wraps this for `from_pretrained()` and
+BPE tokenizer files. `aarambh-studio-tokenizer` wraps this for `from_pretrained()` and
 also uses it for `train()` (delegates the heavy lifting). The pure-Rust `BpeTokenizer`
 implements `encode()` and `decode()` from the merge rules, which is fast and
 dependency-free at runtime.
@@ -160,7 +160,7 @@ have a valid tokenizer for tests before training your own on a custom corpus.
 ```bash
 # Download GPT-2 tokenizer fixture (run once before Phase 1 tests)
 curl -L https://huggingface.co/gpt2/resolve/main/tokenizer.json \
-     -o crates/aarambh-ai-tokenizer/tests/fixtures/tokenizer.json
+     -o crates/aarambh-studio-tokenizer/tests/fixtures/tokenizer.json
 ```
 
 ---
@@ -168,14 +168,14 @@ curl -L https://huggingface.co/gpt2/resolve/main/tokenizer.json \
 ## 4. Complete Workspace — 17 Crates
 
 ```
-aarambh-ai/
+aarambh-studio/
 ├── Cargo.toml                        ← [workspace] manifest, shared dependencies
 ├── ARCHITECTURE.md                   ← this file
 ├── ROADMAP.md                        ← phased delivery plan
 │
 ├── crates/
 │   │
-│   ├── aarambh-ai-core/              ← LAYER 0: Foundation types (no ML deps)
+│   ├── aarambh-studio-core/              ← LAYER 0: Foundation types (no ML deps)
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── config.rs             ← ModelConfig (4 presets), TrainConfig (incl. eval_steps)
@@ -184,21 +184,21 @@ aarambh-ai/
 │   │       ├── error.rs              ← AarambhError, Result<T>
 │   │       └── traits.rs             ← Forward, Saveable, Loadable, TokenizerLike
 │   │
-│   ├── aarambh-ai-tokenizer/         ← LAYER 1: Text → token IDs
+│   ├── aarambh-studio-tokenizer/         ← LAYER 1: Text → token IDs
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── bpe.rs                ← BPE merge algorithm (load + encode/decode)
 │   │       ├── vocab.rs              ← Vocab struct, token↔ID maps
 │   │       └── special.rs            ← <think>, </think>, <|user|>, etc.
 │   │
-│   ├── aarambh-ai-data/              ← LAYER 1: Raw text → batched tensors
+│   ├── aarambh-studio-data/              ← LAYER 1: Raw text → batched tensors
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── dataset.rs            ← TextDataset, JsonlDataset traits
 │   │       ├── loader.rs             ← DataLoader, batch collation, padding
 │   │       └── preprocess.rs         ← chunking, shift-by-1 label creation
 │   │
-│   ├── aarambh-ai-nn/                ← LAYER 2: Neural network primitives
+│   ├── aarambh-studio-nn/                ← LAYER 2: Neural network primitives
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── norm.rs               ← RMSNorm
@@ -207,7 +207,7 @@ aarambh-ai/
 │   │       ├── ffn.rs                ← SwiGluFfn
 │   │       └── block.rs              ← TransformerBlock
 │   │
-│   ├── aarambh-ai-kernel/            ← LAYER 2: Custom kernels (CUDA + CPU SIMD)
+│   ├── aarambh-studio-kernel/            ← LAYER 2: Custom kernels (CUDA + CPU SIMD)
 │   │   ├── build.rs                  ← NVCC detection, .cu compilation
 │   │   ├── kernels/
 │   │   │   ├── flash_attention.cu    ← Flash Attention v2 forward
@@ -226,23 +226,23 @@ aarambh-ai/
 │   │           ├── simd_norm.rs      ← Stable AVX2/FMA + AVX512 SIMD RMSNorm
 │   │           └── parallel_attn.rs  ← rayon parallel attention heads (stable)
 │   │
-│   ├── aarambh-ai-model/             ← LAYER 3: Full model assembly
+│   ├── aarambh-studio-model/             ← LAYER 3: Full model assembly
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── embedding.rs          ← TokenEmbedding (weight-tied)
 │   │       ├── head.rs               ← LM head: linear → logits
 │   │       └── model.rs              ← AarambhModel: embed + N×block + head
 │   │
-│   ├── aarambh-ai-weights/           ← LAYER 3: Serialisation I/O
+│   ├── aarambh-studio-weights/           ← LAYER 3: Serialisation I/O
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── safetensors.rs        ← save_model(), load_model()
 │   │       ├── gguf.rs               ← GGUF reader/writer (Q4_K_M, Q5_K_M, Q8_0)
-│   │       └── convert.rs            ← HuggingFace → aarambh-ai weight format
+│   │       └── convert.rs            ← HuggingFace → aarambh-studio weight format
 │   │                                    (renames keys, slices GQA tensors strictly,
 │   │                                     handles tied vs untied LM head)
 │   │
-│   ├── aarambh-ai-quant/             ← LAYER 3: Quantisation stack
+│   ├── aarambh-studio-quant/             ← LAYER 3: Quantisation stack
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── absmax.rs             ← INT8 absmax quantisation
@@ -254,7 +254,7 @@ aarambh-ai/
 │   │       ├── kv_quant.rs           ← KV cache INT8 quantisation
 │   │       └── qat.rs                ← Quantisation-Aware Training (fake quant nodes)
 │   │
-│   ├── aarambh-ai-train/             ← LAYER 4: Training loop
+│   ├── aarambh-studio-train/             ← LAYER 4: Training loop
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── trainer.rs            ← Trainer, train_step(), train_epoch()
@@ -264,7 +264,7 @@ aarambh-ai/
 │   │       ├── checkpoint.rs         ← save/load training state
 │   │       └── vision_projector.rs   ← frozen-encoder projector pretraining
 │   │
-│   ├── aarambh-ai-finetune/          ← LAYER 4: Fine-tuning stack
+│   ├── aarambh-studio-finetune/          ← LAYER 4: Fine-tuning stack
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── lora.rs               ← LoraLayer, inject_lora(), merge_lora()
@@ -276,7 +276,7 @@ aarambh-ai/
 │   │       ├── adapter.rs            ← save/load LoRA adapter weights only
 │   │       └── verifier.rs           ← MathVerifier, FormatVerifier, CodeVerifier
 │   │
-│   ├── aarambh-ai-inference/         ← LAYER 5: Inference engine
+│   ├── aarambh-studio-inference/         ← LAYER 5: Inference engine
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── engine.rs             ← InferenceEngine, generate(), prefill+decode
@@ -285,7 +285,7 @@ aarambh-ai/
 │   │       ├── thinking.rs           ← ThinkingMode, ThinkingController, budget
 │   │       └── stream.rs             ← token-by-token mpsc channel streaming
 │   │
-│   ├── aarambh-ai-safety/            ← LAYER 5: Safety guardrails
+│   ├── aarambh-studio-safety/            ← LAYER 5: Safety guardrails
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── guard.rs              ← SafetyGuard wraps InferenceEngine
@@ -303,7 +303,7 @@ aarambh-ai/
 │   │           ├── pii_redact.rs     ← redact PII in model output
 │   │           └── audit.rs          ← SafetyEvent logging → safety_audit.jsonl
 │   │
-│   ├── aarambh-ai-selflearn/         ← LAYER 5: Self-learning loop
+│   ├── aarambh-studio-selflearn/         ← LAYER 5: Self-learning loop
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── learning_loop.rs      ← SelfLearnLoop (owns OnlineGrpo, Replay)
@@ -313,13 +313,13 @@ aarambh-ai/
 │   │       ├── critique.rs           ← critique_response() free function (replay-only)
 │   │       └── metrics.rs            ← track improvement per topic over time
 │   │
-│   ├── aarambh-ai-eval/              ← LAYER 5: Evaluation harness
+│   ├── aarambh-studio-eval/              ← LAYER 5: Evaluation harness
 │   │   └── src/
 │   │       ├── harness.rs            ← EvalContext, EvalTask, scorecard runner
 │   │       ├── generation.rs         ← greedy text generation helpers
 │   │       └── tasks/                ← ppl, MMLU-lite, HellaSwag, GSM8K, HumanEval, image-caption
 │   │
-│   ├── aarambh-ai-vision/            ← LAYER 3: Vision encoder + projector
+│   ├── aarambh-studio-vision/            ← LAYER 3: Vision encoder + projector
 │       └── src/
 │           ├── encoder.rs            ← frozen CLIP-style ViT, SafeTensors load
 │           ├── preprocess.rs         ← image crate resize/crop/normalize
@@ -327,23 +327,23 @@ aarambh-ai/
 │           ├── fusion.rs             ← <image> prefix token interleave
 │           └── lib.rs
 │   │
-│   └── aarambh-ai-serve/             ← LAYER 6: Axum inference server
+│   └── aarambh-studio-serve/             ← LAYER 6: Axum inference server
 │       └── src/
 │           ├── api.rs                ← OpenAI-compatible request/response types
 │           ├── batching.rs           ← continuous batching worker
 │           ├── metrics.rs            ← lock-free server counters
 │           └── server.rs             ← HTTP/SSE routes, auth, lifecycle
 │
-└── aarambh-ai/                       ← LAYER 6: CLI binary (source-built from GitHub v2.0.0 tag)
+└── aarambh-studio/                       ← LAYER 6: CLI binary (source-built from GitHub v2.0.0 tag)
     └── src/
         ├── main.rs
         ├── cmd/
-        │   ├── train.rs              ← `aarambh-ai train`
-        │   ├── infer.rs              ← `aarambh-ai infer`
-        │   ├── finetune.rs           ← `aarambh-ai finetune sft / grpo`
-        │   ├── quantise.rs           ← `aarambh-ai quantise`
-        │   ├── convert.rs            ← `aarambh-ai convert` (HF → aarambh format)
-        │   └── eval.rs               ← `aarambh-ai eval`
+        │   ├── train.rs              ← `aarambh-studio train`
+        │   ├── infer.rs              ← `aarambh-studio infer`
+        │   ├── finetune.rs           ← `aarambh-studio finetune sft / grpo`
+        │   ├── quantise.rs           ← `aarambh-studio quantise`
+        │   ├── convert.rs            ← `aarambh-studio convert` (HF → aarambh format)
+        │   └── eval.rs               ← `aarambh-studio eval`
         └── ui/
             └── predict_view.rs       ← coloured next-token probability display
 ```
@@ -351,13 +351,13 @@ aarambh-ai/
 ### Dependency Layers (strict, no sideways deps)
 
 ```
-Layer 0  aarambh-ai-core
-Layer 1  aarambh-ai-tokenizer   aarambh-ai-data
-Layer 2  aarambh-ai-nn          aarambh-ai-kernel
-Layer 3  aarambh-ai-model       aarambh-ai-weights    aarambh-ai-quant     aarambh-ai-vision
-Layer 4  aarambh-ai-train       aarambh-ai-finetune
-Layer 5  aarambh-ai-inference   aarambh-ai-safety     aarambh-ai-selflearn  aarambh-ai-eval
-Layer 6  aarambh-ai-serve       aarambh-ai (binary)
+Layer 0  aarambh-studio-core
+Layer 1  aarambh-studio-tokenizer   aarambh-studio-data
+Layer 2  aarambh-studio-nn          aarambh-studio-kernel
+Layer 3  aarambh-studio-model       aarambh-studio-weights    aarambh-studio-quant     aarambh-studio-vision
+Layer 4  aarambh-studio-train       aarambh-studio-finetune
+Layer 5  aarambh-studio-inference   aarambh-studio-safety     aarambh-studio-selflearn  aarambh-studio-eval
+Layer 6  aarambh-studio-serve       aarambh-studio (binary)
 ```
 
 Every crate may only depend on crates in the same or lower layer.
@@ -369,25 +369,25 @@ When you `cargo new` each crate, add exactly these workspace deps to its `Cargo.
 
 | Crate | `[dependencies]` to add |
 |---|---|
-| `aarambh-ai-core` | `candle-core`, `serde`, `thiserror`, `tracing` |
-| `aarambh-ai-tokenizer` | `aarambh-ai-core`, `tokenizers`, `serde_json` |
-| `aarambh-ai-data` | `aarambh-ai-core`, `aarambh-ai-tokenizer`, `candle-core`, `serde_json`, `rayon` |
-| `aarambh-ai-nn` | `aarambh-ai-core`, `aarambh-ai-kernel`, `candle-core`, `candle-nn` |
-| `aarambh-ai-kernel` | `aarambh-ai-core`, `candle-core`, `candle-nn`, `rayon`, `cc`, `which`, `criterion` |
-| `aarambh-ai-model` | `aarambh-ai-core`, `aarambh-ai-nn`, `aarambh-ai-kernel`, `candle-core`, `candle-nn` |
-| `aarambh-ai-weights` | `aarambh-ai-core`, `aarambh-ai-model`, `candle-core`, `safetensors`, `serde_json` |
-| `aarambh-ai-quant` | `aarambh-ai-core`, `aarambh-ai-model`, `aarambh-ai-weights`, `candle-core` |
-| `aarambh-ai-train` | `aarambh-ai-core`, `aarambh-ai-model`, `aarambh-ai-data`, `aarambh-ai-weights`, `candle-core`, `candle-nn` |
-| `aarambh-ai-finetune` | `aarambh-ai-core`, `aarambh-ai-model`, `aarambh-ai-train`, `aarambh-ai-quant`, `candle-core`, `candle-nn` |
-| `aarambh-ai-inference` | `aarambh-ai-core`, `aarambh-ai-model`, `aarambh-ai-weights`, `candle-core`, `tokio` |
-| `aarambh-ai-safety` | `aarambh-ai-core`, `aarambh-ai-inference`, `serde_json` |
-| `aarambh-ai-selflearn` | `aarambh-ai-core`, `aarambh-ai-tokenizer`, `aarambh-ai-model`, `aarambh-ai-weights`, `aarambh-ai-train`, `aarambh-ai-inference`, `aarambh-ai-finetune`, `candle-core`, `candle-nn`, `serde_json`, `rand` |
-| `aarambh-ai-serve` | `aarambh-ai-core`, `aarambh-ai-inference`, `aarambh-ai-safety`, `axum`, `tower-http`, `tokio` |
-| `aarambh-ai` (binary) | all library crates, `clap`, `anyhow`, `tokio`, `tracing-subscriber` |
+| `aarambh-studio-core` | `candle-core`, `serde`, `thiserror`, `tracing` |
+| `aarambh-studio-tokenizer` | `aarambh-studio-core`, `tokenizers`, `serde_json` |
+| `aarambh-studio-data` | `aarambh-studio-core`, `aarambh-studio-tokenizer`, `candle-core`, `serde_json`, `rayon` |
+| `aarambh-studio-nn` | `aarambh-studio-core`, `aarambh-studio-kernel`, `candle-core`, `candle-nn` |
+| `aarambh-studio-kernel` | `aarambh-studio-core`, `candle-core`, `candle-nn`, `rayon`, `cc`, `which`, `criterion` |
+| `aarambh-studio-model` | `aarambh-studio-core`, `aarambh-studio-nn`, `aarambh-studio-kernel`, `candle-core`, `candle-nn` |
+| `aarambh-studio-weights` | `aarambh-studio-core`, `aarambh-studio-model`, `candle-core`, `safetensors`, `serde_json` |
+| `aarambh-studio-quant` | `aarambh-studio-core`, `aarambh-studio-model`, `aarambh-studio-weights`, `candle-core` |
+| `aarambh-studio-train` | `aarambh-studio-core`, `aarambh-studio-model`, `aarambh-studio-data`, `aarambh-studio-weights`, `candle-core`, `candle-nn` |
+| `aarambh-studio-finetune` | `aarambh-studio-core`, `aarambh-studio-model`, `aarambh-studio-train`, `aarambh-studio-quant`, `candle-core`, `candle-nn` |
+| `aarambh-studio-inference` | `aarambh-studio-core`, `aarambh-studio-model`, `aarambh-studio-weights`, `candle-core`, `tokio` |
+| `aarambh-studio-safety` | `aarambh-studio-core`, `aarambh-studio-inference`, `serde_json` |
+| `aarambh-studio-selflearn` | `aarambh-studio-core`, `aarambh-studio-tokenizer`, `aarambh-studio-model`, `aarambh-studio-weights`, `aarambh-studio-train`, `aarambh-studio-inference`, `aarambh-studio-finetune`, `candle-core`, `candle-nn`, `serde_json`, `rand` |
+| `aarambh-studio-serve` | `aarambh-studio-core`, `aarambh-studio-inference`, `aarambh-studio-safety`, `axum`, `tower-http`, `tokio` |
+| `aarambh-studio` (binary) | all library crates, `clap`, `anyhow`, `tokio`, `tracing-subscriber` |
 
 All deps use the `workspace = true` key, e.g.:
 ```toml
-# crates/aarambh-ai-core/Cargo.toml
+# crates/aarambh-studio-core/Cargo.toml
 [dependencies]
 candle-core  = { workspace = true }
 serde        = { workspace = true }
@@ -443,21 +443,21 @@ User types: "The capital of India is"
       │
       ▼
 ┌─────────────────────────────────────────┐
-│  TOKENISER (aarambh-ai-tokenizer)       │
+│  TOKENISER (aarambh-studio-tokenizer)       │
 │  "The capital of India is"              │
 │  → [464, 3139, 286, 4826, 318]          │  ← Vec<u32> token IDs
 └────────────────────┬────────────────────┘
                      │
                      ▼
 ┌─────────────────────────────────────────┐
-│  EMBEDDING TABLE (aarambh-ai-model)     │
+│  EMBEDDING TABLE (aarambh-studio-model)     │
 │  Each ID → d_model-dim float vector     │
 │  Tensor shape: [1, 5, 384]              │  ← (batch, seq_len, d_model)
 └────────────────────┬────────────────────┘
                      │
                      ▼  repeated × N_layers
 ┌─────────────────────────────────────────┐
-│  TRANSFORMER BLOCK (aarambh-ai-nn)      │
+│  TRANSFORMER BLOCK (aarambh-studio-nn)      │
 │                                         │
 │  ┌──── RMSNorm(x) ──────────────────┐   │
 │  │   GroupedQueryAttention           │   │
@@ -483,7 +483,7 @@ User types: "The capital of India is"
                      │
                      ▼
 ┌─────────────────────────────────────────┐
-│  SAMPLER (aarambh-ai-inference)         │
+│  SAMPLER (aarambh-studio-inference)         │
 │  softmax → probabilities → sample       │
 │  → token ID → decode → "New"            │  ← predicted next token
 └─────────────────────────────────────────┘
@@ -503,7 +503,7 @@ The tokeniser converts raw text into a sequence of integer token IDs using
 The learned merge table is saved as the tokeniser file. At inference, encoding
 applies merge rules greedily to produce the final token ID sequence.
 
-**Special tokens** (`aarambh-ai-tokenizer/src/special.rs`):
+**Special tokens** (`aarambh-studio-tokenizer/src/special.rs`):
 ```
 <|endoftext|>   ID 0   end of document
 <|pad|>         ID 1   padding (batch alignment)
@@ -547,7 +547,7 @@ x₁' = x₀ · sin(m·θᵢ) + x₁ · cos(m·θᵢ)
 - Generalises to longer sequences than seen in training
 - Zero extra parameters
 
-The `RopeCache` in `aarambh-ai-nn/src/rope.rs` precomputes all cos/sin values for
+The `RopeCache` in `aarambh-studio-nn/src/rope.rs` precomputes all cos/sin values for
 `max_seq_len` positions at model init. Applied to Q and K before every attention call.
 
 ### 6.4 RMSNorm
@@ -671,7 +671,7 @@ Modern reasoning models (OpenAI o3, DeepSeek-R1, Claude Extended Thinking) gener
 an internal chain-of-thought *before* their final answer. The model "thinks on paper":
 exploring the problem, checking its reasoning, backtracking — then commits to an answer.
 
-In aarambh-ai, this is implemented via **budget-controlled CoT tokens**. The model
+In aarambh-studio, this is implemented via **budget-controlled CoT tokens**. The model
 generates a `<think>` block (hidden or collapsible for the user), then produces the
 final answer. The budget limits how many tokens the model can spend thinking.
 
@@ -710,7 +710,7 @@ Step 6: Stop at <|endoftext|> or max_new_tokens
 The answer is 391.             ← shown in normal text
 ```
 
-### 7.4 ThinkingController (aarambh-ai-inference/src/thinking.rs)
+### 7.4 ThinkingController (aarambh-studio-inference/src/thinking.rs)
 
 ```rust
 pub struct ThinkingController {
@@ -800,8 +800,8 @@ Each layer has its own cache. Memory:
 Tiny at F32: 2 × 8 × 2 × 512 × 64 × 4 = ~4 MB per sequence
 ```
 
-Phase 6 implements this in `aarambh-ai-inference`:
-- `KvCache` owns one `aarambh-ai-nn::KVCache` per transformer layer and exposes
+Phase 6 implements this in `aarambh-studio-inference`:
+- `KvCache` owns one `aarambh-studio-nn::KVCache` per transformer layer and exposes
   mutable layer slices to `AarambhModel::forward_with_cache()`
 - `InferenceEngine::from_paths(...)` loads a SafeTensors checkpoint, validates
   tokenizer special IDs, and adjusts the model vocab size to the tokenizer
@@ -842,7 +842,7 @@ Thinking mode High:           temperature=0.8, top_p=0.95  (exploratory)
 
 ### 8.3 Next-Token Prediction View
 
-When you run `aarambh-ai infer --predict-view`, after each token the CLI shows:
+When you run `aarambh-studio infer --predict-view`, after each token the CLI shows:
 ```
 Input:  "The capital of India is"
 ────────────────────────────────────────────────────────
@@ -860,7 +860,7 @@ Generated so far: "The capital of India is New"
 ────────────────────────────────────────────────────────
 ```
 
-This is implemented in `aarambh-ai/src/ui/predict_view.rs` from the
+This is implemented in `aarambh-studio/src/ui/predict_view.rs` from the
 `GenerationStep.candidates` returned by the sampler. It is the most powerful
 tool for understanding and debugging your model — you can see exactly which
 tokens the model is considering and with what confidence.
@@ -998,7 +998,7 @@ Steps warmup_steps → max_steps:
 ### 9.7 Training Output
 
 ```
-$ cargo run --release -p aarambh-ai -- train --config configs/tiny_shakespeare.toml
+$ cargo run --release -p aarambh-studio -- train --config configs/tiny_shakespeare.toml
 
 step=1 loss=9.0304 ppl=8352.87 lr=0.000250 grad_norm=0.7182
 step=10 loss=9.0241 ppl=8300.43 lr=0.000800 grad_norm=0.7221
@@ -1008,7 +1008,7 @@ step=1000 loss=2.8740 ppl=17.71 lr=0.000287 grad_norm=0.9123
 
 For a quick CPU validation, use:
 ```
-$ cargo run --release -p aarambh-ai -- train --config configs/tiny_shakespeare_smoke.toml
+$ cargo run --release -p aarambh-studio -- train --config configs/tiny_shakespeare_smoke.toml
 ```
 
 Checkpoint directories contain:
@@ -1022,13 +1022,13 @@ train_state.json        ← step, epoch, micro-step, train/val/best losses
 
 ---
 
-## 10. Custom Kernels (aarambh-ai-kernel)
+## 10. Custom Kernels (aarambh-studio-kernel)
 
 ### 10.1 Why a Kernel Crate
 
 The kernel crate is the only place containing CUDA C code and raw SIMD pointer
-arithmetic. Two audited SafeTensors loader boundaries in `aarambh-ai-weights`
-and `aarambh-ai-vision` also use Candle's memory-mapped loader. Every unsafe
+arithmetic. Two audited SafeTensors loader boundaries in `aarambh-studio-weights`
+and `aarambh-studio-vision` also use Candle's memory-mapped loader. Every unsafe
 block carries an explicit safety rationale and CI denies undocumented unsafe
 blocks. This keeps the optimized boundary small and reviewable.
 
@@ -1037,7 +1037,7 @@ blocks. This keeps the optimized boundary small and reviewable.
 The CPU SIMD kernel (`cpu/simd_norm.rs`) uses stable `std::arch` intrinsics with
 cached runtime dispatch. No nightly override is required. On x86/x86_64, the
 kernel prefers AVX2/FMA by default on this class of CPU, supports AVX512 when
-forced with `AARAMBH_SIMD_FORCE=avx512`, and falls back to AVX2 or scalar. Non-x86
+forced with `AARAMBH_STUDIO_SIMD_FORCE=avx512`, and falls back to AVX2 or scalar. Non-x86
 targets use the scalar path.
 
 ### 10.3 Flash Attention v2
@@ -1061,7 +1061,7 @@ For each tile of Q (size B_r):
 
 Memory: O(n) instead of O(n²). For n=4096: ~16× less HBM access on GPU.
 
-**Integration with aarambh-ai-nn:**
+**Integration with aarambh-studio-nn:**
 ```rust
 // attention.rs — dispatch based on device at runtime
 let output = aarambh_ai_kernel::dispatch::attention_forward(&q, &k, &v, mask, scale)?;
@@ -1113,7 +1113,7 @@ module cache at runtime.
 
 ---
 
-## 11. Quantisation (aarambh-ai-quant)
+## 11. Quantisation (aarambh-studio-quant)
 
 ### 11.1 Why Quantise
 
@@ -1181,8 +1181,8 @@ INT8 uses the same global absmax scale.
 
 ```
 # QAT continuation, then unchanged GGUF export
-aarambh-ai train --config configs/qat_tiny.toml
-aarambh-ai convert \
+aarambh-studio train --config configs/qat_tiny.toml
+aarambh-studio convert \
   --config configs/qat_tiny.toml \
   --input checkpoints/qat_tiny/best/model.safetensors \
   --output checkpoints/qat_tiny/model-q4.gguf \
@@ -1219,8 +1219,8 @@ attention kernel.
 
 ### 11.8 Weight Conversion (convert.rs)
 
-`aarambh-ai-weights/src/convert.rs` loads HuggingFace-format checkpoints
-(LLaMA 2/3, Mistral, Qwen, etc.) and converts them to aarambh-ai's key naming
+`aarambh-studio-weights/src/convert.rs` loads HuggingFace-format checkpoints
+(LLaMA 2/3, Mistral, Qwen, etc.) and converts them to aarambh-studio's key naming
 and tensor layout:
 
 - Renames keys: `model.layers.0.self_attn.q_proj.weight` → `blocks.0.attn.wq`
@@ -1231,7 +1231,7 @@ and tensor layout:
   `.safetensors` files.
 
 ```bash
-aarambh-ai convert \
+aarambh-studio convert \
   --input  /path/to/hf_llama2_7b/ \
   --output checkpoints/llama2_7b_aarambh.safetensors \
   --arch   llama2
@@ -1250,7 +1250,7 @@ Tiny-Q4 in 13 MB: embeddable in other Rust apps, WASM-capable (with limitations)
 
 ---
 
-## 12. Fine-Tuning (aarambh-ai-finetune)
+## 12. Fine-Tuning (aarambh-studio-finetune)
 
 ### 12.1 LoRA — Low-Rank Adaptation
 
@@ -1367,7 +1367,7 @@ checkpoint so it doesn't drift.
 
 ---
 
-## 13. Safety Layer (aarambh-ai-safety)
+## 13. Safety Layer (aarambh-studio-safety)
 
 ### 13.1 Architecture
 
@@ -1490,7 +1490,7 @@ The prompt text is **never** logged — only its hash. Enables audit trails with
 
 ---
 
-## 14. Self-Learning Loop (aarambh-ai-selflearn)
+## 14. Self-Learning Loop (aarambh-studio-selflearn)
 
 ### 14.1 Overview & Design
 
@@ -1834,14 +1834,14 @@ impl SelfLearnConfig {
 **CLI flag:**
 ```bash
 # Enable self-learning in CPU mode
-aarambh-ai infer --model checkpoints/tiny_sft.safetensors \
+aarambh-studio infer --model checkpoints/tiny_sft.safetensors \
                  --self-learn cpu \
                  --replay-path data/replay_buffer.jsonl \
                  --self-learn-state-dir adapters/selflearn \
                  --prompt "What is recursion?"
 
 # Flush accumulated gradients manually (CPU mode)
-aarambh-ai selflearn flush-gradients \
+aarambh-studio selflearn flush-gradients \
                  --base checkpoints/tiny_sft.safetensors \
                  --tokenizer checkpoints/tokenizer.json \
                  --replay-path data/replay_buffer.jsonl \
@@ -1854,23 +1854,23 @@ aarambh-ai selflearn flush-gradients \
 
 | Crate | Layer | Key Types | Dependencies |
 |---|---|---|---|
-| `aarambh-ai-core` | 0 | `ModelConfig`, `TrainConfig` (incl. `eval_steps`), `Device`, `DType`, `AarambhError`, `Result<T>`, `Forward`, `TokenizerLike` | `candle-core`, `serde`, `thiserror` |
-| `aarambh-ai-tokenizer` | 1 | `BpeTokenizer impl TokenizerLike`, `Vocab`, special token IDs | `core`, `tokenizers` |
-| `aarambh-ai-data` | 1 | `DataLoader`, `TextDataset`, `JsonlDataset`, `Batch` | `core`, `tokenizer` |
-| `aarambh-ai-nn` | 2 | `RMSNorm`, `RopeCache`, `GroupedQueryAttention`, `SwiGluFfn`, `TransformerBlock` | `core`, `candle-nn`, `kernel` |
-| `aarambh-ai-kernel` | 2 | `flash_attn::forward()`, `fused_norm::rms_norm()`, dispatch | `core`, `candle-core`, `cc`, `rayon` |
-| `aarambh-ai-model` | 3 | `AarambhModel`, `TokenEmbedding`, `LmHead` | `core`, `nn` |
-| `aarambh-ai-weights` | 3 | `save_model()`, `load_model()`, `GgufReader`, `convert_hf()` (pragmatic slicing) | `core`, `model`, Candle SafeTensors |
-| `aarambh-ai-quant` | 3 | `quantise_i8()`, `GptqQuantiser`, `AwqQuantiser`, `QuantisedKvCache`, `QatNode` | `core`, `model` |
-| `aarambh-ai-train` | 4 | `Trainer`, `AdamW`, `CosineScheduler`, `CheckpointManager` | `core`, `model`, `data`, `weights` |
-| `aarambh-ai-finetune` | 4 | `LoraLayer`, `inject_lora()`, `merge_lora()`, `SftTrainer`, `GrpoTrainer` (deterministic verifier) | `core`, `model`, `train`, `quant` |
-| `aarambh-ai-inference` | 5 | `InferenceEngine`, `KvCache`, `Sampler`, `ThinkingController` | `core`, `model`, `weights` |
-| `aarambh-ai-safety` | 5 | `SafetyGuard`, `SafetyPolicy`, `SafetyVerdict` | `core`, `inference` |
-| `aarambh-ai-selflearn` | 5 | `SelfLearnLoop` (owns OnlineGrpo, Replay), `critique_response` (free fn), `LearningMetrics` | `core`, `tokenizer`, `model`, `weights`, `train`, `inference`, `finetune` |
-| `aarambh-ai-eval` | 5 | `EvalTask`, `EvalContext`, `Scorecard`, benchmark tasks | `model`, `inference`, `finetune`, `vision` |
-| `aarambh-ai-vision` | 3 | `ClipVisionEncoder`, `VisionProjector`, image fusion | `core`, `candle`, `image` |
-| `aarambh-ai-serve` | 6 | `ServeConfig`, `BatcherHandle`, OpenAI API types | `inference`, `safety`, `axum` |
-| `aarambh-ai` (binary) | 6 | CLI commands: train / infer / eval / finetune / quantise / convert / selflearn / serve | all crates |
+| `aarambh-studio-core` | 0 | `ModelConfig`, `TrainConfig` (incl. `eval_steps`), `Device`, `DType`, `AarambhError`, `Result<T>`, `Forward`, `TokenizerLike` | `candle-core`, `serde`, `thiserror` |
+| `aarambh-studio-tokenizer` | 1 | `BpeTokenizer impl TokenizerLike`, `Vocab`, special token IDs | `core`, `tokenizers` |
+| `aarambh-studio-data` | 1 | `DataLoader`, `TextDataset`, `JsonlDataset`, `Batch` | `core`, `tokenizer` |
+| `aarambh-studio-nn` | 2 | `RMSNorm`, `RopeCache`, `GroupedQueryAttention`, `SwiGluFfn`, `TransformerBlock` | `core`, `candle-nn`, `kernel` |
+| `aarambh-studio-kernel` | 2 | `flash_attn::forward()`, `fused_norm::rms_norm()`, dispatch | `core`, `candle-core`, `cc`, `rayon` |
+| `aarambh-studio-model` | 3 | `AarambhModel`, `TokenEmbedding`, `LmHead` | `core`, `nn` |
+| `aarambh-studio-weights` | 3 | `save_model()`, `load_model()`, `GgufReader`, `convert_hf()` (pragmatic slicing) | `core`, `model`, Candle SafeTensors |
+| `aarambh-studio-quant` | 3 | `quantise_i8()`, `GptqQuantiser`, `AwqQuantiser`, `QuantisedKvCache`, `QatNode` | `core`, `model` |
+| `aarambh-studio-train` | 4 | `Trainer`, `AdamW`, `CosineScheduler`, `CheckpointManager` | `core`, `model`, `data`, `weights` |
+| `aarambh-studio-finetune` | 4 | `LoraLayer`, `inject_lora()`, `merge_lora()`, `SftTrainer`, `GrpoTrainer` (deterministic verifier) | `core`, `model`, `train`, `quant` |
+| `aarambh-studio-inference` | 5 | `InferenceEngine`, `KvCache`, `Sampler`, `ThinkingController` | `core`, `model`, `weights` |
+| `aarambh-studio-safety` | 5 | `SafetyGuard`, `SafetyPolicy`, `SafetyVerdict` | `core`, `inference` |
+| `aarambh-studio-selflearn` | 5 | `SelfLearnLoop` (owns OnlineGrpo, Replay), `critique_response` (free fn), `LearningMetrics` | `core`, `tokenizer`, `model`, `weights`, `train`, `inference`, `finetune` |
+| `aarambh-studio-eval` | 5 | `EvalTask`, `EvalContext`, `Scorecard`, benchmark tasks | `model`, `inference`, `finetune`, `vision` |
+| `aarambh-studio-vision` | 3 | `ClipVisionEncoder`, `VisionProjector`, image fusion | `core`, `candle`, `image` |
+| `aarambh-studio-serve` | 6 | `ServeConfig`, `BatcherHandle`, OpenAI API types | `inference`, `safety`, `axum` |
+| `aarambh-studio` (binary) | 6 | CLI commands: train / infer / eval / finetune / quantise / convert / selflearn / serve | all crates |
 
 ---
 
@@ -1879,27 +1879,27 @@ aarambh-ai selflearn flush-gradients \
 ```
 Raw text
    │
-   ▼ aarambh-ai-tokenizer
+   ▼ aarambh-studio-tokenizer
 Token IDs (Vec<u32>)
    │
-   ▼ aarambh-ai-data
+   ▼ aarambh-studio-data
 Batched Tensors (input_ids, labels)
    │
-   ▼ aarambh-ai-nn + aarambh-ai-kernel
+   ▼ aarambh-studio-nn + aarambh-studio-kernel
 Transformer computations (per block)
    │
-   ▼ aarambh-ai-model
+   ▼ aarambh-studio-model
 Logits [batch, seq, vocab_size]
    │
-   ├──▶ aarambh-ai-train ──▶ AdamW ──▶ updated weights ──▶ aarambh-ai-weights (save)
+   ├──▶ aarambh-studio-train ──▶ AdamW ──▶ updated weights ──▶ aarambh-studio-weights (save)
    │
-   ├──▶ aarambh-ai-finetune ──▶ LoRA/SFT/GRPO ──▶ adapter weights (save)
+   ├──▶ aarambh-studio-finetune ──▶ LoRA/SFT/GRPO ──▶ adapter weights (save)
    │
-   ├──▶ aarambh-ai-quant ──▶ INT4 weights ──▶ aarambh-ai-weights (GGUF save)
+   ├──▶ aarambh-studio-quant ──▶ INT4 weights ──▶ aarambh-studio-weights (GGUF save)
    │
-   ├──▶ aarambh-ai-inference ──▶ aarambh-ai-safety ──▶ safe response to user
+   ├──▶ aarambh-studio-inference ──▶ aarambh-studio-safety ──▶ safe response to user
    │
-   └──▶ aarambh-ai-selflearn
+   └──▶ aarambh-studio-selflearn
            │
            ├── OnlineGrpo: N completions → deterministic verifier → score → mini AdamW step (LoRA only)
            ├── SelfCritique (free fn): model scores own output → rewrite if low quality (replay-only)
@@ -1908,10 +1908,10 @@ Logits [batch, seq, vocab_size]
 
 External HF checkpoint
    │
-   ▼ aarambh-ai-weights (convert.rs) — pragmatic slicing
-aarambh-ai SafeTensors checkpoint
+   ▼ aarambh-studio-weights (convert.rs) — pragmatic slicing
+aarambh-studio SafeTensors checkpoint
    │
-   └──▶ aarambh-ai-inference / aarambh-ai-finetune / aarambh-ai-quant / aarambh-ai-selflearn
+   └──▶ aarambh-studio-inference / aarambh-studio-finetune / aarambh-studio-quant / aarambh-studio-selflearn
 ```
 
 ---
@@ -1990,7 +1990,7 @@ The predict-view will show coherent English candidates after ~2K steps.
 
 GPU scale-up uses opt-in Candle CUDA features so local CPU builds remain the
 default. Switch `device = "cuda:0"` and `dtype = "bf16"` in the config, then run
-with `cargo run --release -p aarambh-ai --features cuda -- train --config ...`.
+with `cargo run --release -p aarambh-studio --features cuda -- train --config ...`.
 Training logs include `tok/s` for the Phase 13 throughput benchmark. Download
 checkpoints from Kaggle output, then run inference with the same config dtype.
 

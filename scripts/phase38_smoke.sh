@@ -18,11 +18,11 @@ assert len(schema["required"]) == 7
 print("Phase 38 contracts: valid")
 PY
 
-cargo test --locked -p aarambh-ai-eval forgetting
-cargo test --locked -p aarambh-ai-selflearn forgetting
-cargo run --quiet --locked -p aarambh-ai -- eval --help |
+cargo test --locked -p aarambh-studio-eval forgetting
+cargo test --locked -p aarambh-studio-selflearn forgetting
+cargo run --quiet --locked -p aarambh-studio -- eval --help |
   rg --quiet -- '--forgetting-manifest'
-cargo run --quiet --locked -p aarambh-ai -- selflearn --help |
+cargo run --quiet --locked -p aarambh-studio -- selflearn --help |
   rg --quiet -- 'forgetting-report'
 
 if [[ -n "${PHASE38_MODEL:-}" ]]; then
@@ -32,7 +32,7 @@ if [[ -n "${PHASE38_MODEL:-}" ]]; then
   mkdir -p "$PHASE38_STATE"
 
   for checkpoint_id in smoke-baseline smoke-current; do
-    cargo run --quiet --locked -p aarambh-ai -- eval \
+    cargo run --quiet --locked -p aarambh-studio -- eval \
       --config "$PHASE38_CONFIG" \
       --model "$PHASE38_MODEL" \
       --tokenizer "$PHASE38_TOKENIZER" \

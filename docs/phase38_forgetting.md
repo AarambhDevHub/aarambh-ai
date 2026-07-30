@@ -61,7 +61,7 @@ explicitly allowed.
 Record the baseline:
 
 ```sh
-cargo run --release -p aarambh-ai -- eval \
+cargo run --release -p aarambh-studio -- eval \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -78,7 +78,7 @@ cargo run --release -p aarambh-ai -- eval \
 Record and compare a later checkpoint:
 
 ```sh
-cargo run --release -p aarambh-ai -- eval \
+cargo run --release -p aarambh-studio -- eval \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_shakespeare/step_000100/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -123,7 +123,7 @@ require_all_probes = false
 Then run the existing command:
 
 ```sh
-aarambh-ai train --config configs/your_training_config.toml
+aarambh-studio train --config configs/your_training_config.toml
 ```
 
 The observer records the run start, every configured optimizer-step cadence,
@@ -139,7 +139,7 @@ random/short-trained model cannot establish useful capability quality.
 Attach diagnostics to a text self-learning turn:
 
 ```sh
-aarambh-ai selflearn start \
+aarambh-studio selflearn start \
   --mode text \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_shakespeare/step_000050/model.safetensors \
@@ -161,7 +161,7 @@ base checkpoint is not overwritten.
 Print stored curves:
 
 ```sh
-aarambh-ai selflearn forgetting-report \
+aarambh-studio selflearn forgetting-report \
   --forgetting-store adapters/selflearn/forgetting_curves.json
 ```
 

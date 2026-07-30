@@ -1,6 +1,6 @@
-# Contributing to aarambh-ai
+# Contributing to aarambh-studio
 
-Thank you for taking the time to contribute. Every bug report, feature suggestion, documentation improvement, and pull request makes aarambh-ai better for everyone.
+Thank you for taking the time to contribute. Every bug report, feature suggestion, documentation improvement, and pull request makes aarambh-studio better for everyone.
 
 ---
 
@@ -35,7 +35,7 @@ You do not need to write code to contribute:
 - **Report a bug** — open an issue with a minimal reproduction
 - **Suggest a feature** — open an issue describing the use case, not just the API
 - **Improve documentation** — fix typos, add examples, clarify confusing sections
-- **Write an example** — show aarambh-ai being used in a real scenario
+- **Write an example** — show aarambh-studio being used in a real scenario
 - **Write a benchmark** — help identify performance regressions
 - **Review pull requests** — read others' changes and leave thoughtful feedback
 - **Write tests** — increase coverage for existing code
@@ -52,8 +52,8 @@ You do not need to write code to contribute:
 ### Clone and build
 
 ```sh
-git clone https://github.com/AarambhDevHub/aarambh-ai.git
-cd aarambh-ai
+git clone https://github.com/AarambhDevHub/aarambh-studio.git
+cd aarambh-studio
 
 # Build all crates:
 cargo build --workspace --locked
@@ -70,36 +70,36 @@ cargo fmt --all --check
 
 ### IDE Setup
 
-This is a standard Cargo workspace. Any IDE with `rust-analyzer` support (VS Code, IntelliJ, Neovim) will work out of the box. Open the root `aarambh-ai/` folder.
+This is a standard Cargo workspace. Any IDE with `rust-analyzer` support (VS Code, IntelliJ, Neovim) will work out of the box. Open the root `aarambh-studio/` folder.
 
 ---
 
 ## Project Structure
 
 ```
-aarambh-ai/
+aarambh-studio/
 ├── Cargo.toml              ← Workspace manifest (pinned deps)
 ├── crates/
-│   ├── aarambh-ai-core/        ← Foundation types — start here if unsure
-│   ├── aarambh-ai-tokenizer/   ← BPE tokeniser, vocab, special tokens
-│   ├── aarambh-ai-data/        ← Datasets, preprocessing, data loader
-│   ├── aarambh-ai-nn/          ← RMSNorm, RoPE, GQA, SwiGLU, TransformerBlock
-│   ├── aarambh-ai-kernel/      ← Custom CUDA + CPU SIMD kernels
-│   ├── aarambh-ai-model/       ← Embedding, LM head, full model forward pass
-│   ├── aarambh-ai-weights/     ← SafeTensors I/O, GGUF, HF conversion
-│   ├── aarambh-ai-quant/       ← INT8, GPTQ, AWQ, GGUF, KV cache quant
-│   ├── aarambh-ai-train/       ← Training loop, AdamW, cosine schedule
-│   ├── aarambh-ai-finetune/    ← LoRA, QLoRA, SFT, GRPO, verifiers
-│   ├── aarambh-ai-inference/   ← Inference engine, KV cache, sampler
-│   ├── aarambh-ai-safety/      ← Input/output guardrails, PII, audit
-│   ├── aarambh-ai-selflearn/   ← Self-learning loop, replay buffer, critique
-│   ├── aarambh-ai-eval/        ← Evaluation harness and scorecards
-│   ├── aarambh-ai-vision/      ← Frozen vision encoder and projector
-│   └── aarambh-ai-serve/       ← OpenAI-compatible local inference server
-└── aarambh-ai/             ← CLI binary
+│   ├── aarambh-studio-core/        ← Foundation types — start here if unsure
+│   ├── aarambh-studio-tokenizer/   ← BPE tokeniser, vocab, special tokens
+│   ├── aarambh-studio-data/        ← Datasets, preprocessing, data loader
+│   ├── aarambh-studio-nn/          ← RMSNorm, RoPE, GQA, SwiGLU, TransformerBlock
+│   ├── aarambh-studio-kernel/      ← Custom CUDA + CPU SIMD kernels
+│   ├── aarambh-studio-model/       ← Embedding, LM head, full model forward pass
+│   ├── aarambh-studio-weights/     ← SafeTensors I/O, GGUF, HF conversion
+│   ├── aarambh-studio-quant/       ← INT8, GPTQ, AWQ, GGUF, KV cache quant
+│   ├── aarambh-studio-train/       ← Training loop, AdamW, cosine schedule
+│   ├── aarambh-studio-finetune/    ← LoRA, QLoRA, SFT, GRPO, verifiers
+│   ├── aarambh-studio-inference/   ← Inference engine, KV cache, sampler
+│   ├── aarambh-studio-safety/      ← Input/output guardrails, PII, audit
+│   ├── aarambh-studio-selflearn/   ← Self-learning loop, replay buffer, critique
+│   ├── aarambh-studio-eval/        ← Evaluation harness and scorecards
+│   ├── aarambh-studio-vision/      ← Frozen vision encoder and projector
+│   └── aarambh-studio-serve/       ← OpenAI-compatible local inference server
+└── aarambh-studio/             ← CLI binary
 ```
 
-Each crate is self-contained. If you are working on attention, you should only need to open `crates/aarambh-ai-nn/`. You should not need to understand `aarambh-ai-quant` to fix an attention bug.
+Each crate is self-contained. If you are working on attention, you should only need to open `crates/aarambh-studio-nn/`. You should not need to understand `aarambh-studio-quant` to fix an attention bug.
 
 ---
 
@@ -107,13 +107,13 @@ Each crate is self-contained. If you are working on attention, you should only n
 
 ### 1. Check for an existing issue
 
-Search [open issues](https://github.com/AarambhDevHub/aarambh-ai/issues) before starting work. If there is no issue for your change, open one first — especially for anything larger than a typo fix. This prevents duplicate work and gives maintainers a chance to give early feedback on direction.
+Search [open issues](https://github.com/AarambhDevHub/aarambh-studio/issues) before starting work. If there is no issue for your change, open one first — especially for anything larger than a typo fix. This prevents duplicate work and gives maintainers a chance to give early feedback on direction.
 
 ### 2. Fork and branch
 
 ```sh
-git clone https://github.com/YOUR_USERNAME/aarambh-ai.git
-cd aarambh-ai
+git clone https://github.com/YOUR_USERNAME/aarambh-studio.git
+cd aarambh-studio
 git checkout -b fix/adamw-beta2-default
 ```
 
@@ -167,7 +167,7 @@ Use the [Conventional Commits](https://www.conventionalcommits.org/) format:
 | `chore` | Build system, CI, dependency updates |
 | `ci` | CI configuration changes |
 
-**Scope** is the affected crate (without the `aarambh-ai-` prefix):
+**Scope** is the affected crate (without the `aarambh-studio-` prefix):
 
 ```
 feat(core): add ModelConfig::from_json
@@ -207,10 +207,10 @@ Every pull request must include tests. There are no exceptions.
 cargo test --workspace
 
 # A specific crate only:
-cargo test -p aarambh-ai-core
+cargo test -p aarambh-studio-core
 
 # A specific test by name:
-cargo test -p aarambh-ai-core tiny_config_head_dim_is_correct
+cargo test -p aarambh-studio-core tiny_config_head_dim_is_correct
 ```
 
 ### Clippy
@@ -282,7 +282,7 @@ Open an issue using the **Bug Report** template. Include:
 1. **What you expected to happen.**
 2. **What actually happened** — include the full error message or unexpected output.
 3. **A minimal reproduction** — the smallest possible code that demonstrates the bug. Remove everything unrelated.
-4. **Environment** — Rust version (`rustc --version`), OS, aarambh-ai version, active feature flags.
+4. **Environment** — Rust version (`rustc --version`), OS, aarambh-studio version, active feature flags.
 
 A minimal reproduction is the single most important thing you can provide. Issues without one may be closed if the bug cannot be reproduced.
 
@@ -302,8 +302,8 @@ Feature requests that describe only the desired API without explaining the use c
 
 ## Working on Custom Kernels
 
-The `aarambh-ai-kernel` crate owns CUDA C and raw SIMD pointer arithmetic.
-`aarambh-ai-weights` and `aarambh-ai-vision` each contain one audited
+The `aarambh-studio-kernel` crate owns CUDA C and raw SIMD pointer arithmetic.
+`aarambh-studio-weights` and `aarambh-studio-vision` each contain one audited
 memory-mapped SafeTensors boundary. Every unsafe block requires a `SAFETY:`
 explanation and must pass `clippy::undocumented_unsafe_blocks`.
 
@@ -325,7 +325,7 @@ which nvcc
 ### Testing kernel fallback
 
 ```sh
-cargo test -p aarambh-ai-kernel
+cargo test -p aarambh-studio-kernel
 ```
 
 All tests should pass even without NVCC — they test the candle fallback path.
@@ -334,7 +334,7 @@ All tests should pass even without NVCC — they test the candle fallback path.
 
 ## Crate Versioning
 
-aarambh-ai follows [Semantic Versioning](https://semver.org/).
+aarambh-studio follows [Semantic Versioning](https://semver.org/).
 
 - **Patch** (`2.0.x`) — bug fixes only, no API changes.
 - **Minor** (`2.x.0`) — new features and backward-compatible API additions.

@@ -1,4 +1,4 @@
-# ROADMAP.md — aarambh-ai
+# ROADMAP.md — aarambh-studio
 
 > Step-by-step build plan. Every phase ends with working, testable code.
 > Start Phase 0 today on your i3. No GPU required until Phase 7.
@@ -49,22 +49,22 @@ Phase 19 →  Vision encoder + projector           (10–14 days)  [Kaggle] ✅
 ```toml
 [workspace]
 members = [
-    "crates/aarambh-ai-core",
-    "crates/aarambh-ai-tokenizer",
-    "crates/aarambh-ai-data",
-    "crates/aarambh-ai-nn",
-    "crates/aarambh-ai-kernel",
-    "crates/aarambh-ai-model",
-    "crates/aarambh-ai-weights",
-    "crates/aarambh-ai-quant",
-    "crates/aarambh-ai-train",
-    "crates/aarambh-ai-finetune",
-    "crates/aarambh-ai-inference",
-    "crates/aarambh-ai-safety",
-    "crates/aarambh-ai-selflearn",
-    "crates/aarambh-ai-eval",
-    "crates/aarambh-ai-vision",
-    "aarambh-ai",
+    "crates/aarambh-studio-core",
+    "crates/aarambh-studio-tokenizer",
+    "crates/aarambh-studio-data",
+    "crates/aarambh-studio-nn",
+    "crates/aarambh-studio-kernel",
+    "crates/aarambh-studio-model",
+    "crates/aarambh-studio-weights",
+    "crates/aarambh-studio-quant",
+    "crates/aarambh-studio-train",
+    "crates/aarambh-studio-finetune",
+    "crates/aarambh-studio-inference",
+    "crates/aarambh-studio-safety",
+    "crates/aarambh-studio-selflearn",
+    "crates/aarambh-studio-eval",
+    "crates/aarambh-studio-vision",
+    "aarambh-studio",
 ]
 resolver = "2"
 
@@ -72,7 +72,7 @@ resolver = "2"
 # Tensor backend — pin to 0.10 exactly; API changes across minor versions
 candle-core        = { version = "0.10" }
 candle-nn          = { version = "0.10" }
-# HuggingFace tokenizer loader (used in aarambh-ai-tokenizer for from_pretrained)
+# HuggingFace tokenizer loader (used in aarambh-studio-tokenizer for from_pretrained)
 tokenizers         = "0.21"
 anyhow             = "1"
 thiserror          = "2"
@@ -104,30 +104,30 @@ image              = { version = "0.25", default-features = false, features = ["
 
 ### Goal
 A compilable Cargo workspace where `cargo check --workspace` passes with zero
-errors and zero warnings. `aarambh-ai-core` is 100% complete. All other crates
+errors and zero warnings. `aarambh-studio-core` is 100% complete. All other crates
 exist as initial scaffold modules for later phases.
 
 ### Tasks (do in this order)
 
 ```
-[x] Create directory: aarambh-ai/
+[x] Create directory: aarambh-studio/
 [x] Write root Cargo.toml (copy from above)
-[x] cargo new --lib crates/aarambh-ai-core
-[x] cargo new --lib crates/aarambh-ai-tokenizer
-[x] cargo new --lib crates/aarambh-ai-data
-[x] cargo new --lib crates/aarambh-ai-nn
-[x] cargo new --lib crates/aarambh-ai-kernel
-[x] cargo new --lib crates/aarambh-ai-model
-[x] cargo new --lib crates/aarambh-ai-weights
-[x] cargo new --lib crates/aarambh-ai-quant
-[x] cargo new --lib crates/aarambh-ai-train
-[x] cargo new --lib crates/aarambh-ai-finetune
-[x] cargo new --lib crates/aarambh-ai-inference
-[x] cargo new --lib crates/aarambh-ai-safety
-[x] cargo new --bin aarambh-ai
+[x] cargo new --lib crates/aarambh-studio-core
+[x] cargo new --lib crates/aarambh-studio-tokenizer
+[x] cargo new --lib crates/aarambh-studio-data
+[x] cargo new --lib crates/aarambh-studio-nn
+[x] cargo new --lib crates/aarambh-studio-kernel
+[x] cargo new --lib crates/aarambh-studio-model
+[x] cargo new --lib crates/aarambh-studio-weights
+[x] cargo new --lib crates/aarambh-studio-quant
+[x] cargo new --lib crates/aarambh-studio-train
+[x] cargo new --lib crates/aarambh-studio-finetune
+[x] cargo new --lib crates/aarambh-studio-inference
+[x] cargo new --lib crates/aarambh-studio-safety
+[x] cargo new --bin aarambh-studio
 ```
 
-**Write `aarambh-ai-core` completely:**
+**Write `aarambh-studio-core` completely:**
 
 ```
 [x] src/config.rs
@@ -212,7 +212,7 @@ exist as initial scaffold modules for later phases.
 ### Tests
 
 ```rust
-// crates/aarambh-ai-core/tests/core_tests.rs
+// crates/aarambh-studio-core/tests/core_tests.rs
 
 #[test]
 fn tiny_config_head_dim_is_correct() {
@@ -259,7 +259,7 @@ fn default_train_config_beta2_is_correct() {
 ### Milestone ✅
 ```
 cargo check --workspace    → 0 errors, 0 warnings
-cargo test -p aarambh-ai-core   → all tests pass
+cargo test -p aarambh-studio-core   → all tests pass
 
 git add .
 git commit -m "feat: Phase 0 — workspace scaffold and core types"
@@ -278,7 +278,7 @@ The tokeniser encodes and decodes correctly including all special tokens.
 
 ### What was built
 
-**`aarambh-ai-tokenizer`:**
+**`aarambh-studio-tokenizer`:**
 ```
 [x] src/special.rs — 7 special token ID constants (ENDOFTEXT=0, PAD=1, BOS=2,
       THINK_START=3, THINK_END=4, USER=5, ASSISTANT=6)
@@ -297,7 +297,7 @@ The tokeniser encodes and decodes correctly including all special tokens.
 [x] src/lib.rs — flat re-exports
 ```
 
-**`aarambh-ai-data`:**
+**`aarambh-studio-data`:**
 ```
 [x] src/dataset.rs — TextDataset trait + PlaintextDataset + JsonlDataset
       PlaintextDataset::from_file — load .txt, one line per record
@@ -351,7 +351,7 @@ No full model yet — just the pieces.
 
 ### What was built
 
-**`aarambh-ai-nn`:**
+**`aarambh-studio-nn`:**
 ```
 [x] src/norm.rs       — RMSNorm (learnable weight, epsilon)
 [x] src/rope.rs       — RopeCache (precomputed cos/sin, magnitude-preserving)
@@ -364,7 +364,7 @@ No full model yet — just the pieces.
 
 ### Tasks
 
-**`aarambh-ai-nn`:**
+**`aarambh-studio-nn`:**
 ```
 [x] src/norm.rs — RMSNorm
       weight: Tensor  [hidden_dim]
@@ -460,8 +460,8 @@ fn transformer_block_output_shape() {
 
 ### Milestone ✅
 ```
-cargo test -p aarambh-ai-nn   → all tests pass
-cargo clippy -p aarambh-ai-nn -- -D warnings   → clean
+cargo test -p aarambh-studio-nn   → all tests pass
+cargo clippy -p aarambh-studio-nn -- -D warnings   → clean
 
 git commit -m "feat: Phase 2 — RMSNorm, RoPE, GQA, SwiGLU, TransformerBlock"
 git tag v0.2.0
@@ -479,7 +479,7 @@ Token IDs go in → logits `[batch, seq, vocab_size]` come out.
 
 ### Tasks
 
-**`aarambh-ai-model`:**
+**`aarambh-studio-model`:**
 ```
 [x] src/embedding.rs — TokenEmbedding
       weight: Tensor  [vocab_size, hidden_dim]
@@ -517,7 +517,7 @@ Token IDs go in → logits `[batch, seq, vocab_size]` come out.
       fn get_weight(&self, name: &str) -> Option<&Tensor>
 ```
 
-**`aarambh-ai-weights`:**
+**`aarambh-studio-weights`:**
 ```
 [x] src/lib.rs
       fn save_model(model: &AarambhModel, path: &Path) -> Result<()>
@@ -528,7 +528,7 @@ Token IDs go in → logits `[batch, seq, vocab_size]` come out.
         // loads HF safetensors, renames keys, validates shapes, and handles strict GQA slicing
 ```
 
-**`aarambh-ai-nn`:**
+**`aarambh-studio-nn`:**
 ```
 [x] Added read-only weight accessors on attention, FFN, and block types
       // Required for model tensor enumeration and SafeTensors save/load
@@ -586,8 +586,8 @@ fn safetensors_roundtrip() {
 
 ### Milestone ✅
 ```
-cargo test -p aarambh-ai-model
-cargo test -p aarambh-ai-weights
+cargo test -p aarambh-studio-model
+cargo test -p aarambh-studio-weights
 Tiny forward pass runs, all four configs validate, and full-scale construction is available as an ignored manual test.
 
 git commit -m "feat: Phase 3 — full model forward pass, all 4 scales, SafeTensors"
@@ -610,11 +610,11 @@ All kernels are behind runtime dispatch — fallback to candle if kernel unavail
 
 Phase 4 uses stable Rust with `std::arch` intrinsics. No nightly override is
 required. Runtime dispatch is cached and selects AVX2/FMA, AVX512, AVX2, or
-scalar code based on the CPU and optional `AARAMBH_SIMD_FORCE`.
+scalar code based on the CPU and optional `AARAMBH_STUDIO_SIMD_FORCE`.
 
 ### Tasks
 
-**`aarambh-ai-kernel`:**
+**`aarambh-studio-kernel`:**
 ```
 [x] build.rs
       // Detect NVCC → compile .cu files if found
@@ -649,7 +649,7 @@ scalar code based on the CPU and optional `AARAMBH_SIMD_FORCE`.
 [x] src/fused_ffn.rs    — PTX loader/custom op wrapper
 ```
 
-**Update `aarambh-ai-nn`:**
+**Update `aarambh-studio-nn`:**
 ```
 [x] norm.rs      → call kernel::dispatch::rms_norm() instead of inline
 [x] attention.rs → call kernel::dispatch::attention_forward() instead of inline
@@ -693,7 +693,7 @@ fn workspace_builds_without_nvcc() {
 
 ### Benchmark (run this, record the numbers)
 ```bash
-cargo bench -p aarambh-ai-kernel
+cargo bench -p aarambh-studio-kernel
 # Record:  RMSNorm SIMD vs candle baseline
 #          Attention parallel vs sequential
 # Target:  ≥ 1.5× speedup on RMSNorm, ≥ 2× on parallel attention
@@ -702,8 +702,8 @@ cargo bench -p aarambh-ai-kernel
 
 ### Milestone ✅
 ```
-cargo test -p aarambh-ai-kernel    → passes
-cargo bench -p aarambh-ai-kernel   → local: SIMD ~1.43×, parallel attn ~2.94×
+cargo test -p aarambh-studio-kernel    → passes
+cargo bench -p aarambh-studio-kernel   → local: SIMD ~1.43×, parallel attn ~2.94×
 
 git commit -m "feat: Phase 4 — CPU SIMD kernels, parallel attention, dispatch layer"
 git tag v0.4.0
@@ -721,7 +721,7 @@ Checkpoints save and resume correctly. This is the most important milestone.
 
 ### Tasks
 
-**`aarambh-ai-train`:**
+**`aarambh-studio-train`:**
 ```
 [x] src/loss.rs
       fn cross_entropy_loss(logits, labels, padding_mask) -> Result<Tensor>
@@ -766,9 +766,9 @@ Checkpoints save and resume correctly. This is the most important milestone.
         // builds tokenizer, train/val loaders, model VarMap, trainer
         // reuses checkpoint_dir/tokenizer.json when it already exists
 
-[x] aarambh-ai CLI
-      aarambh-ai train --config configs/tiny_shakespeare.toml
-      aarambh-ai train --config configs/tiny_shakespeare_smoke.toml
+[x] aarambh-studio CLI
+      aarambh-studio train --config configs/tiny_shakespeare.toml
+      aarambh-studio train --config configs/tiny_shakespeare_smoke.toml
 
 [x] autograd-safe training forward path
       AarambhModel::forward_train()
@@ -831,7 +831,7 @@ Additional Phase 5 tests:
 ```bash
 # tiny_shakespeare.txt was already downloaded in Phase 1 setup
 
-cargo run --release -p aarambh-ai -- train --config configs/tiny_shakespeare.toml
+cargo run --release -p aarambh-studio -- train --config configs/tiny_shakespeare.toml
 
 # Expected output:
 # step=1 loss≈9.0 ppl≈8000 lr=... grad_norm=...
@@ -842,7 +842,7 @@ cargo run --release -p aarambh-ai -- train --config configs/tiny_shakespeare.tom
 
 Fast smoke check:
 ```bash
-cargo run --release -p aarambh-ai -- train --config configs/tiny_shakespeare_smoke.toml
+cargo run --release -p aarambh-studio -- train --config configs/tiny_shakespeare_smoke.toml
 # Expected start: loss≈9.0, not ~80. Random 8K-vocab loss should be close to ln(8000).
 ```
 
@@ -870,10 +870,10 @@ The predict-view shows next-token probabilities. The CLI binary works.
 
 ### Tasks
 
-**`aarambh-ai-inference`:**
+**`aarambh-studio-inference`:**
 ```
 [x] src/kvcache.rs — KvCache
-      Wraps one aarambh-ai-nn::KVCache per transformer layer.
+      Wraps one aarambh-studio-nn::KVCache per transformer layer.
       fn for_model(model) -> Self
       fn layers_mut(&mut self) -> &mut [KVCache]
       fn clear(&mut self)
@@ -904,7 +904,7 @@ The predict-view shows next-token probabilities. The CLI binary works.
       Phase 7 completes forced <think> and </think> behavior
 ```
 
-**`aarambh-ai` binary:**
+**`aarambh-studio` binary:**
 ```
 [x] src/cmd/infer.rs
       --config <path>       default configs/tiny_shakespeare.toml
@@ -965,7 +965,7 @@ Additional Phase 6 test coverage:
 
 ### First Public Demo
 ```bash
-aarambh-ai infer \
+aarambh-studio infer \
   --config configs/tiny_shakespeare.toml \
   --prompt "To be, or not to be" \
   --max-tokens 64 \
@@ -1085,7 +1085,7 @@ fn thinking_medium_allows_more_than_low() {
 
 ### Example Output
 ```bash
-aarambh-ai infer --prompt "What is 15 x 27?" --thinking medium
+aarambh-studio infer --prompt "What is 15 x 27?" --thinking medium
 
 [thinking: 43 tokens]
   15 x 27
@@ -1119,7 +1119,7 @@ HuggingFace checkpoint conversion (`convert.rs`) fully implemented.
 
 ### Tasks (do in this order — each builds on the previous)
 
-**`aarambh-ai-quant`:**
+**`aarambh-studio-quant`:**
 ```
 [x] src/absmax.rs — INT8 (easiest, do first)
       fn quantise_absmax_i8(tensor: &Tensor) -> Result<I8QuantizedTensor>
@@ -1176,7 +1176,7 @@ HuggingFace checkpoint conversion (`convert.rs`) fully implemented.
       fn append_and_get(&mut self, layer, k, v) -> (Tensor_f32, Tensor_f32)
 ```
 
-**`aarambh-ai-weights` — complete convert.rs:**
+**`aarambh-studio-weights` — complete convert.rs:**
 ```
 [x] src/gguf.rs
       fn save_gguf(model: &AarambhModel, format: GgufFormat, path: &Path) -> Result<()>
@@ -1203,19 +1203,19 @@ HuggingFace checkpoint conversion (`convert.rs`) fully implemented.
 
 **CLI commands:**
 ```
-[x] aarambh-ai quantise
+[x] aarambh-studio quantise
       --model <path>
       --method int8|awq|gptq
       --bits 8|4
       --calibration-data <path>
       --output <path>
 
-[x] aarambh-ai convert
+[x] aarambh-studio convert
       --input <hf_dir or safetensors>
       --output <aarambh safetensors>
       --arch llama2|llama3|mistral|qwen2
 
-[x] aarambh-ai convert --gguf
+[x] aarambh-studio convert --gguf
       --input <safetensors path>
       --output <gguf path>
       --format q4_k_m|q5_k_m|q8_0
@@ -1300,7 +1300,7 @@ Adapters save separately and merge back into normal SafeTensors checkpoints.
 
 ### Tasks
 
-**`aarambh-ai-finetune`:**
+**`aarambh-studio-finetune`:**
 ```
 [x] src/lora.rs
       LoraConfig { rank, alpha, dropout, target_modules, group_size }
@@ -1332,9 +1332,9 @@ Adapters save separately and merge back into normal SafeTensors checkpoints.
       merge_lora_from_paths writes normal model.safetensors for existing infer
 
 [x] CLI
-      aarambh-ai finetune sft
-      aarambh-ai finetune qlora
-      aarambh-ai finetune merge
+      aarambh-studio finetune sft
+      aarambh-studio finetune qlora
+      aarambh-studio finetune merge
 ```
 
 ### Tests
@@ -1369,7 +1369,7 @@ fn sft_batch_pads_and_masks_prompt_tokens() {
 ### Fine-Tuning Commands
 ```bash
 # LoRA SFT on Tiny (runs on i3, ~200 MB)
-cargo run --release -p aarambh-ai -- finetune sft \
+cargo run --release -p aarambh-studio -- finetune sft \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -1378,7 +1378,7 @@ cargo run --release -p aarambh-ai -- finetune sft \
   --output adapters/tiny_sft
 
 # QLoRA SFT on Small (runs on i3, ~400 MB peak)
-cargo run --release -p aarambh-ai -- finetune qlora \
+cargo run --release -p aarambh-studio -- finetune qlora \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/small_q4.gguf \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -1387,13 +1387,13 @@ cargo run --release -p aarambh-ai -- finetune qlora \
   --output adapters/small_qlora
 
 # Merge and test
-cargo run --release -p aarambh-ai -- finetune merge \
+cargo run --release -p aarambh-studio -- finetune merge \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --adapter adapters/tiny_sft \
   --output checkpoints/tiny_sft_merged
 
-cargo run --release -p aarambh-ai -- infer \
+cargo run --release -p aarambh-studio -- infer \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_sft_merged/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -1429,7 +1429,7 @@ Do **NOT** use SelfCritique as the verifier for GRPO. SelfCritique is only used 
 
 ### Tasks
 
-**`aarambh-ai-finetune/src/grpo.rs`:**
+**`aarambh-studio-finetune/src/grpo.rs`:**
 ```
 [x] GrpoConfig {
       group_size: usize,         // G — number of completions per prompt, default 8
@@ -1480,7 +1480,7 @@ Do **NOT** use SelfCritique as the verifier for GRPO. SelfCritique is only used 
       // full-distribution KL is computed against the frozen reference model
 ```
 
-**`aarambh-ai-finetune/src/verifier.rs`:**
+**`aarambh-studio-finetune/src/verifier.rs`:**
 ```
 [x] trait Verifier { fn score(&self, completion: &str, ground_truth: &str) -> f32; }
 
@@ -1538,7 +1538,7 @@ fn grpo_loss_naming_is_unambiguous() {
 
 ### GRPO Training Command
 ```bash
-cargo run --release -p aarambh-ai -- finetune grpo \
+cargo run --release -p aarambh-studio -- finetune grpo \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_sft_merged/model.safetensors \
   --reference checkpoints/tiny_sft_merged/model.safetensors \
@@ -1576,7 +1576,7 @@ PII is redacted. Toxicity is scored. Audit log is written.
 
 ### Tasks
 
-**`aarambh-ai-safety`:**
+**`aarambh-studio-safety`:**
 ```
 [x] src/input/injection.rs
       fn detect_injection(prompt: &str) -> InjectionScore
@@ -1705,7 +1705,7 @@ Phase 9 (LoRA) and Phase 10 (GRPO) must be complete. Phase 11 (Safety) must
 be complete so `SafetyGuard` is available to wrap the self-learning loop.
 
 ### Why Phase 12 (not after v1.0)
-Self-learning is a core feature of aarambh-ai — not a post-release addon.
+Self-learning is a core feature of aarambh-studio — not a post-release addon.
 It is built and validated on Tiny/Small here, then automatically benefits from
 GPU scale-up in Phase 13 and faster kernels in Phase 14. Phase 15 does not ship
 pretrained checkpoints; any user-trained checkpoint can use `--self-learn` when
@@ -1714,11 +1714,11 @@ paired with its tokenizer, config, and self-learning adapter state.
 ### Tasks
 
 ```
-[x] cargo new --lib crates/aarambh-ai-selflearn
+[x] cargo new --lib crates/aarambh-studio-selflearn
 [x] Add to workspace Cargo.toml members list
 ```
 
-**`aarambh-ai-selflearn/src/config.rs`:**
+**`aarambh-studio-selflearn/src/config.rs`:**
 ```rust
 [x] pub enum SelfLearnMode { Cpu, Gpu, Disabled }
 
@@ -1762,7 +1762,7 @@ paired with its tokenizer, config, and self-learning adapter state.
     }
 ```
 
-**`aarambh-ai-selflearn/src/critique.rs`:**
+**`aarambh-studio-selflearn/src/critique.rs`:**
 ```rust
 // CRITICAL DESIGN: SelfCritique is a STATELESS free function, NOT a struct.
 // This avoids Rust borrow-checker issues with the mutable generation owner.
@@ -1794,7 +1794,7 @@ paired with its tokenizer, config, and self-learning adapter state.
     """
 ```
 
-**`aarambh-ai-selflearn/src/replay.rs`:**
+**`aarambh-studio-selflearn/src/replay.rs`:**
 ```rust
 [x] pub struct ReplayEntry {
       pub prompt:    String,
@@ -1826,7 +1826,7 @@ paired with its tokenizer, config, and self-learning adapter state.
       // keyword matching — used only for diversity sampling, not for scoring
 ```
 
-**`aarambh-ai-selflearn/src/online_grpo.rs`:**
+**`aarambh-studio-selflearn/src/online_grpo.rs`:**
 ```rust
 [x] pub struct OnlineGrpo {
       model:         LoraAarambhModel,
@@ -1861,7 +1861,7 @@ paired with its tokenizer, config, and self-learning adapter state.
       // masked SFT over replay examples using the same LoRA adapter and optimizer state
 ```
 
-**`aarambh-ai-selflearn/src/metrics.rs`:**
+**`aarambh-studio-selflearn/src/metrics.rs`:**
 ```rust
 [x] pub struct LearningMetrics {
       per_topic_scores: HashMap<String, VecDeque<f32>>,   // last 100 per topic
@@ -1876,7 +1876,7 @@ paired with its tokenizer, config, and self-learning adapter state.
 [x] pub fn save_jsonl(&self, path: &Path) -> Result<()>
 ```
 
-**`aarambh-ai-selflearn/src/learning_loop.rs`:**
+**`aarambh-studio-selflearn/src/learning_loop.rs`:**
 ```rust
 // NEW BORROW-CHECKER-SAFE DESIGN: SelfCritique is a free function.
 // SelfLearnLoop only holds the components that need to persist state.
@@ -1918,10 +1918,10 @@ paired with its tokenizer, config, and self-learning adapter state.
 ```
 [x] src/cmd/infer.rs     — add --self-learn cpu|gpu|disabled flag
 [x] src/cmd/selflearn.rs — new subcommand:
-      aarambh-ai selflearn flush-gradients  ← CPU: apply accumulated grads
-      aarambh-ai selflearn stats            ← per-topic improvement trends
-      aarambh-ai selflearn replay           ← manual replay fine-tune trigger
-      aarambh-ai selflearn reset            ← clear buffer + accumulated grads
+      aarambh-studio selflearn flush-gradients  ← CPU: apply accumulated grads
+      aarambh-studio selflearn stats            ← per-topic improvement trends
+      aarambh-studio selflearn replay           ← manual replay fine-tune trigger
+      aarambh-studio selflearn reset            ← clear buffer + accumulated grads
 ```
 
 ### Tests
@@ -2015,7 +2015,7 @@ fn self_learn_disabled_mode_has_zero_overhead() {
 
 ### Integration Test
 ```bash
-aarambh-ai infer \
+aarambh-studio infer \
   --model checkpoints/tiny_sft.safetensors \
   --tokenizer checkpoints/tokenizer.json \
   --self-learn cpu \
@@ -2028,13 +2028,13 @@ aarambh-ai infer \
 # [self-learn] critique score: 0.82  stored in replay ✓
 # [self-learn] replay buffer: 1/500  math:0 code:0 general:1
 
-aarambh-ai selflearn flush-gradients \
+aarambh-studio selflearn flush-gradients \
   --base checkpoints/tiny_sft.safetensors \
   --tokenizer checkpoints/tokenizer.json \
   --replay-path data/replay.jsonl \
   --self-learn-state-dir adapters/selflearn
 
-aarambh-ai selflearn stats --replay-path data/replay.jsonl --self-learn-state-dir adapters/selflearn
+aarambh-studio selflearn stats --replay-path data/replay.jsonl --self-learn-state-dir adapters/selflearn
 # Reasoning: ↑ +0.11 | Factual: ↑ +0.06 | Code: → +0.01
 ```
 
@@ -2177,7 +2177,7 @@ not released, and YouTube/Discord launch items are intentionally out of scope.
 ```
 [x] Package manifests: all 13 library crates + CLI set to version 1.0.0
 [x] Package manifests: publish=false for all crates; no crates.io release
-[x] CLI: `aarambh-ai --version` reports the package version
+[x] CLI: `aarambh-studio --version` reports the package version
 [x] Docs: every public API has /// doc comments
 [x] Docs: library crates deny missing public docs
 [x] README.md: source install, quickstart, examples, and v1.0 release policy
@@ -2192,7 +2192,7 @@ not released, and YouTube/Discord launch items are intentionally out of scope.
       cargo clippy --workspace --all-targets -- -D warnings
       cargo test --workspace
       RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
-      cargo build --release -p aarambh-ai
+      cargo build --release -p aarambh-studio
       CLI smoke tests
 [x] GitHub Actions release workflow:
       trigger on tag v1.0.0
@@ -2202,8 +2202,8 @@ not released, and YouTube/Discord launch items are intentionally out of scope.
 
 ### Milestone ✅
 ```
-cargo install --path aarambh-ai
-aarambh-ai --version  → aarambh-ai 1.0.0
+cargo install --path aarambh-studio
+aarambh-studio --version  → aarambh-studio 1.0.0
 git tag v1.0.0
 git push origin v1.0.0
 

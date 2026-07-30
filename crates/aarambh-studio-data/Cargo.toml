@@ -1,0 +1,17 @@
+[package]
+name = "aarambh-studio-data"
+version.workspace = true
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+cuda = ["aarambh-studio-core/cuda", "candle-core/cuda"]
+
+[dependencies]
+aarambh-studio-core = { path = "../aarambh-studio-core" }
+candle-core      = { workspace = true }
+rand             = "0.8"
+serde_json       = { workspace = true }
+serde            = { workspace = true }

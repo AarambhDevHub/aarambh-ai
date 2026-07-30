@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BIN=${AARAMBH_BIN:-target/release/aarambh-ai}
+BIN=${AARAMBH_STUDIO_BIN:-target/release/aarambh-studio}
 BASE=${DOCUMENT_BASE_MODEL:-checkpoints/tiny_shakespeare/step_000050/model.safetensors}
 IMAGE_TOKENIZER=${DOCUMENT_IMAGE_TOKENIZER:-checkpoints/vision_projector_smoke/tokenizer.json}
 VIDEO_DIR=${DOCUMENT_VIDEO_MIGRATION_DIR:-checkpoints/document_smoke/video}

@@ -58,41 +58,41 @@ jobs:
         run: find scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
 
       - name: Build release
-        run: cargo build --release -p aarambh-ai --locked
+        run: cargo build --release -p aarambh-studio --locked
 
       - name: CLI smoke
         run: |
-          target/release/aarambh-ai --version
-          target/release/aarambh-ai --help
-          target/release/aarambh-ai train --help
-          target/release/aarambh-ai infer --help
-          target/release/aarambh-ai agent --help
-          target/release/aarambh-ai eval --help
-          target/release/aarambh-ai quantise --help
-          target/release/aarambh-ai convert --help
-          target/release/aarambh-ai serve --help
-          target/release/aarambh-ai finetune --help
-          target/release/aarambh-ai finetune sft --help
-          target/release/aarambh-ai finetune qlora --help
-          target/release/aarambh-ai finetune tool-sft --help
-          target/release/aarambh-ai finetune tool-qlora --help
-          target/release/aarambh-ai finetune dora --help
-          target/release/aarambh-ai finetune qdora --help
-          target/release/aarambh-ai finetune vlm-dora --help
-          target/release/aarambh-ai finetune vlm-qdora --help
-          target/release/aarambh-ai finetune grpo --help
-          target/release/aarambh-ai finetune dpo --help
-          target/release/aarambh-ai finetune qdpo --help
-          target/release/aarambh-ai finetune merge --help
-          target/release/aarambh-ai distill --help
-          target/release/aarambh-ai distill train --help
-          target/release/aarambh-ai distill evaluate --help
-          target/release/aarambh-ai selflearn --help
-          target/release/aarambh-ai selflearn start --help
-          target/release/aarambh-ai selflearn flush-gradients --help
-          target/release/aarambh-ai selflearn replay --help
-          target/release/aarambh-ai selflearn stats --help
-          target/release/aarambh-ai selflearn reset --help
+          target/release/aarambh-studio --version
+          target/release/aarambh-studio --help
+          target/release/aarambh-studio train --help
+          target/release/aarambh-studio infer --help
+          target/release/aarambh-studio agent --help
+          target/release/aarambh-studio eval --help
+          target/release/aarambh-studio quantise --help
+          target/release/aarambh-studio convert --help
+          target/release/aarambh-studio serve --help
+          target/release/aarambh-studio finetune --help
+          target/release/aarambh-studio finetune sft --help
+          target/release/aarambh-studio finetune qlora --help
+          target/release/aarambh-studio finetune tool-sft --help
+          target/release/aarambh-studio finetune tool-qlora --help
+          target/release/aarambh-studio finetune dora --help
+          target/release/aarambh-studio finetune qdora --help
+          target/release/aarambh-studio finetune vlm-dora --help
+          target/release/aarambh-studio finetune vlm-qdora --help
+          target/release/aarambh-studio finetune grpo --help
+          target/release/aarambh-studio finetune dpo --help
+          target/release/aarambh-studio finetune qdpo --help
+          target/release/aarambh-studio finetune merge --help
+          target/release/aarambh-studio distill --help
+          target/release/aarambh-studio distill train --help
+          target/release/aarambh-studio distill evaluate --help
+          target/release/aarambh-studio selflearn --help
+          target/release/aarambh-studio selflearn start --help
+          target/release/aarambh-studio selflearn flush-gradients --help
+          target/release/aarambh-studio selflearn replay --help
+          target/release/aarambh-studio selflearn stats --help
+          target/release/aarambh-studio selflearn reset --help
 
   security-audit:
     name: RustSec audit

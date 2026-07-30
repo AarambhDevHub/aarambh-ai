@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BIN=${AARAMBH_BIN:-target/release/aarambh-ai}
+BIN=${AARAMBH_STUDIO_BIN:-target/release/aarambh-studio}
 CONFIG=${DISTILL_CONFIG:-configs/distill_smoke.toml}
 STUDENT=${DISTILL_STUDENT:-checkpoints/mtp_smoke/step_000001/model.safetensors}
 TEACHER=${DISTILL_TEACHER:-checkpoints/mtp_smoke/step_000002/model.safetensors}

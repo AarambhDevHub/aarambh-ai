@@ -9,7 +9,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in aarambh-ai, please report it responsibly:
+If you discover a security vulnerability in aarambh-studio, please report it responsibly:
 
 1. **DO NOT** open a public GitHub issue for security vulnerabilities
 2. Use GitHub private vulnerability reporting or open a private GitHub Security Advisory for this repository
@@ -21,7 +21,7 @@ If you discover a security vulnerability in aarambh-ai, please report it respons
 
 ## Scope
 
-Security concerns for aarambh-ai include:
+Security concerns for aarambh-studio include:
 
 - Model weight tampering or injection
 - Checkpoint deserialization vulnerabilities

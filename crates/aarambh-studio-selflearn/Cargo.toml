@@ -1,0 +1,38 @@
+[package]
+name = "aarambh-studio-selflearn"
+version.workspace = true
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+cuda = [
+    "aarambh-studio-core/cuda",
+    "aarambh-studio-eval/cuda",
+    "aarambh-studio-finetune/cuda",
+    "aarambh-studio-inference/cuda",
+    "aarambh-studio-model/cuda",
+    "aarambh-studio-train/cuda",
+    "aarambh-studio-vision/cuda",
+    "aarambh-studio-weights/cuda",
+    "candle-core/cuda",
+    "candle-nn/cuda",
+]
+
+[dependencies]
+aarambh-studio-core      = { path = "../aarambh-studio-core" }
+aarambh-studio-eval      = { path = "../aarambh-studio-eval" }
+aarambh-studio-finetune  = { path = "../aarambh-studio-finetune" }
+aarambh-studio-inference = { path = "../aarambh-studio-inference" }
+aarambh-studio-model     = { path = "../aarambh-studio-model" }
+aarambh-studio-tokenizer = { path = "../aarambh-studio-tokenizer" }
+aarambh-studio-train     = { path = "../aarambh-studio-train" }
+aarambh-studio-vision    = { path = "../aarambh-studio-vision" }
+aarambh-studio-weights   = { path = "../aarambh-studio-weights" }
+candle-core          = { workspace = true }
+candle-nn            = { workspace = true }
+rand                 = "0.8"
+serde                = { workspace = true }
+serde_json           = { workspace = true }
+sha2                 = { workspace = true }
