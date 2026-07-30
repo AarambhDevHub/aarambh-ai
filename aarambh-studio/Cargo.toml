@@ -1,0 +1,54 @@
+[package]
+name = "aarambh-studio"
+version.workspace = true
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+cuda = [
+    "aarambh-studio-agent/cuda",
+    "aarambh-studio-core/cuda",
+    "aarambh-studio-data/cuda",
+    "aarambh-studio-distill/cuda",
+    "aarambh-studio-eval/cuda",
+    "aarambh-studio-finetune/cuda",
+    "aarambh-studio-inference/cuda",
+    "aarambh-studio-model/cuda",
+    "aarambh-studio-quant/cuda",
+    "aarambh-studio-safety/cuda",
+    "aarambh-studio-serve/cuda",
+    "aarambh-studio-selflearn/cuda",
+    "aarambh-studio-train/cuda",
+    "aarambh-studio-vision/cuda",
+    "aarambh-studio-weights/cuda",
+    "candle-core/nccl",
+]
+
+[dependencies]
+aarambh-studio-agent     = { path = "../crates/aarambh-studio-agent" }
+aarambh-studio-core      = { path = "../crates/aarambh-studio-core" }
+aarambh-studio-data      = { path = "../crates/aarambh-studio-data" }
+aarambh-studio-distill   = { path = "../crates/aarambh-studio-distill" }
+aarambh-studio-eval      = { path = "../crates/aarambh-studio-eval" }
+aarambh-studio-finetune  = { path = "../crates/aarambh-studio-finetune" }
+aarambh-studio-inference = { path = "../crates/aarambh-studio-inference" }
+aarambh-studio-model     = { path = "../crates/aarambh-studio-model" }
+aarambh-studio-quant     = { path = "../crates/aarambh-studio-quant" }
+aarambh-studio-safety    = { path = "../crates/aarambh-studio-safety" }
+aarambh-studio-serve     = { path = "../crates/aarambh-studio-serve" }
+aarambh-studio-selflearn = { path = "../crates/aarambh-studio-selflearn" }
+aarambh-studio-tokenizer = { path = "../crates/aarambh-studio-tokenizer" }
+aarambh-studio-train     = { path = "../crates/aarambh-studio-train" }
+aarambh-studio-vision    = { path = "../crates/aarambh-studio-vision" }
+aarambh-studio-weights   = { path = "../crates/aarambh-studio-weights" }
+anyhow               = { workspace = true }
+candle-core          = { workspace = true }
+candle-nn            = { workspace = true }
+clap                 = { workspace = true }
+serde                = { workspace = true }
+serde_json           = { workspace = true }
+tokio                = { workspace = true }
+tracing              = { workspace = true }
+tracing-subscriber   = { workspace = true }

@@ -1,4 +1,4 @@
-# ROADMAP_V3.md — aarambh-ai v3.0
+# ROADMAP_V3.md — aarambh-studio v3.0
 
 > Step-by-step build plan for v3.0. Every phase ends with working, testable
 > code. Builds on the completed v2.0.0 base (Phases 0–28, all ✅). No
@@ -53,7 +53,7 @@ Phase 40 →  crates.io publish (v3.0.0)                   (5–7 days)    [all]
    attention primitive that every later phase trains on top of. Doing
    attention surgery *after* MoE or distillation is built would mean
    re-validating both against a moving target. Get the attention stack
-   stable and eval-harness-verified (`aarambh-ai-eval`, v2 Phase 17) before
+   stable and eval-harness-verified (`aarambh-studio-eval`, v2 Phase 17) before
    anything else touches it.
 2. **31 (fine-grained MoE)** comes right after because it is the other
    half of the "efficient frontier architecture" story, and because v2's
@@ -71,7 +71,7 @@ Phase 40 →  crates.io publish (v3.0.0)                   (5–7 days)    [all]
    wasted work.
 4. **35–36 (video, document understanding)** come together because they
    share a vision encoder and multimodal fusion path (both build on v2's
-   Phase 19 `aarambh-ai-vision` crate). Video first because it is the
+   Phase 19 `aarambh-studio-vision` crate). Video first because it is the
    larger architectural lift (temporal fusion); document understanding
    reuses the same patch encoder with a layout-aware head, so it is
    naturally the smaller follow-on phase.
@@ -103,34 +103,34 @@ Phase 40 →  crates.io publish (v3.0.0)                   (5–7 days)    [all]
 [workspace]
 members = [
     # ...existing v1.0.0 + v2.0.0 members unchanged...
-    "crates/aarambh-ai-core",
-    "crates/aarambh-ai-tokenizer",
-    "crates/aarambh-ai-data",
-    "crates/aarambh-ai-nn",
-    "crates/aarambh-ai-kernel",
-    "crates/aarambh-ai-model",
-    "crates/aarambh-ai-weights",
-    "crates/aarambh-ai-quant",
-    "crates/aarambh-ai-train",
-    "crates/aarambh-ai-finetune",
-    "crates/aarambh-ai-inference",
-    "crates/aarambh-ai-safety",
-    "crates/aarambh-ai-selflearn",
-    "crates/aarambh-ai-eval",
-    "crates/aarambh-ai-vision",
-    "crates/aarambh-ai-serve",
+    "crates/aarambh-studio-core",
+    "crates/aarambh-studio-tokenizer",
+    "crates/aarambh-studio-data",
+    "crates/aarambh-studio-nn",
+    "crates/aarambh-studio-kernel",
+    "crates/aarambh-studio-model",
+    "crates/aarambh-studio-weights",
+    "crates/aarambh-studio-quant",
+    "crates/aarambh-studio-train",
+    "crates/aarambh-studio-finetune",
+    "crates/aarambh-studio-inference",
+    "crates/aarambh-studio-safety",
+    "crates/aarambh-studio-selflearn",
+    "crates/aarambh-studio-eval",
+    "crates/aarambh-studio-vision",
+    "crates/aarambh-studio-serve",
 
     # new in v3.0
-    "crates/aarambh-ai-distill",     # Phase 33
-    "crates/aarambh-ai-agent",       # Phase 37
+    "crates/aarambh-studio-distill",     # Phase 33
+    "crates/aarambh-studio-agent",       # Phase 37
 
-    "aarambh-ai",
+    "aarambh-studio",
 ]
 ```
 
-Two new crates (`aarambh-ai-distill`, `aarambh-ai-agent`). Everything else
-extends existing crates, most heavily `aarambh-ai-nn` (attention, MoE, MTP),
-`aarambh-ai-vision` (video, documents), and `aarambh-ai-quant` (native QAT).
+Two new crates (`aarambh-studio-distill`, `aarambh-studio-agent`). Everything else
+extends existing crates, most heavily `aarambh-studio-nn` (attention, MoE, MTP),
+`aarambh-studio-vision` (video, documents), and `aarambh-studio-quant` (native QAT).
 No new external dependencies beyond what's listed in each phase's
 Dependency Policy note.
 
@@ -150,7 +150,7 @@ modification slotted in during fine-tuning.
 
 ### Tasks
 
-**`aarambh-ai-nn`:**
+**`aarambh-studio-nn`:**
 ```
 [x] src/gated_deltanet.rs
       Exact decayed delta-rule recurrence with causal depthwise q/k/v
@@ -166,7 +166,7 @@ modification slotted in during fine-tuning.
       HybridKvCache enum: Full(KVCache) | Linear(DeltaNetState)
       Full-attention layers retain the existing GQA + RoPE/YaRN path
 
-[x] aarambh-ai-core/src/config.rs
+[x] aarambh-studio-core/src/config.rs
       AttentionKind: Full | GatedDeltaNet
       HybridAttentionSchedule selects one full-attention layer per configurable N
       Full-attention layers keep the existing GQA + RoPE/YaRN path
@@ -175,7 +175,7 @@ modification slotted in during fine-tuning.
       replaced everywhere"
 ```
 
-**`aarambh-ai-model`:**
+**`aarambh-studio-model`:**
 ```
 [x] Model config gains `attention_schedule: Option<HybridAttentionSchedule>`
 [x] Backward compatible: attention_schedule = None reproduces exact v1/v2
@@ -188,7 +188,7 @@ modification slotted in during fine-tuning.
       configs/wikitext103_hybrid_cuda_smoke.toml
 ```
 
-**`aarambh-ai-train`:**
+**`aarambh-studio-train`:**
 ```
 [x] Continued-pretraining recipe: load an existing v2 checkpoint, replace
     the scheduled layers' weights with freshly-initialised GatedDeltaNet
@@ -202,7 +202,7 @@ modification slotted in during fine-tuning.
     tolerance band before a trained retrofit is accepted
 ```
 
-**`aarambh-ai-weights`:**
+**`aarambh-studio-weights`:**
 ```
 [x] Partial-checkpoint loading: load full-attention layer weights from an
     existing SafeTensors checkpoint while initialising GatedDeltaNet layer
@@ -253,7 +253,7 @@ fn deltanet_state_size_is_constant_regardless_of_sequence_length() {
 fn partial_checkpoint_load_preserves_full_attention_layer_weights_exactly() {}
 
 // Hardware acceptance after continued training:
-// compare dense and retrofit scorecards with `aarambh-ai eval compare`.
+// compare dense and retrofit scorecards with `aarambh-studio eval compare`.
 ```
 
 ### Milestone
@@ -284,7 +284,7 @@ not the asymptotic cache capacity.
 
 ### Tasks
 
-**`aarambh-ai-nn`:**
+**`aarambh-studio-nn`:**
 ```
 [x] src/sparse_attention.rs
       DsaConfig — top_k (how many key blocks each query attends to),
@@ -304,7 +304,7 @@ not the asymptotic cache capacity.
       attention" layer slots from Phase 29's schedule
 ```
 
-**`aarambh-ai-model`:**
+**`aarambh-studio-model`:**
 ```
 [x] Model config gains `dsa_config: Option<DsaConfig>`, applies to
     whichever layers HybridAttentionSchedule marks as Sparse
@@ -313,7 +313,7 @@ not the asymptotic cache capacity.
       configs/large_hybrid_dsa.toml
 ```
 
-**`aarambh-ai-train`:**
+**`aarambh-studio-train`:**
 ```
 [x] Indexer training: the lightning indexer needs its own small
     supervised signal (distilled from full-attention scores on a subset
@@ -373,7 +373,7 @@ counts.
 
 ### Tasks
 
-**`aarambh-ai-nn`:**
+**`aarambh-studio-nn`:**
 ```
 [x] src/moe.rs (extends v2's implementation)
       MoeConfig gains: num_shared_experts (default 0), fine_grained_factor
@@ -395,7 +395,7 @@ counts.
       since it is never routed, only always-on)
 ```
 
-**`aarambh-ai-model`:**
+**`aarambh-studio-model`:**
 ```
 [x] Model config's existing `moe: Option<MoeConfig>` (v2 §20) gains the
     new fields above; old MoeConfig values remain valid (fine_grained_factor
@@ -406,7 +406,7 @@ counts.
       configs/large_finegrained_moe.toml
 ```
 
-**`aarambh-ai-train`:**
+**`aarambh-studio-train`:**
 ```
 [x] Router warm-start: initialise the finer-grained router from the
     already-trained v2 coarse router's weights where dimensions allow,
@@ -470,13 +470,13 @@ Phase 33's on-policy distillation builds on.
 
 ### Tasks
 
-**`aarambh-ai-core`:**
+**`aarambh-studio-core`:**
 ```
 [x] Optional `MtpConfig` with explicit total-horizon semantics, defaults,
     serde compatibility, and range validation
 ```
 
-**`aarambh-ai-nn`:**
+**`aarambh-studio-nn`:**
 ```
 [x] src/mtp.rs
       MtpHead — lightweight additional transformer block per future-token
@@ -487,7 +487,7 @@ Phase 33's on-policy distillation builds on.
       heads are bypassed during ordinary next-token inference
 ```
 
-**`aarambh-ai-train`:**
+**`aarambh-studio-train`:**
 ```
 [x] src/mtp_loss.rs
       Auxiliary loss: weighted sum of the main next-token loss and each
@@ -498,7 +498,7 @@ Phase 33's on-policy distillation builds on.
       the training scorecard
 ```
 
-**`aarambh-ai-inference`:**
+**`aarambh-studio-inference`:**
 ```
 [x] MTP heads optionally reused as the draft model for Phase 25's
     speculative decoding (v2 §29) — since they already predict several
@@ -562,16 +562,16 @@ mismatch that plain offline distillation suffers from.
 
 ### Tasks
 
-**New crate `aarambh-ai-distill`:**
+**New crate `aarambh-studio-distill`:**
 ```
 [x] src/rollout.rs
       Student generates completions for a batch of prompts using its own
-      current weights (on-policy) — reuses aarambh-ai-inference's decode
+      current weights (on-policy) — reuses aarambh-studio-inference's decode
       path directly, no separate generation code
 
 [x] src/teacher_score.rs
       TeacherScorer trait — abstracts over "teacher" being either a larger
-      local aarambh-ai checkpoint or a scored-reference dataset; scores or
+      local aarambh-studio checkpoint or a scored-reference dataset; scores or
       corrects the student's own rollouts rather than only supplying
       independently-generated teacher text
       KL-style or reward-style scoring paths, both supported behind the
@@ -583,7 +583,7 @@ mismatch that plain offline distillation suffers from.
       with the MTP auxiliary loss (Phase 32) where enabled
 ```
 
-**`aarambh-ai-distill` trainer using `aarambh-ai-train` primitives:**
+**`aarambh-studio-distill` trainer using `aarambh-studio-train` primitives:**
 ```
 [x] Distillation training loop: alternates rollout generation (inference
     mode, no gradient) with gradient updates on the scored rollouts
@@ -639,7 +639,7 @@ an afterthought.
 
 ### Tasks
 
-**`aarambh-ai-quant`:**
+**`aarambh-studio-quant`:**
 ```
 [x] Device-native FakeQuantize for INT4/INT8 with identity STE; no host
     tensor conversion in the training forward/backward path
@@ -649,10 +649,10 @@ an afterthought.
 [x] QatLinear preserves Candle's contiguous matmul fast paths and caches one
     effective weight per optimizer generation
 [x] Calibration orchestration moved to the CLI so quant remains below model
-    assembly and can be depended on by aarambh-ai-nn/model
+    assembly and can be depended on by aarambh-studio-nn/model
 ```
 
-**`aarambh-ai-model`, `aarambh-ai-nn`, and `aarambh-ai-train`:**
+**`aarambh-studio-model`, `aarambh-studio-nn`, and `aarambh-studio-train`:**
 ```
 [x] QAT wraps attention, FFN/expert, MoE-router, DeltaNet, DSA-indexer, MTP,
     and optional LM-head projections; embeddings/norms/convolutions/scalars
@@ -723,7 +723,7 @@ Qwen3.5 integrate video/vision early rather than bolting it on.
 
 ### Tasks
 
-**`aarambh-ai-vision` (extends v2's crate):**
+**`aarambh-studio-vision` (extends v2's crate):**
 ```
 [x] src/video.rs
       Native H.264 MP4 decode through bundled OpenH264, deterministic
@@ -743,7 +743,7 @@ Qwen3.5 integrate video/vision early rather than bolting it on.
       frozen CLIP forwards are chunked by encoder_frame_batch_size
 ```
 
-**`aarambh-ai-finetune`:**
+**`aarambh-studio-finetune`:**
 ```
 [x] Video instruction tuning reuses v2 Phase 20's DoRA-adapted VLM
     training path (`vlm_dora.rs`), extended to accept a sequence of frame
@@ -751,7 +751,7 @@ Qwen3.5 integrate video/vision early rather than bolting it on.
     temporal parameters share accumulation, clipping, and artifact-save cadence
 ```
 
-**`aarambh-ai-tokenizer`:**
+**`aarambh-studio-tokenizer`:**
 ```
 [x] New reserved special tokens: <video>, <video_end>, <frame_sep> — IDs
     9, 10, and 11, with deterministic legacy tokenizer and SafeTensors
@@ -762,7 +762,7 @@ Qwen3.5 integrate video/vision early rather than bolting it on.
 
 ```bash
 # Deterministic four-clip local fixture. FFmpeg is used only to create the
-# fixture; the aarambh-ai runtime decoder never invokes it.
+# fixture; the aarambh-studio runtime decoder never invokes it.
 python3 scripts/phase35_make_video_smoke_fixture.py
 scripts/phase35_smoke.sh
 
@@ -818,7 +818,7 @@ standing up a separate document-specific model.
 
 ### Tasks
 
-**`aarambh-ai-vision` (extends the crate again):**
+**`aarambh-studio-vision` (extends the crate again):**
 ```
 [x] src/document_sample.rs
       PageRasterizer — renders PDFs through pinned pure-Rust Hayro 0.4 and
@@ -847,14 +847,14 @@ standing up a separate document-specific model.
       covering both born-digital PDFs and scanned/rasterized pages
 ```
 
-**`aarambh-ai-finetune`:**
+**`aarambh-studio-finetune`:**
 ```
 [x] Document instruction tuning reuses the same DoRA-adapted VLM path as
     Phase 35's video tuning and v2 Phase 20's image tuning — one training
     code path, three data types (image, video, document)
 ```
 
-**`aarambh-ai-tokenizer`:**
+**`aarambh-studio-tokenizer`:**
 ```
 [x] New reserved special tokens: <document>, <document_end>, <page_sep> —
     IDs 12, 13, and 14, with deterministic video-tokenizer and SafeTensors
@@ -922,10 +922,10 @@ than one typed request per turn.
 
 ### Tasks
 
-**New crate `aarambh-ai-agent`:**
+**New crate `aarambh-studio-agent`:**
 ```
 [x] src/chain.rs
-      ToolChain — orchestrates repeated calls into aarambh-ai-inference's
+      ToolChain — orchestrates repeated calls into aarambh-studio-inference's
       existing single-call tool-call decoding path (v2 §30), feeding each
       tool's result back into context as the next turn's input
       MaxSteps / stopping conditions — explicit step budget, explicit
@@ -947,7 +947,7 @@ than one typed request per turn.
       attention has a practical ceiling worth planning for)
 ```
 
-**`aarambh-ai-finetune`:**
+**`aarambh-studio-finetune`:**
 ```
 [x] Multi-step tool-use SFT: extends v2 Phase 26's tool_sft.rs loss-
     masking scheme (mask everything except the tool-call spans and final
@@ -957,7 +957,7 @@ than one typed request per turn.
 
 **CLI:**
 ```
-[x] aarambh-ai agent --config <cfg> --tools tools.json --prompt "..." --max-steps 8
+[x] aarambh-studio agent --config <cfg> --tools tools.json --prompt "..." --max-steps 8
 ```
 
 ### Tests
@@ -998,13 +998,13 @@ git tag v3.0.0-alpha.9
 A diagnostic toolkit that measures catastrophic forgetting through
 controlled, fixed capability-probe regressions rather than unrelated
 one-off eval runs, producing persistent per-capability curves that both
-aarambh-ai's own self-learning loop (`SELF_LEARNING.md` §8,
+aarambh-studio's own self-learning loop (`SELF_LEARNING.md` §8,
 `SELF_LEARNING_V2.md` §17) and Manas v3's anti-forgetting design
 (`SELF_LEARNING_V3.md` in the Manas repo) can consume as a shared signal.
 
 ### Tasks
 
-**`aarambh-ai-eval` (extends v2's crate):**
+**`aarambh-studio-eval` (extends v2's crate):**
 ```
 [x] src/forgetting.rs
       CapabilityProbe — a small, fixed held-out set per capability
@@ -1030,7 +1030,7 @@ aarambh-ai's own self-learning loop (`SELF_LEARNING.md` §8,
     introspection cost
 ```
 
-**`aarambh-ai-selflearn`:**
+**`aarambh-studio-selflearn`:**
 ```
 [x] Forgetting diagnostics wired into the existing self-learning loop
     (`SELF_LEARNING.md` §5, §8): after each online-GRPO update batch, run
@@ -1040,7 +1040,7 @@ aarambh-ai's own self-learning loop (`SELF_LEARNING.md` §8,
 [x] Shared export format: forgetting curves exported in a schema
     documented to be directly importable by Manas's associative-memory
     anti-forgetting tracking (cross-project consistency between
-    aarambh-ai and Manas's own forgetting-diagnostics work)
+    aarambh-studio and Manas's own forgetting-diagnostics work)
 [x] No runtime dependency or filesystem discovery of `../manas`; JSONL is
     an explicit optional bridge controlled by the caller
 ```
@@ -1050,9 +1050,9 @@ aarambh-ai's own self-learning loop (`SELF_LEARNING.md` §8,
 [x] Read-only training observer runs a baseline, configurable optimizer-step
     probes, and a final probe without checkpoint serialization or parameter
     mutation; distributed ranks synchronize around rank-0 diagnostics
-[x] `aarambh-ai eval` records named checkpoint/session points and can export
+[x] `aarambh-studio eval` records named checkpoint/session points and can export
     JSON/Markdown scorecards plus the seven-field bridge JSONL
-[x] `aarambh-ai selflearn forgetting-report` summarizes persistent curves
+[x] `aarambh-studio selflearn forgetting-report` summarizes persistent curves
 [x] Checked-in probe manifest, JSON Schema, preparation/smoke scripts,
     smoke training config, and Phase 38 operating guide
 ```
@@ -1109,7 +1109,7 @@ long-horizon tool-use chain before the first tool call is even made.
 
 ### Tasks
 
-**`aarambh-ai-inference`:**
+**`aarambh-studio-inference`:**
 ```
 [x] src/thinking.rs (extends v1's existing module)
       ThinkingMode gains a fifth variant: None / Low(256) / Medium(1024)
@@ -1124,7 +1124,7 @@ long-horizon tool-use chain before the first tool call is even made.
       default_sampler() for the per-mode sampling table.)
 ```
 
-**`aarambh-ai-train`:**
+**`aarambh-studio-train`:**
 ```
 [x] Sampling defaults for Max mode, extending v1's existing table
     (`ARCHITECTURE.md` §8.2):
@@ -1150,21 +1150,21 @@ long-horizon tool-use chain before the first tool call is even made.
     the same incentive structure
 ```
 
-**`aarambh-ai-eval`:**
+**`aarambh-studio-eval`:**
 ```
 [x] New eval-harness task: a held-out "hard problems" subset specifically
     selected because they are unsolved (or solved at low accuracy) under
     High-mode budget, scoring Max-mode accuracy against that same set —
     the direct test of whether Max mode earns its larger budget rather
     than just spending more tokens for the same outcome
-    (data/eval/hard_problems/data.jsonl + crates/aarambh-ai-eval/src/tasks/hard_problems.rs;
+    (data/eval/hard_problems/data.jsonl + crates/aarambh-studio-eval/src/tasks/hard_problems.rs;
     reports accuracy, thinking_tokens, completion_tokens, total_tokens.)
 ```
 
 **CLI:**
 ```
-[x] aarambh-ai infer --config <cfg> --thinking max --prompt "..."
-[x] aarambh-ai agent --config <cfg> --thinking max --tools tools.json ...
+[x] aarambh-studio infer --config <cfg> --thinking max --prompt "..."
+[x] aarambh-studio agent --config <cfg> --thinking max --tools tools.json ...
       # pairs naturally with Phase 37's tool chains: Max-budget planning
       # before the first tool call, on the hardest multi-step tasks
     (serve, finetune grpo, distill train, selflearn start, and eval also
@@ -1207,8 +1207,8 @@ finetune grpo/distill train/selflearn start/eval all accept --thinking max.
 Accuracy improvement over High mode on a held-out High-insufficient set is
 documented (schema, no invented numbers) in docs/phase39_max_thinking_results.md;
 the optional Kaggle helper scripts produce the measurement when a trained
-checkpoint is supplied. `aarambh-ai infer --thinking max` and
-`aarambh-ai agent --thinking max` both work end to end.
+checkpoint is supplied. `aarambh-studio infer --thinking max` and
+`aarambh-studio agent --thinking max` both work end to end.
 
 git commit -m "feat: Phase 39 — Max thinking mode (16,384-token budget)"
 git tag v3.0.0-alpha.11
@@ -1243,8 +1243,8 @@ publishing is deferred to v4.0.0.
 
 ### Milestone
 ```
-cargo install --path aarambh-ai
-aarambh-ai --version  → aarambh-ai 3.0.0
+cargo install --path aarambh-studio
+aarambh-studio --version  → aarambh-studio 3.0.0
 git tag v3.0.0
 git push origin v3.0.0
 
@@ -1264,11 +1264,11 @@ git commit -m "chore: v3.0.0 — source release"
 | 30 | DSA | Sparse attention for remaining full-attention layers | Kaggle | 10–14 days ✅ |
 | 31 | Fine-Grained MoE | DeepSeek-style routing + shared expert, upgrades v2 dense MoE | Kaggle | 10–14 days ✅ |
 | 32 | MTP | Multi-token prediction heads, doubles as speculative-decode draft | Kaggle | 7–10 days ✅ |
-| 33 | On-Policy Distillation | New `aarambh-ai-distill`, teacher-scored student rollouts | Kaggle | 10–14 days ✅ |
+| 33 | On-Policy Distillation | New `aarambh-studio-distill`, teacher-scored student rollouts | Kaggle | 10–14 days ✅ |
 | 34 | Native QAT | Fake-quantize training, folds INT4/INT8 into the training loop | i3 + Kaggle | 7–10 days ✅ |
-| 35 | Video Understanding | Frame sampling + temporal fusion, extends `aarambh-ai-vision` | Kaggle | 14–18 days ✅ |
+| 35 | Video Understanding | Frame sampling + temporal fusion, extends `aarambh-studio-vision` | Kaggle | 14–18 days ✅ |
 | 36 | Document Understanding | Layout-aware projector, shares vision encoder with video | Kaggle | 10–14 days ✅ |
-| 37 | Long-Horizon Tool Chains | New `aarambh-ai-agent`, multi-step tool calls with result ingestion | i3 + Kaggle | 10–14 days ✅ |
+| 37 | Long-Horizon Tool Chains | New `aarambh-studio-agent`, multi-step tool calls with result ingestion | i3 + Kaggle | 10–14 days ✅ |
 | 38 | Forgetting Diagnostics | Per-capability forgetting curves, shared export format for Manas | i3 + Kaggle | 7–10 days ✅ |
 | 39 | Max Thinking Mode | 5th reasoning depth, 16,384-token budget, extends `ThinkingController` | i3 + Kaggle | 5–7 days ✅ |
 | 40 | v3.0.0 Source Release | CHANGELOG, RELEASE.md, CI, docs, release notes; crates.io deferred to v4 | all | 5–7 days ✅ |
@@ -1281,9 +1281,9 @@ git commit -m "chore: v3.0.0 — source release"
 
 | Dependency | Allowed crates | Reason |
 |---|---|---|
-| video container decode crate (permissive-licensed, e.g. an `ffmpeg`-free pure-Rust decoder) | `aarambh-ai-vision` | Frame extraction only, no network calls |
-| PDF/document rasterisation crate | `aarambh-ai-vision` | Page-to-image rendering only, no network calls |
-| (no new dependency for distillation or agent chains — both reuse existing `candle-core` and inference paths) | `aarambh-ai-distill`, `aarambh-ai-agent` | — |
+| video container decode crate (permissive-licensed, e.g. an `ffmpeg`-free pure-Rust decoder) | `aarambh-studio-vision` | Frame extraction only, no network calls |
+| PDF/document rasterisation crate | `aarambh-studio-vision` | Page-to-image rendering only, no network calls |
+| (no new dependency for distillation or agent chains — both reuse existing `candle-core` and inference paths) | `aarambh-studio-distill`, `aarambh-studio-agent` | — |
 
 **Still forbidden everywhere, unchanged from v1/v2:** PyTorch bindings
 (`tch-rs`), ONNX Runtime (`ort`), Python FFI, `llama.cpp` as a backend. All

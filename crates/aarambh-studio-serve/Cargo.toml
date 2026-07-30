@@ -1,0 +1,36 @@
+[package]
+name = "aarambh-studio-serve"
+version.workspace = true
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+cuda = [
+    "aarambh-studio-core/cuda",
+    "aarambh-studio-inference/cuda",
+    "aarambh-studio-safety/cuda",
+]
+
+[dependencies]
+aarambh-studio-core      = { path = "../aarambh-studio-core" }
+aarambh-studio-inference = { path = "../aarambh-studio-inference" }
+aarambh-studio-safety    = { path = "../aarambh-studio-safety" }
+axum                 = { workspace = true }
+futures-util         = { workspace = true }
+serde                = { workspace = true }
+serde_json           = { workspace = true }
+sha2                 = { workspace = true }
+tokio                = { workspace = true }
+tokio-stream         = { workspace = true, features = ["sync"] }
+tower                = { workspace = true }
+tower-http           = { workspace = true, features = ["cors", "limit", "request-id", "trace"] }
+tracing              = { workspace = true }
+
+[dev-dependencies]
+candle-core = { workspace = true }
+candle-nn   = { workspace = true }
+aarambh-studio-model = { path = "../aarambh-studio-model" }
+aarambh-studio-tokenizer = { path = "../aarambh-studio-tokenizer" }
+http-body-util = { workspace = true }

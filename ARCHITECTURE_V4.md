@@ -1,11 +1,11 @@
-# ARCHITECTURE_V4.md — aarambh-ai v4.0
+# ARCHITECTURE_V4.md — aarambh-studio v4.0
 
 > Companion to `ARCHITECTURE.md`, `ARCHITECTURE_V2.md`, and
 > `ARCHITECTURE_V3.md`. This document covers **only what v4.0 adds** on
 > top of the completed v3.0.0 architecture. Sections continue numbering
 > from v3's Section 52. Everything in the three prior documents is
 > unchanged and continues to work exactly as documented. v4.0 is the
-> **final planned version** of aarambh-ai as an application — see §69.
+> **final planned version** of aarambh-studio as an application — see §69.
 
 ---
 
@@ -36,7 +36,7 @@
 
 ## 53. What's New in v4.0
 
-v4.0 closes out aarambh-ai with twelve additions across four themes:
+v4.0 closes out aarambh-studio with twelve additions across four themes:
 
 **Attention completion:** Multi-Head Latent Attention (§55) joins Gated
 DeltaNet and DSA (both v3) as the third attention kind, completing the
@@ -77,7 +77,7 @@ Two new crates. Everything else extends in place — no crate is removed
 or renamed, matching the discipline every version has held since v1.
 
 ```
-aarambh-ai/
+aarambh-studio/
 ├── Cargo.toml
 ├── ARCHITECTURE.md / ARCHITECTURE_V2.md / ARCHITECTURE_V3.md / ARCHITECTURE_V4.md
 ├── ROADMAP.md / ROADMAP_V2.md / ROADMAP_V3.md / ROADMAP_V4.md
@@ -86,7 +86,7 @@ aarambh-ai/
 ├── crates/
 │   │   ...Layers 0–6 from v1.0.0/v2.0.0/v3.0.0, extended (see §55–65)...
 │   │
-│   ├── aarambh-ai-audio/             ← NEW, LAYER 3: Audio modality
+│   ├── aarambh-studio-audio/             ← NEW, LAYER 3: Audio modality
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── encoder.rs            ← frozen pretrained audio encoder
@@ -95,7 +95,7 @@ aarambh-ai/
 │   │       ├── fusion.rs             ← audio-token interleaving
 │   │       └── instruct_data.rs      ← AudioQaExample schema
 │   │
-│   └── aarambh-ai-retrieve/          ← NEW, LAYER 4: RAG
+│   └── aarambh-studio-retrieve/          ← NEW, LAYER 4: RAG
 │       └── src/
 │           ├── lib.rs
 │           ├── embedding.rs          ← contrastive text-embedding head
@@ -103,28 +103,28 @@ aarambh-ai/
 │           ├── chunking.rs           ← document chunking policy
 │           └── retrieval.rs          ← RetrievalPipeline
 │
-└── aarambh-ai/                       ← LAYER 6: CLI binary
+└── aarambh-studio/                       ← LAYER 6: CLI binary
     └── src/cmd/
         ├── ...train.rs / infer.rs / finetune.rs / quantise.rs /
         │    convert.rs / eval.rs / serve.rs / agent.rs...
-        ├── retrieve.rs               ← NEW: `aarambh-ai retrieve`
-        └── merge.rs                  ← NEW: `aarambh-ai merge`
+        ├── retrieve.rs               ← NEW: `aarambh-studio retrieve`
+        └── merge.rs                  ← NEW: `aarambh-studio merge`
 ```
 
 ### Extended (not new) crates in v4.0
 
 | Crate | v4.0 additions |
 |---|---|
-| `aarambh-ai-nn` | `mla.rs` (§55), `dispatch.rs` extended with `DispatchKind::Sparse` (§57) |
-| `aarambh-ai-model` | `attention_schedule` accepts `LatentMLA` entries, `MoeConfig.dispatch: DispatchKind` |
-| `aarambh-ai-train` | MLA retrofit recipe, multi-node `distributed.rs` extended (§58) |
-| `aarambh-ai-weights` | Partial-checkpoint loading extended for MLA layers, `merge.rs` (§64) |
-| `aarambh-ai-tokenizer` | `<audio>`/`<audio_end>` reserved tokens |
-| `aarambh-ai-finetune` | `vlm_dora.rs` extended for audio, `rlaif.rs` (§60) |
-| `aarambh-ai-inference` | `best_of_n.rs`, `self_consistency.rs`, `process_reward.rs` (§59), KV-cache report tooling (§55) |
-| `aarambh-ai-eval` | `audio_qa_subset.rs`, `--best-of-n` comparison flag |
-| `aarambh-ai-agent` | `sandbox.rs`, `authorization.rs` (§61), `orchestrator.rs` (§62) — extends the crate v3 §37 scaffolded |
-| `aarambh-ai-serve` | `auth.rs`, `prefix_cache.rs`, `tenant_isolation.rs` (§65) |
+| `aarambh-studio-nn` | `mla.rs` (§55), `dispatch.rs` extended with `DispatchKind::Sparse` (§57) |
+| `aarambh-studio-model` | `attention_schedule` accepts `LatentMLA` entries, `MoeConfig.dispatch: DispatchKind` |
+| `aarambh-studio-train` | MLA retrofit recipe, multi-node `distributed.rs` extended (§58) |
+| `aarambh-studio-weights` | Partial-checkpoint loading extended for MLA layers, `merge.rs` (§64) |
+| `aarambh-studio-tokenizer` | `<audio>`/`<audio_end>` reserved tokens |
+| `aarambh-studio-finetune` | `vlm_dora.rs` extended for audio, `rlaif.rs` (§60) |
+| `aarambh-studio-inference` | `best_of_n.rs`, `self_consistency.rs`, `process_reward.rs` (§59), KV-cache report tooling (§55) |
+| `aarambh-studio-eval` | `audio_qa_subset.rs`, `--best-of-n` comparison flag |
+| `aarambh-studio-agent` | `sandbox.rs`, `authorization.rs` (§61), `orchestrator.rs` (§62) — extends the crate v3 §37 scaffolded |
+| `aarambh-studio-serve` | `auth.rs`, `prefix_cache.rs`, `tenant_isolation.rs` (§65) |
 
 ### Updated Crate Count
 
@@ -145,7 +145,7 @@ another.
 
 ## 55. Multi-Head Latent Attention (MLA)
 
-**Crate:** `aarambh-ai-nn` (`mla.rs`) | **Depends on:** v1 §6.3 (GQA/RoPE), v2 §21 (YaRN/NTK), v3 §29 (`HybridAttentionSchedule`)
+**Crate:** `aarambh-studio-nn` (`mla.rs`) | **Depends on:** v1 §6.3 (GQA/RoPE), v2 §21 (YaRN/NTK), v3 §29 (`HybridAttentionSchedule`)
 
 ### The Problem
 
@@ -253,7 +253,7 @@ compression helps because the mechanism is theoretically sound.
 
 ## 56. Audio Modality
 
-**Crate:** `aarambh-ai-audio` (new) | **Depends on:** v2 §24–25 (vision fusion pattern), v1 §7 (thinking engine)
+**Crate:** `aarambh-studio-audio` (new) | **Depends on:** v2 §24–25 (vision fusion pattern), v1 §7 (thinking engine)
 
 ### The Same Recipe, a New Sense
 
@@ -319,7 +319,7 @@ never changes, only what feeds it.
 
 Following the same explicit-scope discipline as every other modality
 phase: this covers audio *understanding* (the model can be asked about
-audio it's given), not audio *generation* — aarambh-ai does not produce
+audio it's given), not audio *generation* — aarambh-studio does not produce
 audio output. That capability, along with the broader question of a
 dedicated audio-generation stack, belongs to a separate project
 entirely and is intentionally out of scope here.
@@ -328,7 +328,7 @@ entirely and is intentionally out of scope here.
 
 ## 57. Sparse/Grouped MoE Dispatch
 
-**Crate:** `aarambh-ai-nn` (`dispatch.rs`, extended) | **Depends on:** v2 §26 (MoE), v3 §40 (fine-grained MoE)
+**Crate:** `aarambh-studio-nn` (`dispatch.rs`, extended) | **Depends on:** v2 §26 (MoE), v3 §40 (fine-grained MoE)
 
 ### The Deferred Optimisation, Resolved
 
@@ -393,7 +393,7 @@ since have followed.
 
 ## 58. Multi-Node Distributed Training
 
-**Crate:** `aarambh-ai-train` (`distributed.rs`, extended) | **Depends on:** v2 §27 (single-node NCCL data parallel)
+**Crate:** `aarambh-studio-train` (`distributed.rs`, extended) | **Depends on:** v2 §27 (single-node NCCL data parallel)
 
 ### Scope
 
@@ -449,7 +449,7 @@ attempt to half-implement.
 
 ## 59. Test-Time Compute Scaling
 
-**Crate:** `aarambh-ai-inference` (`best_of_n.rs`, `self_consistency.rs`, `process_reward.rs`) | **Depends on:** v1 §7 (thinking engine), v2 §29 (speculative decoding), v1 §11/v2 §22 (verifiers)
+**Crate:** `aarambh-studio-inference` (`best_of_n.rs`, `self_consistency.rs`, `process_reward.rs`) | **Depends on:** v1 §7 (thinking engine), v2 §29 (speculative decoding), v1 §11/v2 §22 (verifiers)
 
 ### A New Axis, Not a Replacement
 
@@ -512,7 +512,7 @@ deltas; the scorecard is the source of truth, not the roadmap's prose.
 
 ## 60. RLAIF
 
-**Crate:** `aarambh-ai-finetune` (`rlaif.rs`) | **Depends on:** v1 §11 (GRPO), v2 §28 (DPO), v1 §12 (self-learning N-completion sampling)
+**Crate:** `aarambh-studio-finetune` (`rlaif.rs`) | **Depends on:** v1 §11 (GRPO), v2 §28 (DPO), v1 §12 (self-learning N-completion sampling)
 
 ### The Gap It Fills
 
@@ -577,7 +577,7 @@ this project has held since v1.
 
 ## 61. Tool Execution With Sandboxing
 
-**Crate:** `aarambh-ai-agent` (`sandbox.rs`, `authorization.rs`) | **Depends on:** v2 §30 (grammar-constrained emit-only tool calling), v3 §46 (multi-step chains, still emit-only)
+**Crate:** `aarambh-studio-agent` (`sandbox.rs`, `authorization.rs`) | **Depends on:** v2 §30 (grammar-constrained emit-only tool calling), v3 §46 (multi-step chains, still emit-only)
 
 ### Closing an Arc, Carefully
 
@@ -585,8 +585,8 @@ The boundary has moved twice already: v2 §30 gave the model
 grammar-constrained JSON tool calls it could *emit* but never execute.
 v3 §46 let it emit *sequences* of tool calls, using real intermediate
 results — but the execution of each call still happened outside
-aarambh-ai entirely, by the developer integrating it. v4 §61 is the
-first phase where aarambh-ai itself is permitted to execute a tool
+aarambh-studio entirely, by the developer integrating it. v4 §61 is the
+first phase where aarambh-studio itself is permitted to execute a tool
 call — and it is scoped as narrowly as the risk demands.
 
 ### Closed-World Execution
@@ -656,7 +656,7 @@ can be talked into requesting.
 
 ## 62. Multi-Agent Orchestration
 
-**Crate:** `aarambh-ai-agent` (`orchestrator.rs`) | **Depends on:** v4 §61 (sandboxed execution) — hard dependency, must ship after
+**Crate:** `aarambh-studio-agent` (`orchestrator.rs`) | **Depends on:** v4 §61 (sandboxed execution) — hard dependency, must ship after
 
 ### One Reasoning Process, Several Sandboxed Sub-Chains
 
@@ -708,7 +708,7 @@ missing or malformed entry.
 
 ## 63. Retrieval-Augmented Generation (RAG)
 
-**Crate:** `aarambh-ai-retrieve` (new) | **Depends on:** none within the model itself — deliberately a prompt-level augmentation, not a model-internals change
+**Crate:** `aarambh-studio-retrieve` (new) | **Depends on:** none within the model itself — deliberately a prompt-level augmentation, not a model-internals change
 
 ### Deliberately the Simplest Correct Design
 
@@ -769,7 +769,7 @@ discipline every capability claim in this project has held since v2
 
 ## 64. Model Merging / Weight Averaging
 
-**Crate:** `aarambh-ai-weights` (`merge.rs`) | **Depends on:** v2 §23 (DoRA), v2 §28 (DPO), v4 §60 (RLAIF), v3 §40 (fine-grained MoE), v3 §42 (distillation) — needs their checkpoint variants to exist
+**Crate:** `aarambh-studio-weights` (`merge.rs`) | **Depends on:** v2 §23 (DoRA), v2 §28 (DPO), v4 §60 (RLAIF), v3 §40 (fine-grained MoE), v3 §42 (distillation) — needs their checkpoint variants to exist
 
 ### Why Now, Not Earlier
 
@@ -826,7 +826,7 @@ MoE and every subsequent capability claim has held since.
 
 ## 65. Public Inference Server + Prefix Caching
 
-**Crate:** `aarambh-ai-serve` (`auth.rs`, `prefix_cache.rs`, `tenant_isolation.rs`) | **Depends on:** v2 §31 (local OpenAI-compatible server)
+**Crate:** `aarambh-studio-serve` (`auth.rs`, `prefix_cache.rs`, `tenant_isolation.rs`) | **Depends on:** v2 §31 (local OpenAI-compatible server)
 
 ### The Biggest Risk/Scope Jump in the Project's History
 
@@ -890,7 +890,7 @@ adds a capability, it does not change the recommended starting point.
 
 ## 66. System Role, Chat-Template Versioning, and Context Management
 
-**Crate:** `aarambh-ai-tokenizer`, `aarambh-ai-safety`, `aarambh-ai-serve`, `aarambh-ai-inference`/`aarambh-ai-agent` | **Depends on:** `<|system|>` token reservation (v1, ID 7), v2 §31 (server), v3 §46/v4 §61–62 (agentic chains), v4 §63 (RAG)
+**Crate:** `aarambh-studio-tokenizer`, `aarambh-studio-safety`, `aarambh-studio-serve`, `aarambh-studio-inference`/`aarambh-studio-agent` | **Depends on:** `<|system|>` token reservation (v1, ID 7), v2 §31 (server), v3 §46/v4 §61–62 (agentic chains), v4 §63 (RAG)
 
 ### Formalizing What Was Reserved but Undocumented
 
@@ -915,7 +915,7 @@ single token ID:
   operator- or application-supplied. `GenerationSession` (v2 §31) never
   derives system-turn content from a user's own message — a user's
   message can only ever occupy the `<|user|>` position, which the
-  existing prompt-injection guardrails (`aarambh-ai-safety`) already
+  existing prompt-injection guardrails (`aarambh-studio-safety`) already
   treat as untrusted. This is the system-side half of a defense whose
   user-side half (detecting `"new system prompt:"`-style injection
   attempts inside user input) has existed since v1.
@@ -978,7 +978,7 @@ writing, math/code verification).
 
 ## 67. Red-Team / Adversarial Safety Evaluation
 
-**Crate:** `aarambh-ai-safety` (`redteam/`) | **Depends on:** `ARCHITECTURE.md` §13 (safety layer), v4 §61 (sandboxed execution), v4 §65 (public server), v4 §66 (system-role precedence)
+**Crate:** `aarambh-studio-safety` (`redteam/`) | **Depends on:** `ARCHITECTURE.md` §13 (safety layer), v4 §61 (sandboxed execution), v4 §65 (public server), v4 §66 (system-role precedence)
 
 ### Distinct From Per-Phase Unit Tests
 
@@ -1028,7 +1028,7 @@ project has followed since v1.
 
 ## 68. Model Card
 
-**Crate:** `aarambh-ai-eval` (`model_card.rs`) | **Depends on:** v2 §17 (eval harness), v4 §67 (red-team report)
+**Crate:** `aarambh-studio-eval` (`model_card.rs`) | **Depends on:** v2 §17 (eval harness), v4 §67 (red-team report)
 
 ### One Canonical, Assembled — Not Hand-Written — Document
 
@@ -1064,20 +1064,20 @@ model card with an empty or stale safety section.
 ## 69. Updated Dependency Layers
 
 ```
-Layer 0: aarambh-ai-core
-Layer 1: aarambh-ai-tokenizer, aarambh-ai-data
-Layer 2: aarambh-ai-nn, aarambh-ai-kernel
-Layer 3: aarambh-ai-model, aarambh-ai-vision, aarambh-ai-audio (NEW)
-Layer 4: aarambh-ai-weights, aarambh-ai-quant, aarambh-ai-retrieve (NEW)
-Layer 5: aarambh-ai-train, aarambh-ai-finetune, aarambh-ai-inference,
-         aarambh-ai-safety, aarambh-ai-selflearn, aarambh-ai-eval,
-         aarambh-ai-distill, aarambh-ai-agent
-Layer 6: aarambh-ai-serve, aarambh-ai (CLI binary)
+Layer 0: aarambh-studio-core
+Layer 1: aarambh-studio-tokenizer, aarambh-studio-data
+Layer 2: aarambh-studio-nn, aarambh-studio-kernel
+Layer 3: aarambh-studio-model, aarambh-studio-vision, aarambh-studio-audio (NEW)
+Layer 4: aarambh-studio-weights, aarambh-studio-quant, aarambh-studio-retrieve (NEW)
+Layer 5: aarambh-studio-train, aarambh-studio-finetune, aarambh-studio-inference,
+         aarambh-studio-safety, aarambh-studio-selflearn, aarambh-studio-eval,
+         aarambh-studio-distill, aarambh-studio-agent
+Layer 6: aarambh-studio-serve, aarambh-studio (CLI binary)
 ```
 
-`aarambh-ai-audio` sits at Layer 3 alongside `aarambh-ai-vision` —
+`aarambh-studio-audio` sits at Layer 3 alongside `aarambh-studio-vision` —
 same role, a modality-specific encoder/fusion crate consumed by the
-model layer above it. `aarambh-ai-retrieve` sits at Layer 4 — it
+model layer above it. `aarambh-studio-retrieve` sits at Layer 4 — it
 depends on tokenization and its own small embedding model, but produces
 prompt-level context rather than model-internal state, placing it
 alongside the weights/quant utilities rather than inside the core
@@ -1089,8 +1089,8 @@ v2.
 
 | Dependency | Allowed crates | Reason |
 |---|---|---|
-| Permissively-licensed audio decode (pure-Rust or system-library-bound) | `aarambh-ai-audio` | Local mel-spectrogram extraction only — no network calls, no Python audio tooling |
-| Small contrastive text-embedding architecture | `aarambh-ai-retrieve` | Loaded as SafeTensors via `candle-core`, same policy as every other encoder in the project |
+| Permissively-licensed audio decode (pure-Rust or system-library-bound) | `aarambh-studio-audio` | Local mel-spectrogram extraction only — no network calls, no Python audio tooling |
+| Small contrastive text-embedding architecture | `aarambh-studio-retrieve` | Loaded as SafeTensors via `candle-core`, same policy as every other encoder in the project |
 
 **Still forbidden everywhere, unchanged since v1:** PyTorch bindings,
 ONNX Runtime, Python FFI, `llama.cpp` as a backend. All computation
@@ -1147,7 +1147,7 @@ rather than silently degrading or producing misleading numbers.
 
 ## 72. Final Release Contract — Why v4.0 Is the Last Version
 
-v4.0.0 is confirmed as **the final planned version of aarambh-ai as an
+v4.0.0 is confirmed as **the final planned version of aarambh-studio as an
 application.** This section states the reasoning plainly, the same way
 every other design decision in this project has been stated rather than
 left implicit.
@@ -1165,7 +1165,7 @@ natural, deliberately-declared end state here.
 **Release policy, corrected and finalised.** v4.0.0 ships as a GitHub
 source release. Every workspace crate remains `publish = false`. This
 explicitly corrects the direction implied by v3 §40 (which described a
-crates.io publish) — aarambh-ai is an **application**, not a **library**,
+crates.io publish) — aarambh-studio is an **application**, not a **library**,
 and the project's actual, confirmed policy going forward is: source
 only, no crates.io publish, ever, consistent with v1.0.0's and
 v2.0.0's original release policy. No pretrained checkpoint, adapter,

@@ -1,4 +1,4 @@
-# ROADMAP_V2.md — aarambh-ai v2.0
+# ROADMAP_V2.md — aarambh-studio v2.0
 
 > Step-by-step build plan for v2.0. Every phase ends with working, testable code.
 > Builds on the completed v1.0.0 base (Phases 0–15, all ✅). No pretrained
@@ -76,31 +76,31 @@ Phase 28 →  Production release v2.0.0           (5–7 days)    [all] ✅
 [workspace]
 members = [
     # ...existing v1.0.0 members unchanged...
-    "crates/aarambh-ai-core",
-    "crates/aarambh-ai-tokenizer",
-    "crates/aarambh-ai-data",
-    "crates/aarambh-ai-nn",
-    "crates/aarambh-ai-kernel",
-    "crates/aarambh-ai-model",
-    "crates/aarambh-ai-weights",
-    "crates/aarambh-ai-quant",
-    "crates/aarambh-ai-train",
-    "crates/aarambh-ai-finetune",
-    "crates/aarambh-ai-inference",
-    "crates/aarambh-ai-safety",
-    "crates/aarambh-ai-selflearn",
+    "crates/aarambh-studio-core",
+    "crates/aarambh-studio-tokenizer",
+    "crates/aarambh-studio-data",
+    "crates/aarambh-studio-nn",
+    "crates/aarambh-studio-kernel",
+    "crates/aarambh-studio-model",
+    "crates/aarambh-studio-weights",
+    "crates/aarambh-studio-quant",
+    "crates/aarambh-studio-train",
+    "crates/aarambh-studio-finetune",
+    "crates/aarambh-studio-inference",
+    "crates/aarambh-studio-safety",
+    "crates/aarambh-studio-selflearn",
 
     # new in v2.0
-    "crates/aarambh-ai-eval",       # Phase 17
-    "crates/aarambh-ai-vision",     # Phase 19
-    "crates/aarambh-ai-serve",      # Phase 27
+    "crates/aarambh-studio-eval",       # Phase 17
+    "crates/aarambh-studio-vision",     # Phase 19
+    "crates/aarambh-studio-serve",      # Phase 27
 
-    "aarambh-ai",
+    "aarambh-studio",
 ]
 ```
 
-Three new crates (`aarambh-ai-eval`, `aarambh-ai-vision`, and
-`aarambh-ai-serve`). Everything else extends existing crates. No new
+Three new crates (`aarambh-studio-eval`, `aarambh-studio-vision`, and
+`aarambh-studio-serve`). Everything else extends existing crates. No new
 external dependencies beyond what's listed in each phase's Dependency
 Policy note.
 
@@ -117,11 +117,11 @@ frequency interpolation. Short-context quality does not regress.
 
 ### Tasks
 
-**`aarambh-ai-nn`:**
+**`aarambh-studio-nn`:**
 ```
 [x] src/rope_scaling.rs
-      RopeScalingConfig lives in aarambh-ai-core because ModelConfig owns it;
-      aarambh-ai-nn implements method: Yarn | Ntk | Linear, factor,
+      RopeScalingConfig lives in aarambh-studio-core because ModelConfig owns it;
+      aarambh-studio-nn implements method: Yarn | Ntk | Linear, factor,
       original_max_seq_len, beta_fast, beta_slow, attn_factor
       yarn_frequencies() — per-dimension interpolation between original and
         scaled inverse frequencies, ramp function over beta_fast/beta_slow
@@ -133,7 +133,7 @@ frequency interpolation. Short-context quality does not regress.
       KV cache preallocation now takes scaled max_seq_len as a parameter
 ```
 
-**`aarambh-ai-model`:**
+**`aarambh-studio-model`:**
 ```
 [x] Model config gains `rope_scaling: Option<RopeScalingConfig>`
 [x] Backward compatible: rope_scaling = None reproduces exact v1.0.0 output
@@ -142,7 +142,7 @@ frequency interpolation. Short-context quality does not regress.
       configs/large_16k.toml
 ```
 
-**`aarambh-ai-train`:**
+**`aarambh-studio-train`:**
 ```
 [x] Short continued-pretraining recipe: fine-tune an existing checkpoint on
     long-document data at the new context length (not from-scratch training)
@@ -198,18 +198,18 @@ git tag v2.0.0-alpha.1
 **Duration:** 7–10 days | **Hardware:** i3 (small sets) + Kaggle (full sets)
 
 ### Goal
-`aarambh-ai eval` command that runs perplexity-on-holdout plus free public
+`aarambh-studio eval` command that runs perplexity-on-holdout plus free public
 benchmark subsets, and prints a scorecard. This is the measuring stick for
 every phase that follows — no model change after this point ships without a
 before/after number.
 
 ### Tasks
 
-**New crate `aarambh-ai-eval`:**
+**New crate `aarambh-studio-eval`:**
 ```
 [x] src/ppl.rs
       compute_ppl(model, tokenizer, holdout_path) -> f32
-      Reuses existing masked cross-entropy from aarambh-ai-train, eval-only
+      Reuses existing masked cross-entropy from aarambh-studio-train, eval-only
       (no gradient, no optimizer state)
 
 [x] src/harness.rs
@@ -226,11 +226,11 @@ before/after number.
 
 [x] src/tasks/gsm8k_subset.rs
       Small free subset of GSM8K, exact-match on final numeric answer
-      Reuses MathVerifier from aarambh-ai-finetune (Phase 10's GRPO verifier)
+      Reuses MathVerifier from aarambh-studio-finetune (Phase 10's GRPO verifier)
 
 [x] src/tasks/humaneval_lite.rs
       Small free subset of HumanEval, pass@1 via sandboxed execution
-      Adds and reuses CodeVerifier from aarambh-ai-finetune
+      Adds and reuses CodeVerifier from aarambh-studio-finetune
 
 [x] src/report.rs
       Scorecard { ppl, mmlu, hellaswag, gsm8k, humaneval, context_len_used }
@@ -238,11 +238,11 @@ before/after number.
       to_json() — machine-readable for CI regression checks
 ```
 
-**CLI (`aarambh-ai`):**
+**CLI (`aarambh-studio`):**
 ```
-[x] aarambh-ai eval --config <cfg> --model <ckpt> --tasks ppl,mmlu,hellaswag
-[x] aarambh-ai eval --config <cfg> --model <ckpt> --tasks all --out scorecard.json
-[x] aarambh-ai eval --compare scorecard_before.json scorecard_after.json
+[x] aarambh-studio eval --config <cfg> --model <ckpt> --tasks ppl,mmlu,hellaswag
+[x] aarambh-studio eval --config <cfg> --model <ckpt> --tasks all --out scorecard.json
+[x] aarambh-studio eval --compare scorecard_before.json scorecard_after.json
 ```
 
 ### Data Setup
@@ -271,7 +271,7 @@ fn scorecard_json_roundtrips_and_compare_reports_deltas() {}
 
 ### Milestone
 ```
-`aarambh-ai eval` code/config support is implemented with offline unit tests
+`aarambh-studio eval` code/config support is implemented with offline unit tests
 and fixture-safe CI. Full Tiny/Small/Medium benchmark scorecards are user-run
 because this repository does not ship pretrained checkpoints.
 
@@ -286,7 +286,7 @@ git tag v2.0.0-alpha.2
 **Duration:** 7–10 days | **Hardware:** i3 (small scale) + Kaggle (Small+)
 
 ### Goal
-`aarambh-ai finetune dora` alongside the existing `lora`/`qlora`/`sft`/`merge`
+`aarambh-studio finetune dora` alongside the existing `lora`/`qlora`/`sft`/`merge`
 commands. DoRA decomposes each adapted weight matrix into a magnitude vector
 and a direction matrix, applies the LoRA-style low-rank update to direction
 only, and trains magnitude as a separate free parameter. Same adapter
@@ -294,7 +294,7 @@ save/merge pattern as LoRA — this is additive, not a replacement.
 
 ### Tasks
 
-**`aarambh-ai-finetune`:**
+**`aarambh-studio-finetune`:**
 ```
 [x] src/dora.rs
       DoraConfig { rank, alpha, dropout, target_modules, group_size }
@@ -321,9 +321,9 @@ save/merge pattern as LoRA — this is additive, not a replacement.
       run_dora_from_config, merge_dora_from_paths
 
 [x] CLI
-      aarambh-ai finetune dora --config <cfg> --data <sft.jsonl>
-      aarambh-ai finetune qdora --config <cfg> --data <sft.jsonl>
-      aarambh-ai finetune merge --adapter <path> --method dora
+      aarambh-studio finetune dora --config <cfg> --data <sft.jsonl>
+      aarambh-studio finetune qdora --config <cfg> --data <sft.jsonl>
+      aarambh-studio finetune merge --adapter <path> --method dora
 ```
 
 ### Tests
@@ -367,7 +367,7 @@ git tag v2.0.0-alpha.3
 **Duration:** 10–14 days | **Hardware:** Kaggle (T4/P100)
 
 ### Goal
-New `aarambh-ai-vision` crate. A frozen, pretrained ViT-class image encoder
+New `aarambh-studio-vision` crate. A frozen, pretrained ViT-class image encoder
 (CLIP-B/32 scale, ~86M params, loaded from public SafeTensors weights via
 Candle — no PyTorch bindings, no ONNX Runtime, no Python FFI, consistent
 with the existing Dependency Policy) plus a small trainable projector MLP
@@ -377,7 +377,7 @@ trains.
 
 ### Tasks
 
-**New crate `aarambh-ai-vision`:**
+**New crate `aarambh-studio-vision`:**
 ```
 [x] src/encoder.rs
       VisionEncoderConfig { patch_size, image_size, vit_d_model, vit_layers,
@@ -405,14 +405,14 @@ trains.
       VisionModel { encoder: ClipVisionEncoder (frozen), projector: Projector (trainable) }
 ```
 
-**`aarambh-ai-tokenizer`:**
+**`aarambh-studio-tokenizer`:**
 ```
 [x] Reserve <image> and <image_end> special token IDs (alongside existing
     <think>/</think> reserved IDs from Phase 7)
 [x] Extend special-token validation so v2 tokenizers keep every reserved ID stable
 ```
 
-**`aarambh-ai-train`:**
+**`aarambh-studio-train`:**
 ```
 [x] src/vision_projector.rs
       Stage-1 recipe: encoder frozen, LLM frozen, only Projector trains
@@ -422,8 +422,8 @@ trains.
 
 **CLI:**
 ```
-[x] aarambh-ai train --config configs/vision_projector_pretrain.toml
-[x] aarambh-ai infer --config <cfg> --image path.jpg --prompt "What is this?"
+[x] aarambh-studio train --config configs/vision_projector_pretrain.toml
+[x] aarambh-studio infer --config <cfg> --image path.jpg --prompt "What is this?"
 ```
 
 ### Data Setup
@@ -480,7 +480,7 @@ questions about an image, not just caption it.
 
 ### Tasks
 
-**`aarambh-ai-vision`:**
+**`aarambh-studio-vision`:**
 ```
 [x] src/instruct_data.rs
       VqaExample { image_path, question, answer, thinking: Option<String> }
@@ -488,7 +488,7 @@ questions about an image, not just caption it.
       from Phase 9 (build_loss_mask reused unmodified)
 ```
 
-**`aarambh-ai-finetune`:**
+**`aarambh-studio-finetune`:**
 ```
 [x] src/vlm_dora.rs
       VlmDoraTrainer combines: frozen vision encoder, frozen-or-tunable
@@ -496,7 +496,7 @@ questions about an image, not just caption it.
       Only DoRA adapter params + optionally projector params enter AdamW
 ```
 
-**`aarambh-ai-inference`:**
+**`aarambh-studio-inference`:**
 ```
 [x] Existing infer path: --image flag prepends vision tokens before
     the KV-cache prefill step, otherwise inference is unchanged
@@ -514,7 +514,7 @@ scripts/phase20_prepare_llava_instruct.sh data
 Local smoke data:
 ```bash
 python3 scripts/phase20_make_vqa_smoke_fixture.py
-cargo run --release -p aarambh-ai -- finetune vlm-dora \
+cargo run --release -p aarambh-studio -- finetune vlm-dora \
   --config configs/vision_vqa_smoke.toml \
   --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --tokenizer checkpoints/vision_projector_smoke/tokenizer.json \
@@ -561,7 +561,7 @@ git tag v2.0.0-alpha.5
 > sequencing purposes.
 
 ### Goal
-Extend the existing self-learning loop (`aarambh-ai-selflearn`) to handle
+Extend the existing self-learning loop (`aarambh-studio-selflearn`) to handle
 image-grounded turns. Text-only self-learning continues to work unmodified
 on the i3, exactly as it does today. Vision self-learning is gated to
 Kaggle only because a forward pass through the frozen ViT encoder on every
@@ -569,7 +569,7 @@ turn pushes memory well past the i3's comfortable CPU-safe envelope.
 
 ### Tasks
 
-**`aarambh-ai-selflearn`:**
+**`aarambh-studio-selflearn`:**
 ```
 [x] src/replay.rs + src/vision_cache.rs
       Extend ReplayEntry with `image_ref: Option<PathBuf>` and cache projected
@@ -596,9 +596,9 @@ turn pushes memory well past the i3's comfortable CPU-safe envelope.
 
 **CLI:**
 ```
-[x] aarambh-ai selflearn start --mode vision   (Kaggle only, errors on i3 with
+[x] aarambh-studio selflearn start --mode vision   (Kaggle only, errors on i3 with
                                                  a clear message pointing here)
-[x] aarambh-ai selflearn stats --mode vision
+[x] aarambh-studio selflearn stats --mode vision
 ```
 
 ### Tests
@@ -646,7 +646,7 @@ at this parameter count before it's treated as a default.
 
 ### Tasks
 
-**`aarambh-ai-nn`:**
+**`aarambh-studio-nn`:**
 ```
 [x] src/moe.rs
       MoeConfig { num_experts, top_k, expert_ffn_dim, aux_loss_weight, every_n_layers }
@@ -662,14 +662,14 @@ at this parameter count before it's treated as a default.
       implementation is an optional follow-up, not required for this phase)
 ```
 
-**`aarambh-ai-model`:**
+**`aarambh-studio-model`:**
 ```
 [x] Model config gains `moe: Option<MoeConfig>` every-N-layers
 [x] New MoE-scale config: configs/small_moe.toml (Small dense-equivalent
     active params, more total params via experts)
 ```
 
-**`aarambh-ai-train`:**
+**`aarambh-studio-train`:**
 ```
 [x] Total loss = cross_entropy_loss + aux_loss_weight * load_balancing_loss
 [x] Training log line gains `expert_util=[...]` per-expert utilization stats
@@ -717,11 +717,11 @@ break the existing single-GPU path from Phase 13).
 
 ### Tasks
 
-**`aarambh-ai-train`:**
+**`aarambh-studio-train`:**
 ```
 [x] src/distributed.rs
       DistributedConfig + env override resolution for
-      AARAMBH_WORLD_SIZE/RANK/LOCAL_RANK
+      AARAMBH_STUDIO_WORLD_SIZE/RANK/LOCAL_RANK
       single-node NCCL rendezvous through .aarambh_dist/<run_id>/nccl_id.bin
       bucketed F32 gradient all-reduce before clipping/AdamW
       rank-0 fallback when a Kaggle 2×T4 session is not available
@@ -732,7 +732,7 @@ break the existing single-GPU path from Phase 13).
       gradient sync runs after accumulation and before clipping
       logging, validation, best/final checkpoints save only from rank 0
 
-[x] aarambh-ai-data
+[x] aarambh-studio-data
       DataLoader::new_sharded gives each rank equal-count disjoint batches
       DataLoader::new_with_seed keeps rank-local shuffling deterministic
 ```
@@ -741,12 +741,12 @@ break the existing single-GPU path from Phase 13).
 
 ```bash
 # No new dataset; reuses Phase 13's WikiText-103 pipeline, sharded across ranks.
-cargo build --release -p aarambh-ai --features cuda
-export AARAMBH_WORLD_SIZE=2
-export AARAMBH_DIST_RUN_ID=wikitext-2gpu-$(date +%s)
-AARAMBH_RANK=0 AARAMBH_LOCAL_RANK=0 ./target/release/aarambh-ai train \
+cargo build --release -p aarambh-studio --features cuda
+export AARAMBH_STUDIO_WORLD_SIZE=2
+export AARAMBH_STUDIO_DIST_RUN_ID=wikitext-2gpu-$(date +%s)
+AARAMBH_STUDIO_RANK=0 AARAMBH_STUDIO_LOCAL_RANK=0 ./target/release/aarambh-studio train \
   --config configs/wikitext103_small_2gpu.toml &
-AARAMBH_RANK=1 AARAMBH_LOCAL_RANK=1 ./target/release/aarambh-ai train \
+AARAMBH_STUDIO_RANK=1 AARAMBH_STUDIO_LOCAL_RANK=1 ./target/release/aarambh-studio train \
   --config configs/wikitext103_small_2gpu.toml &
 wait
 ```
@@ -792,7 +792,7 @@ apply well.
 
 ### Tasks
 
-**`aarambh-ai-finetune`:**
+**`aarambh-studio-finetune`:**
 ```
 [x] src/dpo.rs
       DpoConfig { beta, reference_free, max_prompt_tokens, max_completion_tokens }
@@ -806,7 +806,7 @@ apply well.
       adapter-only AdamW, accumulation, clipping, cosine schedule, step/final saves
       reference defaults to base; explicit reference-free mode supported
 
-[x] aarambh-ai-eval
+[x] aarambh-studio-eval
       `preference` task reports held-out chosen/rejected win rate using mean
       completion log-probability
 ```
@@ -861,7 +861,7 @@ parity confirm that the optimization does not change target-model behavior.
 
 ### Tasks
 
-**`aarambh-ai-inference`:**
+**`aarambh-studio-inference`:**
 ```
 [x] src/speculative.rs
       SpeculativeConfig { num_draft_tokens }
@@ -876,7 +876,7 @@ parity confirm that the optimization does not change target-model behavior.
 [x] KV-cache rollback, target-pending-token optimization, and telemetry
 
 [x] CLI
-      aarambh-ai infer --config <cfg> --speculative \
+      aarambh-studio infer --config <cfg> --speculative \
         --draft-config <tiny.toml> --draft-model <tiny.safetensors>
 ```
 
@@ -920,7 +920,7 @@ SFT alone.
 
 ### Tasks
 
-**`aarambh-ai-inference`:**
+**`aarambh-studio-inference`:**
 ```
 [x] src/grammar.rs
       JsonSchemaGrammar — compiles a JSON Schema into a token-level
@@ -935,7 +935,7 @@ SFT alone.
       answer directly or emit a constrained tool_call block
 ```
 
-**`aarambh-ai-finetune`:**
+**`aarambh-studio-finetune`:**
 ```
 [x] src/tool_sft.rs
       Tool-call JSONL schema: {"instruction", "tools": [...], "tool_call": {...} | null, "response"}
@@ -944,7 +944,7 @@ SFT alone.
 
 **CLI:**
 ```
-[x] aarambh-ai infer --config <cfg> --tools tools.json --prompt "..."
+[x] aarambh-studio infer --config <cfg> --tools tools.json --prompt "..."
 ```
 
 ### Tests
@@ -995,7 +995,7 @@ by this phase**, same "source, not artifacts" policy as the rest of v2.0.
 
 ### Tasks
 
-**New crate `aarambh-ai-serve`:**
+**New crate `aarambh-studio-serve`:**
 ```
 [x] src/server.rs
       Axum 0.8.9 routing, bounded JSON requests, bearer auth, tracing,
@@ -1011,7 +1011,7 @@ by this phase**, same "source, not artifacts" policy as the rest of v2.0.
       rather than waiting for a full batch to complete (standard continuous
       batching, not static batching)
 
-[x] Resumable GenerationSession in aarambh-ai-inference
+[x] Resumable GenerationSession in aarambh-studio-inference
       Per-request preallocated KV cache, sampler, thinking/tool/stop state,
       chunked prefill, and shared batched decode projections/FFN
 
@@ -1022,8 +1022,8 @@ by this phase**, same "source, not artifacts" policy as the rest of v2.0.
 
 **CLI:**
 ```
-[x] aarambh-ai serve --config <cfg> --model <ckpt> --port 8080
-[x] aarambh-ai serve --config <cfg> --model <ckpt> --tools tools.json --thinking medium
+[x] aarambh-studio serve --config <cfg> --model <ckpt> --port 8080
+[x] aarambh-studio serve --config <cfg> --model <ckpt> --tools tools.json --thinking medium
 ```
 
 ### Tests
@@ -1085,8 +1085,8 @@ tokenizers, GGUF files, or compiled binaries.
 
 ### Milestone
 ```
-cargo install --path aarambh-ai --locked
-aarambh-ai --version  → aarambh-ai 2.0.0
+cargo install --path aarambh-studio --locked
+aarambh-studio --version  → aarambh-studio 2.0.0
 git tag v2.0.0
 git push origin v2.0.0
 
@@ -1104,9 +1104,9 @@ git commit -m "chore: prepare v2.0.0 production source release"
 | # | Phase | Key Deliverable | Hardware | Duration |
 |---|---|---|---|---|
 | 16 | Long Context | YaRN/NTK RoPE scaling, 4K → 16K+ | Kaggle | 7–10 days |
-| 17 | Evaluation Harness | `aarambh-ai eval`, PPL + MMLU-lite/HellaSwag/GSM8K/HumanEval-lite | i3 + Kaggle | 7–10 days |
-| 18 | DoRA | Weight-decomposed LoRA in `aarambh-ai-finetune` | i3 + Kaggle | 7–10 days |
-| 19 | Vision Encoder + Projector | ✅ New `aarambh-ai-vision` crate, frozen ViT + trainable projector | Kaggle | 10–14 days |
+| 17 | Evaluation Harness | `aarambh-studio eval`, PPL + MMLU-lite/HellaSwag/GSM8K/HumanEval-lite | i3 + Kaggle | 7–10 days |
+| 18 | DoRA | Weight-decomposed LoRA in `aarambh-studio-finetune` | i3 + Kaggle | 7–10 days |
+| 19 | Vision Encoder + Projector | ✅ New `aarambh-studio-vision` crate, frozen ViT + trainable projector | Kaggle | 10–14 days |
 | 20 | Vision-Language Training | ✅ VQA instruction tuning via DoRA-adapted VLM | Kaggle | 10–14 days |
 | 21 | Vision-Aware Self-Learning | ✅ Image-grounded replay + verifier, Kaggle-only | Kaggle only | 7–10 days |
 | 22 | Mixture of Experts | ✅ Top-k router, load-balancing loss | Kaggle | 10–14 days |

@@ -1,0 +1,17 @@
+[package]
+name = "aarambh-studio-agent"
+version.workspace = true
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+cuda = ["aarambh-studio-inference/cuda"]
+
+[dependencies]
+aarambh-studio-core      = { path = "../aarambh-studio-core" }
+aarambh-studio-inference = { path = "../aarambh-studio-inference" }
+serde                = { workspace = true }
+serde_json           = { workspace = true }
+thiserror            = { workspace = true }

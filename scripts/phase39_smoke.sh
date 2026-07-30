@@ -12,26 +12,26 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 echo "==> Phase 39 unit + contract tests"
-cargo test --locked -p aarambh-ai-inference thinking
-cargo test --locked -p aarambh-ai-finetune --lib grpo
-cargo test --locked -p aarambh-ai-distill config
-cargo test --locked -p aarambh-ai-eval --lib hard_problems
-cargo test --locked -p aarambh-ai-eval --lib generation
+cargo test --locked -p aarambh-studio-inference thinking
+cargo test --locked -p aarambh-studio-finetune --lib grpo
+cargo test --locked -p aarambh-studio-distill config
+cargo test --locked -p aarambh-studio-eval --lib hard_problems
+cargo test --locked -p aarambh-studio-eval --lib generation
 
 echo "==> Phase 39 CLI surface accepts --thinking max"
-cargo run --quiet --locked -p aarambh-ai -- infer --help |
+cargo run --quiet --locked -p aarambh-studio -- infer --help |
   rg --quiet -- 'none, low, medium, high, or max'
-cargo run --quiet --locked -p aarambh-ai -- agent --help |
+cargo run --quiet --locked -p aarambh-studio -- agent --help |
   rg --quiet -- 'none, low, medium, high, or max'
-cargo run --quiet --locked -p aarambh-ai -- eval --help |
+cargo run --quiet --locked -p aarambh-studio -- eval --help |
   rg --quiet -- 'none, low, medium, high, or max'
-cargo run --quiet --locked -p aarambh-ai -- serve --help |
+cargo run --quiet --locked -p aarambh-studio -- serve --help |
   rg --quiet -- 'thinking'
-cargo run --quiet --locked -p aarambh-ai -- finetune grpo --help |
+cargo run --quiet --locked -p aarambh-studio -- finetune grpo --help |
   rg --quiet -- 'thinking'
-cargo run --quiet --locked -p aarambh-ai -- distill train --help |
+cargo run --quiet --locked -p aarambh-studio -- distill train --help |
   rg --quiet -- 'thinking'
-cargo run --quiet --locked -p aarambh-ai -- selflearn start --help |
+cargo run --quiet --locked -p aarambh-studio -- selflearn start --help |
   rg --quiet -- 'none, low, medium, high, or max'
 
 echo "==> Phase 39 hard-problems fixture is well-formed"
@@ -54,7 +54,7 @@ if [[ -n "${PHASE39_MODEL:-}" ]]; then
   mkdir -p "$PHASE39_STATE"
 
   echo "==> Phase 39 infer smoke (max mode)"
-  cargo run --quiet --locked -p aarambh-ai -- infer \
+  cargo run --quiet --locked -p aarambh-studio -- infer \
     --config "$PHASE39_CONFIG" \
     --model "$PHASE39_MODEL" \
     --tokenizer "$PHASE39_TOKENIZER" \
@@ -64,7 +64,7 @@ if [[ -n "${PHASE39_MODEL:-}" ]]; then
 
   echo "==> Phase 39 eval High-vs-Max comparison on hard-problems"
   for mode in high max; do
-    cargo run --quiet --locked -p aarambh-ai -- eval \
+    cargo run --quiet --locked -p aarambh-studio -- eval \
       --config "$PHASE39_CONFIG" \
       --model "$PHASE39_MODEL" \
       --tokenizer "$PHASE39_TOKENIZER" \

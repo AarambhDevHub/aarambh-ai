@@ -33,7 +33,7 @@ MAX_NEW_TOKENS="${PHASE39_MAX_NEW_TOKENS:-1024}"
 STEPS="${PHASE39_STEPS:-200}"
 
 echo "==> Phase 39 GRPO re-run with Max-budget rollouts (optional, Kaggle)"
-cargo run --quiet --locked --release -p aarambh-ai -- finetune grpo \
+cargo run --quiet --locked --release -p aarambh-studio -- finetune grpo \
   --config "$PHASE39_CONFIG" \
   --base "$PHASE39_BASE" \
   --reference "$PHASE39_REFERENCE" \

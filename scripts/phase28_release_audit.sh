@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-EXPECTED_VERSION="${AARAMBH_EXPECTED_VERSION:-}"
+EXPECTED_VERSION="${AARAMBH_STUDIO_EXPECTED_VERSION:-}"
 EXPECTED_PACKAGES=19
 
 command -v jq >/dev/null 2>&1 || {
@@ -52,8 +52,8 @@ if [[ -n "$invalid_packages" ]]; then
   exit 1
 fi
 
-cli_version="$(cargo run --quiet --locked -p aarambh-ai -- --version)"
-if [[ "$cli_version" != "aarambh-ai $EXPECTED_VERSION" ]]; then
+cli_version="$(cargo run --quiet --locked -p aarambh-studio -- --version)"
+if [[ "$cli_version" != "aarambh-studio $EXPECTED_VERSION" ]]; then
   echo "unexpected CLI version: $cli_version" >&2
   exit 1
 fi
@@ -65,7 +65,7 @@ then
   exit 1
 fi
 
-if rg -n -U '__global__[^\{]+\{\s*\}' crates/aarambh-ai-kernel/kernels -g '*.cu'; then
+if rg -n -U '__global__[^\{]+\{\s*\}' crates/aarambh-studio-kernel/kernels -g '*.cu'; then
   echo "empty CUDA kernel bodies are not allowed" >&2
   exit 1
 fi
@@ -91,4 +91,4 @@ if rg -n 'cargo publish' .github/workflows; then
   exit 1
 fi
 
-echo "Phase 28 release audit passed for aarambh-ai $EXPECTED_VERSION"
+echo "Phase 28 release audit passed for aarambh-studio $EXPECTED_VERSION"

@@ -12,13 +12,13 @@ TOKENIZER=$3
 DRAFT_CONFIG=$4
 DRAFT_MODEL=$5
 PROMPT=${6:-"To be, or not to be"}
-BIN=${AARAMBH_BIN:-target/release/aarambh-ai}
+BIN=${AARAMBH_STUDIO_BIN:-target/release/aarambh-studio}
 RUNS=${RUNS:-3}
 MAX_TOKENS=${MAX_TOKENS:-128}
 DRAFT_TOKENS=${DRAFT_TOKENS:-4}
 
 if [[ ! -x "$BIN" ]]; then
-  echo "missing release binary at $BIN; run cargo build --release -p aarambh-ai --features cuda" >&2
+  echo "missing release binary at $BIN; run cargo build --release -p aarambh-studio --features cuda" >&2
   exit 2
 fi
 

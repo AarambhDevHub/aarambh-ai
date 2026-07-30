@@ -37,7 +37,7 @@ fi
 
 echo "==> Phase 39 High-vs-Max hard-problems comparison (optional, Kaggle)"
 for mode in high max; do
-  cargo run --quiet --locked --release -p aarambh-ai -- eval \
+  cargo run --quiet --locked --release -p aarambh-studio -- eval \
     --config "$PHASE39_CONFIG" \
     --model "$PHASE39_MODEL" \
     --tokenizer "$PHASE39_TOKENIZER" \

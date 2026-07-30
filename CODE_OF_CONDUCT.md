@@ -43,7 +43,7 @@ an individual is officially representing the community in public spaces.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders by opening a
-[GitHub Issue](https://github.com/AarambhDevHub/aarambh-ai/issues). Sensitive
+[GitHub Issue](https://github.com/AarambhDevHub/aarambh-studio/issues). Sensitive
 reports should use GitHub private vulnerability reporting or a private GitHub
 Security Advisory instead of a public issue.
 

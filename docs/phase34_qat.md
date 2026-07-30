@@ -40,7 +40,7 @@ matmul expensive and the embedding lookup itself remains floating point.
 ## Run The CPU Smoke
 
 ```sh
-cargo build --release -p aarambh-ai
+cargo build --release -p aarambh-studio
 scripts/phase34_smoke.sh
 ```
 
@@ -54,7 +54,7 @@ count.
 `configs/qat_tiny.toml` expects the standard Tiny checkpoint and tokenizer:
 
 ```sh
-cargo run --release -p aarambh-ai -- train --config configs/qat_tiny.toml
+cargo run --release -p aarambh-studio -- train --config configs/qat_tiny.toml
 ```
 
 `retrofit_from` uses strict model-only loading for QAT. Missing, unexpected, or
@@ -68,7 +68,7 @@ SafeTensors checkpoints contain floating-point master weights. Export with the
 existing path:
 
 ```sh
-cargo run --release -p aarambh-ai -- convert \
+cargo run --release -p aarambh-studio -- convert \
   --config configs/qat_tiny.toml \
   --input checkpoints/qat_tiny/step_001000/model.safetensors \
   --output checkpoints/qat_tiny/model-q4.gguf \
@@ -105,10 +105,10 @@ claim recovery until this report is produced from trained checkpoints.
 ## Benchmarks And Tests
 
 ```sh
-cargo test -p aarambh-ai-quant qat::tests
-cargo test -p aarambh-ai-model qat_is_enabled_only_for_training_construction
-cargo test -p aarambh-ai-train qat_two_step_smoke_updates_weights_and_cache_generation
-cargo bench -p aarambh-ai-quant --bench qat_bench
+cargo test -p aarambh-studio-quant qat::tests
+cargo test -p aarambh-studio-model qat_is_enabled_only_for_training_construction
+cargo test -p aarambh-studio-train qat_two_step_smoke_updates_weights_and_cache_generation
+cargo bench -p aarambh-studio-quant --bench qat_bench
 ```
 
 Unit tests cover exact Q4/Q8 exporter parity, padded Q4 tails, identity STE

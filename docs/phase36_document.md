@@ -45,7 +45,7 @@ Phase 36 reserves IDs 12-14. Migrate a video-capable tokenizer and matching
 SafeTensors model before training:
 
 ```sh
-target/release/aarambh-ai convert \
+target/release/aarambh-studio convert \
   --config configs/video_qa_smoke.toml \
   --input checkpoints/video_smoke/model.safetensors \
   --output checkpoints/document_smoke/model.safetensors \
@@ -61,7 +61,7 @@ old tokenizer.
 ## Training
 
 ```sh
-target/release/aarambh-ai finetune document-dora \
+target/release/aarambh-studio finetune document-dora \
   --config configs/document_qa_smoke.toml \
   --base checkpoints/document_smoke/model.safetensors \
   --tokenizer checkpoints/document_smoke/tokenizer.json \
@@ -83,7 +83,7 @@ pre-projector feature caching; set it to zero to disable caching.
 ## Inference
 
 ```sh
-target/release/aarambh-ai infer \
+target/release/aarambh-studio infer \
   --config configs/document_qa_smoke_infer.toml \
   --model checkpoints/document_qa_smoke_merged/model.safetensors \
   --tokenizer checkpoints/document_smoke/tokenizer.json \
@@ -103,7 +103,7 @@ after image/video multimodal prefill.
 ## Evaluation
 
 ```sh
-target/release/aarambh-ai eval \
+target/release/aarambh-studio eval \
   --config configs/document_qa_smoke_infer.toml \
   --model checkpoints/document_qa_smoke_merged/model.safetensors \
   --tokenizer checkpoints/document_smoke/tokenizer.json \
@@ -120,7 +120,7 @@ metric. Records tagged `table` also produce `table_anls`.
 ## Local Smoke
 
 ```sh
-cargo build --release -p aarambh-ai
+cargo build --release -p aarambh-studio
 python3 scripts/phase36_make_document_smoke_fixture.py
 scripts/phase36_smoke.sh
 ```

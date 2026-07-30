@@ -1,4 +1,4 @@
-# ARCHITECTURE_V3.md — aarambh-ai v3.0
+# ARCHITECTURE_V3.md — aarambh-studio v3.0
 
 > Companion to `ARCHITECTURE.md` and `ARCHITECTURE_V2.md`. This document
 > covers **only what v3.0 adds or changes** — sections here are numbered to
@@ -57,7 +57,7 @@ Qwen, MiniMax, DeepSeek-derived architectures):
    single-call tool use into sustained multi-step reasoning over tool
    results, including multimodal ones.
 5. **A measurement layer for memory itself** — forgetting diagnostics give
-   both aarambh-ai's self-learning loop and the separate Manas project a
+   both aarambh-studio's self-learning loop and the separate Manas project a
    shared, measured signal for catastrophic forgetting, rather than only
    inferring it from score regressions after the fact.
 6. **A fifth thinking mode** — Max, sitting above High in the existing
@@ -76,7 +76,7 @@ Two new crates. Everything else is extended in place — no crate is
 removed or renamed, matching v2's discipline.
 
 ```
-aarambh-ai/
+aarambh-studio/
 ├── Cargo.toml
 ├── ARCHITECTURE.md / ARCHITECTURE_V2.md / ARCHITECTURE_V3.md
 ├── ROADMAP.md / ROADMAP_V2.md / ROADMAP_V3.md
@@ -85,7 +85,7 @@ aarambh-ai/
 ├── crates/
 │   │   ...Layers 0–6 from v1.0.0/v2.0.0, extended (see §38–47 below)...
 │   │
-│   ├── aarambh-ai-distill/           ← NEW, LAYER 5: On-policy distillation
+│   ├── aarambh-studio-distill/           ← NEW, LAYER 5: On-policy distillation
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── config.rs             ← validated rollout/objective settings
@@ -98,35 +98,35 @@ aarambh-ai/
 │   │       ├── offline.rs            ← matched static-teacher control
 │   │       └── evaluate.rs           ← fresh-rollout alignment reports
 │   │
-│   └── aarambh-ai-agent/             ← NEW, LAYER 5: Multi-step tool-use chains
+│   └── aarambh-studio-agent/             ← NEW, LAYER 5: Multi-step tool-use chains
 │       └── src/
 │           ├── lib.rs
 │           ├── chain.rs              ← ToolChain orchestrator, stopping conditions
 │           ├── result_ingestion.rs   ← ToolResult (text/image/video/document)
 │           └── state.rs              ← ChainState, eviction/summarisation policy
 │
-└── aarambh-ai/                       ← LAYER 6: CLI binary
+└── aarambh-studio/                       ← LAYER 6: CLI binary
     └── src/cmd/
         ├── ...train.rs / infer.rs / finetune.rs / quantise.rs / convert.rs / eval.rs / serve.rs...
-        └── agent.rs                  ← NEW: `aarambh-ai agent`
+        └── agent.rs                  ← NEW: `aarambh-studio agent`
 ```
 
 ### Extended (not new) crates in v3.0
 
 | Crate | v3.0 additions |
 |---|---|
-| `aarambh-ai-nn` | `gated_deltanet.rs` (§38), `sparse_attention.rs` (§39), `moe.rs`/`dispatch.rs` extended (§40), `mtp.rs` (§41) |
-| `aarambh-ai-model` | Hybrid/DSA/MoE/MTP config plus `qat: Option<QatConfig>`; training-only QAT construction and projection coverage |
-| `aarambh-ai-train` | Hybrid retrofit, DSA/MoE/MTP objectives, native QAT recipe/cache lifecycle/exact resume, Max-mode GRPO re-run |
-| `aarambh-ai-distill` | Student rollout replay, local/scored teacher backends, soft-KL/reward objectives, MTP/MoE/DSA auxiliary blending, exact resume, offline control, and fresh-rollout evaluation |
-| `aarambh-ai-weights` | Architecture retrofit plus strict exact model-only SafeTensors loading for QAT |
-| `aarambh-ai-quant` | Device-native `FakeQuantize`, `QatLinear`, exporter-parity policies, and shared generation cache |
-| `aarambh-ai-vision` | `video_sample.rs`, `temporal_fusion.rs` (§44), `document_sample.rs`, `layout_projector.rs` (§45) |
-| `aarambh-ai-tokenizer` | `<video>`/`<video_end>`/`<frame_sep>` and `<document>`/`<document_end>`/`<page_sep>` reserved tokens |
-| `aarambh-ai-finetune` | Multi-frame/multi-page VLM tuning (extends v2's `vlm_dora.rs`), multi-step tool-use SFT loss masking |
-| `aarambh-ai-inference` | MTP heads reusable as speculative-decode draft source; `thinking.rs` gains the `Max(16384)` `ThinkingMode` variant (§48) |
-| `aarambh-ai-eval` | Four-way QAT robustness reports, `forgetting.rs` (§47), and new modality/tool tasks |
-| `aarambh-ai-selflearn` | Forgetting-diagnostics wiring, shared export format for Manas — see `SELF_LEARNING_V3.md` |
+| `aarambh-studio-nn` | `gated_deltanet.rs` (§38), `sparse_attention.rs` (§39), `moe.rs`/`dispatch.rs` extended (§40), `mtp.rs` (§41) |
+| `aarambh-studio-model` | Hybrid/DSA/MoE/MTP config plus `qat: Option<QatConfig>`; training-only QAT construction and projection coverage |
+| `aarambh-studio-train` | Hybrid retrofit, DSA/MoE/MTP objectives, native QAT recipe/cache lifecycle/exact resume, Max-mode GRPO re-run |
+| `aarambh-studio-distill` | Student rollout replay, local/scored teacher backends, soft-KL/reward objectives, MTP/MoE/DSA auxiliary blending, exact resume, offline control, and fresh-rollout evaluation |
+| `aarambh-studio-weights` | Architecture retrofit plus strict exact model-only SafeTensors loading for QAT |
+| `aarambh-studio-quant` | Device-native `FakeQuantize`, `QatLinear`, exporter-parity policies, and shared generation cache |
+| `aarambh-studio-vision` | `video_sample.rs`, `temporal_fusion.rs` (§44), `document_sample.rs`, `layout_projector.rs` (§45) |
+| `aarambh-studio-tokenizer` | `<video>`/`<video_end>`/`<frame_sep>` and `<document>`/`<document_end>`/`<page_sep>` reserved tokens |
+| `aarambh-studio-finetune` | Multi-frame/multi-page VLM tuning (extends v2's `vlm_dora.rs`), multi-step tool-use SFT loss masking |
+| `aarambh-studio-inference` | MTP heads reusable as speculative-decode draft source; `thinking.rs` gains the `Max(16384)` `ThinkingMode` variant (§48) |
+| `aarambh-studio-eval` | Four-way QAT robustness reports, `forgetting.rs` (§47), and new modality/tool tasks |
+| `aarambh-studio-selflearn` | Forgetting-diagnostics wiring, shared export format for Manas — see `SELF_LEARNING_V3.md` |
 
 ### Updated Crate Count
 
@@ -257,7 +257,7 @@ byte-identical-output regression test, not just documented as intent.
    original pretraining LR) so the untouched Full-attention layers and
    the FFN/embedding weights do not drift far from their already-trained
    state while the fresh GatedDeltaNet layers learn from near-random init
-5. Validate: eval-harness score (`ARCHITECTURE_V2.md` §17 / `aarambh-ai-eval`)
+5. Validate: eval-harness score (`ARCHITECTURE_V2.md` §17 / `aarambh-studio-eval`)
    on the same holdout before and after retrofit; regression must stay
    within a documented tolerance band (default: no more than 2 percentage
    points absolute on any tracked task) before the retrofit is accepted
@@ -683,7 +683,7 @@ streaming safety observe committed tokens only. Supplying `--draft-model` and
 v1/v2 have no distillation pipeline — fine-tuning methods (LoRA/QLoRA,
 DoRA, DPO) all adapt a model directly on supervised or preference data
 the model did not itself generate. On-policy distillation, in the new
-`aarambh-ai-distill` crate, is a genuinely different training loop: the
+`aarambh-studio-distill` crate, is a genuinely different training loop: the
 student is trained on *its own* generated rollouts, scored by a teacher,
 rather than on independently-generated teacher text.
 
@@ -704,9 +704,9 @@ verifier's pass/fail.
 ### 42.2 Pipeline
 
 ```rust
-// aarambh-ai-distill/src/rollout.rs
+// aarambh-studio-distill/src/rollout.rs
 pub fn generate_student_rollouts(
-    student: &InferenceSession,   // reuses aarambh-ai-inference directly
+    student: &InferenceSession,   // reuses aarambh-studio-inference directly
     prompts: &[String],
     sampling: &SamplingConfig,
 ) -> Result<Vec<Rollout>> {
@@ -714,7 +714,7 @@ pub fn generate_student_rollouts(
     // pass identical in kind to any other inference call.
 }
 
-// aarambh-ai-distill/src/teacher_score.rs
+// aarambh-studio-distill/src/teacher_score.rs
 pub trait TeacherScorer {
     /// Scores or corrects a student-generated rollout. Returns a scalar
     /// quality signal (and optionally a corrected/preferred completion,
@@ -722,12 +722,12 @@ pub trait TeacherScorer {
     fn score(&self, prompt: &str, student_rollout: &str) -> Result<TeacherScore>;
 }
 
-pub struct LocalCheckpointTeacher { /* wraps a larger aarambh-ai checkpoint */ }
+pub struct LocalCheckpointTeacher { /* wraps a larger aarambh-studio checkpoint */ }
 pub struct ScoredDatasetTeacher { /* looks up pre-scored reference data */ }
 // Both implement TeacherScorer — the training loop below is identical
 // regardless of which backend is in use.
 
-// aarambh-ai-distill/src/distill_loss.rs
+// aarambh-studio-distill/src/distill_loss.rs
 pub fn distill_loss(
     student_logits: &Tensor,       // gradient flows through this
     student_rollout_tokens: &Tensor,
@@ -762,7 +762,7 @@ existing rhythm rather than invent a new training-loop shape.
 ### 42.4 Phase 33 implementation contract
 
 Phase 33 trains the complete student checkpoint; it is not an adapter method.
-The CLI requires an explicit `aarambh-ai distill train` invocation and accepts
+The CLI requires an explicit `aarambh-studio distill train` invocation and accepts
 only SafeTensors for the trainable student. The frozen teacher is either a
 local Aarambh checkpoint or a scored-reference JSONL dataset. Local teachers
 support token-level forward KL and scalar sequence rewards; scored-reference
@@ -780,7 +780,7 @@ The objective is either teacher-to-student forward KL with temperature-squared
 scaling or a group-normalized, clipped reward-policy loss. Existing MTP, MoE
 balance, and periodic DSA indexer objectives are added in the same backward
 pass when configured. AdamW, cosine warmup, gradient accumulation, global-norm
-clipping, and optimizer state reuse `aarambh-ai-train` primitives.
+clipping, and optimizer state reuse `aarambh-studio-train` primitives.
 
 Numbered checkpoints persist full model weights, optimizer moments, optimizer
 and micro-step counters, epoch, deterministic prompt permutation and cursor,
@@ -841,8 +841,8 @@ all projection families except the LM head. Coverage counters deduplicate tied
 weights by Candle tensor identity.
 
 The dependency direction is deliberate: reusable activation statistics remain
-in `aarambh-ai-quant`, while dataset/model calibration iteration lives in the
-CLI. This lets `aarambh-ai-nn` and `aarambh-ai-model` depend on quant without a
+in `aarambh-studio-quant`, while dataset/model calibration iteration lives in the
+CLI. This lets `aarambh-studio-nn` and `aarambh-studio-model` depend on quant without a
 quant-to-model cycle.
 
 ### 43.3 Training and continuation
@@ -865,7 +865,7 @@ initialization rejects missing, unexpected, and shape-mismatched tensors.
 ### 43.4 Validation
 
 ```
-aarambh-ai eval --qat-compare evaluates under identical task settings:
+aarambh-studio eval --qat-compare evaluates under identical task settings:
   1. baseline floating-point master
   2. baseline exported at the configured Q4/Q8 width
   3. QAT floating-point master
@@ -1047,7 +1047,7 @@ impl LayoutAwareProjector {
 ```
 
 This is a **position-augmentation** change, not an OCR pipeline —
-aarambh-ai does not separately parse, segment, or OCR tables/columns
+aarambh-studio does not separately parse, segment, or OCR tables/columns
 before this step. The model is expected to learn layout structure
 (e.g. "text inside a table cell reads differently from a paragraph")
 directly from position-augmented patches plus instruction-tuning data,
@@ -1072,7 +1072,7 @@ rows from compatible image/end/separator rows.
 
 Document instruction tuning reuses the *same* DoRA-adapted VLM training
 path as image (v2 Phase 20) and video (§44) tuning once again — by this
-point, one training code path in `aarambh-ai-finetune` serves all three
+point, one training code path in `aarambh-studio-finetune` serves all three
 visual modalities, differentiated only by which JSONL schema
 (`VqaExample`, `VideoQaExample`, `DocQaExample`) feeds it and which
 projector (`Projector` vs `LayoutAwareProjector`) sits between the frozen
@@ -1104,7 +1104,7 @@ to a later phase.
 
 ### 46.1 Chain orchestration
 
-`aarambh-ai-agent::ToolChain<D, P>` is generic over a `ChainDecoder` and a
+`aarambh-studio-agent::ToolChain<D, P>` is generic over a `ChainDecoder` and a
 `ToolResultProvider`. The decoder wraps the existing grammar-constrained
 single-call inference path; the provider reads caller-produced results from
 stdin JSONL or a deterministic replay file. A normal generation with no
@@ -1366,22 +1366,22 @@ the mechanism sounds in isolation.
 ## 49. Updated Dependency Layers
 
 ```
-Layer 0  aarambh-ai-core
-Layer 1  aarambh-ai-tokenizer   aarambh-ai-data
-Layer 2  aarambh-ai-nn          aarambh-ai-kernel
-Layer 3  aarambh-ai-model       aarambh-ai-weights    aarambh-ai-quant     aarambh-ai-vision
-Layer 4  aarambh-ai-train       aarambh-ai-finetune
-Layer 5  aarambh-ai-inference   aarambh-ai-safety     aarambh-ai-selflearn
-         aarambh-ai-eval        aarambh-ai-distill    aarambh-ai-agent
-Layer 6  aarambh-ai-serve       aarambh-ai (binary)
+Layer 0  aarambh-studio-core
+Layer 1  aarambh-studio-tokenizer   aarambh-studio-data
+Layer 2  aarambh-studio-nn          aarambh-studio-kernel
+Layer 3  aarambh-studio-model       aarambh-studio-weights    aarambh-studio-quant     aarambh-studio-vision
+Layer 4  aarambh-studio-train       aarambh-studio-finetune
+Layer 5  aarambh-studio-inference   aarambh-studio-safety     aarambh-studio-selflearn
+         aarambh-studio-eval        aarambh-studio-distill    aarambh-studio-agent
+Layer 6  aarambh-studio-serve       aarambh-studio (binary)
 ```
 
-`aarambh-ai-distill` sits at Layer 5 alongside `aarambh-ai-eval`: it needs
+`aarambh-studio-distill` sits at Layer 5 alongside `aarambh-studio-eval`: it needs
 a fully-assembled, invokable model (both student and teacher) to generate
 and score rollouts, the same requirement that placed eval at Layer 5 in
-v2. `aarambh-ai-agent` sits at Layer 5 as well — it orchestrates calls
+v2. `aarambh-studio-agent` sits at Layer 5 as well — it orchestrates calls
 into the Layer 5 inference/safety stack, similar in kind to how
-`aarambh-ai-serve` (Layer 6) wraps that same stack with an HTTP transport,
+`aarambh-studio-serve` (Layer 6) wraps that same stack with an HTTP transport,
 except agent chains are a orchestration layer rather than a new entry
 point, so they sit one layer lower, alongside the components they call.
 
@@ -1392,8 +1392,8 @@ crates in the same or lower layer, enforced by `Cargo.toml`.
 
 | Dependency | Allowed crates | Reason |
 |---|---|---|
-| `mp4` + bundled `openh264` | `aarambh-ai-vision` | Native H.264 MP4 frame extraction only, no network calls or runtime FFmpeg |
-| `hayro = 0.4.0` | `aarambh-ai-vision` | Pure-Rust PDF page-to-image rendering only, no network calls |
+| `mp4` + bundled `openh264` | `aarambh-studio-vision` | Native H.264 MP4 frame extraction only, no network calls or runtime FFmpeg |
+| `hayro = 0.4.0` | `aarambh-studio-vision` | Pure-Rust PDF page-to-image rendering only, no network calls |
 
 **Still forbidden everywhere, unchanged from v1/v2:** PyTorch bindings
 (`tch-rs`), ONNX Runtime (`ort`), Python FFI, `llama.cpp` as a backend.
@@ -1483,7 +1483,7 @@ for.
 Everything from v1's and v2's i3 capability lists still applies unchanged.
 v3.0 adds:
 
-- Tool-chain orchestration (`aarambh-ai-agent`) for Tiny/Small checkpoints
+- Tool-chain orchestration (`aarambh-studio-agent`) for Tiny/Small checkpoints
   — orchestration overhead is lightweight; the underlying inference calls
   follow the same i3-capability rules v2 already established for
   single-call tool use

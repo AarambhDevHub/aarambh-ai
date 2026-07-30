@@ -10,7 +10,7 @@ Use the same base checkpoint, tokenizer, SFT dataset, rank, target modules, and
 training schedule for both methods.
 
 ```sh
-cargo run --release -p aarambh-ai -- finetune sft \
+cargo run --release -p aarambh-studio -- finetune sft \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -18,7 +18,7 @@ cargo run --release -p aarambh-ai -- finetune sft \
   --output adapters/tiny_lora \
   --lora-rank 16
 
-cargo run --release -p aarambh-ai -- finetune dora \
+cargo run --release -p aarambh-studio -- finetune dora \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -30,21 +30,21 @@ cargo run --release -p aarambh-ai -- finetune dora \
 ## Merge And Evaluate
 
 ```sh
-cargo run --release -p aarambh-ai -- finetune merge \
+cargo run --release -p aarambh-studio -- finetune merge \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --adapter adapters/tiny_lora \
   --method auto \
   --output checkpoints/tiny_lora_merged
 
-cargo run --release -p aarambh-ai -- finetune merge \
+cargo run --release -p aarambh-studio -- finetune merge \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --adapter adapters/tiny_dora \
   --method auto \
   --output checkpoints/tiny_dora_merged
 
-cargo run --release -p aarambh-ai -- eval \
+cargo run --release -p aarambh-studio -- eval \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_lora_merged/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -53,7 +53,7 @@ cargo run --release -p aarambh-ai -- eval \
   --out scorecard_lora.json \
   --markdown scorecard_lora.md
 
-cargo run --release -p aarambh-ai -- eval \
+cargo run --release -p aarambh-studio -- eval \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_dora_merged/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -62,7 +62,7 @@ cargo run --release -p aarambh-ai -- eval \
   --out scorecard_dora.json \
   --markdown scorecard_dora.md
 
-cargo run --release -p aarambh-ai -- eval \
+cargo run --release -p aarambh-studio -- eval \
   --compare scorecard_lora.json scorecard_dora.json \
   --markdown compare_dora_vs_lora.md
 ```

@@ -7,7 +7,7 @@ calls.
 ## Start The Server
 
 ```bash
-cargo run --release -p aarambh-ai -- serve \
+cargo run --release -p aarambh-studio -- serve \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --tokenizer checkpoints/tiny_shakespeare/tokenizer.json \
@@ -19,8 +19,8 @@ The default bind is `127.0.0.1:8080`. For a non-loopback bind, set a key before
 starting the server:
 
 ```bash
-export AARAMBH_AI_API_KEY='replace-with-a-long-random-secret'
-cargo run --release -p aarambh-ai -- serve \
+export AARAMBH_STUDIO_STUDIO_API_KEY='replace-with-a-long-random-secret'
+cargo run --release -p aarambh-studio -- serve \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_shakespeare/step_000050/model.safetensors \
   --model-id aarambh-tiny \
@@ -61,7 +61,7 @@ print(response.choices[0].message.content)
 
 When local authentication is disabled, SDKs may still require a non-empty
 client-side `api_key`; any placeholder is accepted because the local server does
-not validate authorization unless `AARAMBH_AI_API_KEY` is configured.
+not validate authorization unless `AARAMBH_STUDIO_STUDIO_API_KEY` is configured.
 
 ## Endpoints
 

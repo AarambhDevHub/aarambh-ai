@@ -2,7 +2,7 @@
 
 ### Understanding the terminology + how to actually build a dataset from the internet
 
-This guide is for someone who keeps hearing terms like "AI," "Machine Learning," "Deep Learning," "Dataset," "Web Scraping," etc. thrown around and wants to *actually* understand them — not just buzzwords, but what they mean, why they exist, and how they connect to building something like Aarambh-AI.
+This guide is for someone who keeps hearing terms like "AI," "Machine Learning," "Deep Learning," "Dataset," "Web Scraping," etc. thrown around and wants to *actually* understand them — not just buzzwords, but what they mean, why they exist, and how they connect to building something like Aarambh Studio.
 
 Same format as before, for every concept:
 - **Definition**
@@ -39,7 +39,7 @@ All these terms are **nested inside each other**, like Russian nesting dolls. He
 │   │    │   │                                       │ │  │  │
 │   │    │   │    ┌─────────────────────────────┐   │ │  │  │
 │   │    │   │    │  LLM (Large Language Model) │   │ │  │  │
-│   │    │   │    │  e.g. Aarambh-AI            │   │ │  │  │
+│   │    │   │    │  e.g. Aarambh Studio            │   │ │  │  │
 │   │    │   │    └─────────────────────────────┘   │ │  │  │
 │   │    │   └─────────────────────────────────────┘ │  │  │
 │   │    └───────────────────────────────────────────┘  │  │
@@ -99,7 +99,7 @@ Modern AI (machine learning based):
 Instead of a programmer writing "if email contains the word 'lottery' AND 'winner' then mark as spam," you show the system thousands of emails already labeled as "spam" or "not spam," and it learns on its own which patterns tend to indicate spam.
 
 **Why it matters:**
-This is the foundational idea (Phase 6, the Training Loop, in Aarambh-AI) — instead of hand-coding grammar rules or facts, the model is trained on huge amounts of text and learns language patterns statistically.
+This is the foundational idea (Phase 6, the Training Loop, in Aarambh Studio) — instead of hand-coding grammar rules or facts, the model is trained on huge amounts of text and learns language patterns statistically.
 
 **Example:**
 ```
@@ -140,7 +140,7 @@ ML-based spam filter:
 Traditional ML often needed a human to manually decide what "features" mattered (e.g., "count how many times the word 'free' appears" for spam detection). Deep Learning removes this step — with enough layers, the network *automatically* discovers which features matter, layer by layer, from raw data.
 
 **Why it matters:**
-This is literally what Aarambh-AI's Neural Network Primitives and Forward Pass (Phases 3–4) are — many stacked layers of math, each learning increasingly abstract patterns (early layers might learn "letter shapes," later layers might learn "meaning of a whole sentence").
+This is literally what Aarambh Studio's Neural Network Primitives and Forward Pass (Phases 3–4) are — many stacked layers of math, each learning increasingly abstract patterns (early layers might learn "letter shapes," later layers might learn "meaning of a whole sentence").
 
 **Example:**
 ```
@@ -181,7 +181,7 @@ Deep Learning:
 Despite the "brain-inspired" branding, a neural network is really just repeated applications of the matrix multiplication + activation function formulas from your earlier math guide. Each "neuron" is really just one number, and each connection between neurons is a weight (a learnable number) — layers of these are stacked to form the network.
 
 **Why it matters:**
-This is the literal engine underneath everything — Aarambh-AI's Neural Network Primitives (Phase 3) are the building blocks (matrix multiply, activation, normalization) that get assembled into this structure.
+This is the literal engine underneath everything — Aarambh Studio's Neural Network Primitives (Phase 3) are the building blocks (matrix multiply, activation, normalization) that get assembled into this structure.
 
 **Example:**
 ```
@@ -218,7 +218,7 @@ Simplified 3-neuron layer receiving 2 inputs:
 While deep learning can be applied to images, audio, or numbers, NLP specifically deals with *language* — tasks like translation, summarization, sentiment detection, question-answering, and (most relevantly) generating human-like text responses.
 
 **Why it matters:**
-Aarambh-AI is fundamentally an NLP system — every phase from Tokenizer (Phase 1) onward is solving language-specific problems: how to represent words as numbers, how to understand sentence structure, how to generate coherent responses.
+Aarambh Studio is fundamentally an NLP system — every phase from Tokenizer (Phase 1) onward is solving language-specific problems: how to represent words as numbers, how to understand sentence structure, how to generate coherent responses.
 
 **Example:**
 ```
@@ -254,7 +254,7 @@ NLP Tasks:
 **Definition:** An LLM is a very large neural network (billions of parameters), trained on massive amounts of text, specifically designed to predict and generate human-like language.
 
 **Beginner explanation:**
-This is where Aarambh-AI itself sits in our nested-doll diagram — it's a DL model, applied to NLP tasks, at a large scale (many parameters, trained on huge datasets), giving it broad, flexible language abilities rather than being narrowly built for just one task like translation.
+This is where Aarambh Studio itself sits in our nested-doll diagram — it's a DL model, applied to NLP tasks, at a large scale (many parameters, trained on huge datasets), giving it broad, flexible language abilities rather than being narrowly built for just one task like translation.
 
 **Why it matters:**
 Everything covered in your two previous guides (the 28 phases, and the 14 math formulas) is literally the recipe for building one of these.
@@ -282,7 +282,7 @@ Large Language Model (LLM): trained on huge diverse text,
 
 **Common beginner questions:**
 - *Q: How "large" does a model need to be to count as an LLM?* → No strict cutoff, but generally hundreds of millions to billions+ of parameters; smaller models are often just called "language models."
-- *Q: Is Aarambh-AI an LLM?* → Yes — it's specifically a decoder-only LLM, built from scratch in Rust.
+- *Q: Is Aarambh Studio an LLM?* → Yes — it's specifically a decoder-only LLM, built from scratch in Rust.
 
 ---
 
@@ -294,7 +294,7 @@ Large Language Model (LLM): trained on huge diverse text,
 This is a category that cuts across DL/NLP — an LLM generating text is "Generative AI," but so is an image-generating model, or a music-composing model. The common thread is: it *produces new things*, rather than just labeling/sorting things.
 
 **Why it matters:**
-Aarambh-AI is a generative model — every response it produces is newly generated token-by-token, not retrieved from a lookup table of pre-written answers.
+Aarambh Studio is a generative model — every response it produces is newly generated token-by-token, not retrieved from a lookup table of pre-written answers.
 
 **Example:**
 ```
@@ -896,9 +896,9 @@ This is a genuinely contested area with real legal and ethical debate (regarding
 **Q: Is dataset-building a one-time step, or ongoing?**
 For most real projects, it's iterative — you build an initial dataset, train, evaluate (Phase 17), notice weaknesses, then go back and collect/clean/filter more targeted data to address those gaps, repeating over multiple rounds.
 
-**Q: How does all of this connect back to Aarambh-AI's phases?**
+**Q: How does all of this connect back to Aarambh Studio's phases?**
 Everything in Part 2 above happens *before* Phase 2 (Data Pipeline) even starts — dataset collection and cleaning is the "raw material sourcing" stage that feeds directly into the Data Pipeline, which then feeds the Training Loop (Phase 6), and eventually gets measured by the Evaluation Harness (Phase 17).
 
 ---
 
-*This guide covers the foundational AI/ML/DL terminology and the full practical process of collecting internet data and building a training-ready dataset — the essential groundwork that everything in Aarambh-AI's phases and math formulas is built on top of.*
+*This guide covers the foundational AI/ML/DL terminology and the full practical process of collecting internet data and building a training-ready dataset — the essential groundwork that everything in Aarambh Studio's phases and math formulas is built on top of.*

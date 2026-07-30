@@ -1,0 +1,12 @@
+[package]
+name = "aarambh-studio-tokenizer"
+version.workspace = true
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aarambh-studio-core = { path = "../aarambh-studio-core" }
+tokenizers      = { workspace = true }
+serde           = { workspace = true }
+serde_json      = { workspace = true }

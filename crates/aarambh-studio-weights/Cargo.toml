@@ -1,0 +1,25 @@
+[package]
+name = "aarambh-studio-weights"
+version.workspace = true
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+cuda = [
+    "aarambh-studio-core/cuda",
+    "aarambh-studio-model/cuda",
+    "aarambh-studio-quant/cuda",
+    "candle-core/cuda",
+    "candle-nn/cuda",
+]
+
+[dependencies]
+aarambh-studio-core  = { path = "../aarambh-studio-core" }
+aarambh-studio-model = { path = "../aarambh-studio-model" }
+aarambh-studio-quant = { path = "../aarambh-studio-quant" }
+candle-core      = { workspace = true }
+candle-nn        = { workspace = true }
+serde            = { workspace = true }
+serde_json       = { workspace = true }

@@ -1,0 +1,26 @@
+[package]
+name = "aarambh-studio-vision"
+version.workspace = true
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+cuda = [
+    "aarambh-studio-core/cuda",
+    "candle-core/cuda",
+    "candle-nn/cuda",
+]
+
+[dependencies]
+aarambh-studio-core = { path = "../aarambh-studio-core" }
+candle-core     = { workspace = true }
+candle-nn       = { workspace = true }
+image           = { workspace = true }
+hayro           = { workspace = true }
+serde           = { workspace = true }
+serde_json      = { workspace = true }
+csv             = { workspace = true }
+mp4             = { workspace = true }
+openh264        = { workspace = true }

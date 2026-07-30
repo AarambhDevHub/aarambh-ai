@@ -9,7 +9,7 @@ larger thinking budget.
 
 ## 1. What changed
 
-Aarambh-AI's thinking system already supported four budget modes:
+Aarambh Studio's thinking system already supported four budget modes:
 
 | Mode   | Nominal budget |
 |--------|---------------:|
@@ -42,8 +42,8 @@ API, GRPO, and distillation now share one canonical
 `none | low | medium | high | max` vocabulary. The previously-duplicated
 string-match parsers in `infer`, `serve`, and the server now delegate to
 `ThinkingMode::from_str`. `GrpoThinkingMode` keeps its own mirror of the
-vocabulary because the `aarambh-ai-finetune` crate sits below
-`aarambh-ai-inference` in the dependency layering and therefore cannot depend
+vocabulary because the `aarambh-studio-finetune` crate sits below
+`aarambh-studio-inference` in the dependency layering and therefore cannot depend
 on it; its `ThinkingMode`↔`GrpoThinkingMode` conversions are owned by the
 self-learning crate, which depends on both, so no parsing logic is duplicated
 across crate boundaries.
@@ -74,31 +74,31 @@ Max mode is accepted everywhere High mode is accepted:
 
 ```bash
 # Inference
-aarambh-ai infer --config configs/tiny_shakespeare.toml \
+aarambh-studio infer --config configs/tiny_shakespeare.toml \
   --thinking max --prompt "Prove that the sum of two odd integers is even."
 
 # Agent (long-horizon tool chains — pairs with Phase 37)
-aarambh-ai agent --config configs/tiny_shakespeare.toml \
+aarambh-studio agent --config configs/tiny_shakespeare.toml \
   --thinking max --tools tools.json --prompt "Plan and execute ..."
 
 # Evaluation (Phase 39 hard-problems task)
-aarambh-ai eval --config configs/tiny_shakespeare.toml \
+aarambh-studio eval --config configs/tiny_shakespeare.toml \
   --tasks hard-problems --thinking max --max-new-tokens 512
 
 # Serving (OpenAI-compatible reasoning_effort)
-aarambh-ai serve --thinking max
+aarambh-studio serve --thinking max
 # or per-request:  "reasoning_effort": "max"
 
 # Fine-tuning (GRPO)
-aarambh-ai finetune grpo --config configs/tiny_shakespeare.toml \
+aarambh-studio finetune grpo --config configs/tiny_shakespeare.toml \
   --thinking max --base model.safetensors --reference ref.safetensors ...
 
 # Distillation
-aarambh-ai distill train --config configs/distill_smoke.toml \
+aarambh-studio distill train --config configs/distill_smoke.toml \
   --thinking max --student student.safetensors ...
 
 # Self-learning
-aarambh-ai selflearn start --thinking max --prompt "..."
+aarambh-studio selflearn start --thinking max --prompt "..."
 ```
 
 Invalid values are rejected by the shared parser:
@@ -162,7 +162,7 @@ Run both modes and compare:
 
 ```bash
 for mode in high max; do
-  aarambh-ai eval --config configs/tiny_shakespeare.toml \
+  aarambh-studio eval --config configs/tiny_shakespeare.toml \
     --model model.safetensors --tasks hard-problems \
     --max-new-tokens 512 --thinking "$mode" \
     --out scorecard-${mode}.json
@@ -176,7 +176,7 @@ done
 | high | _measured_ | _measured_ | _measured_ | _measured_ |
 | max  | _measured_ | _measured_ | _measured_ | _measured_ |
 
-> **Note:** This table is intentionally a schema. Aarambh-AI ships **no
+> **Note:** This table is intentionally a schema. Aarambh Studio ships **no
 > pretrained checkpoints**, so no benchmark numbers are reported here. The
 > `hard-problems` fixture is deterministic, so once a trained checkpoint is
 > supplied the table can be filled by running the commands above. The

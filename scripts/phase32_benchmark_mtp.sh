@@ -9,7 +9,7 @@ fi
 CONFIG=$1
 MODEL=$2
 TOKENIZER=$3
-BIN=${AARAMBH_BIN:-target/release/aarambh-ai}
+BIN=${AARAMBH_STUDIO_BIN:-target/release/aarambh-studio}
 PROMPT=${PROMPT:-"Explain why the sky appears blue."}
 MAX_TOKENS=${MAX_TOKENS:-128}
 RUNS=${RUNS:-5}

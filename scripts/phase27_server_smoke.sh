@@ -9,14 +9,14 @@ MODEL="${MODEL:-checkpoints/tiny_shakespeare/step_000050/model.safetensors}"
 TOKENIZER="${TOKENIZER:-checkpoints/tiny_shakespeare/tokenizer.json}"
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-18080}"
-MODEL_ID="${MODEL_ID:-aarambh-ai-smoke}"
+MODEL_ID="${MODEL_ID:-aarambh-studio-smoke}"
 BASE_URL="http://${HOST}:${PORT}"
 
-if [[ ! -x target/release/aarambh-ai ]]; then
-  cargo build --release -p aarambh-ai
+if [[ ! -x target/release/aarambh-studio ]]; then
+  cargo build --release -p aarambh-studio
 fi
 
-target/release/aarambh-ai serve \
+target/release/aarambh-studio serve \
   --config "$CONFIG" \
   --model "$MODEL" \
   --tokenizer "$TOKENIZER" \

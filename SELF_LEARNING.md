@@ -1,6 +1,6 @@
-# SELF_LEARNING.md — aarambh-ai
+# SELF_LEARNING.md — aarambh-studio
 
-> **aarambh-ai-selflearn** — the model learns from its own outputs.
+> **aarambh-studio-selflearn** — the model learns from its own outputs.
 > No human labels required after SFT. Runs on your i3 laptop or Kaggle GPU.
 
 ---
@@ -25,7 +25,7 @@
 
 ## 1. What Self-Learning Is
 
-After you train aarambh-ai through the normal phases (pretraining → SFT → GRPO),
+After you train aarambh-studio through the normal phases (pretraining → SFT → GRPO),
 the model is good at following instructions. But it doesn't get better just by
 being used. It is frozen — every conversation is the same model.
 
@@ -39,7 +39,7 @@ being used. It is frozen — every conversation is the same model.
 Over hundreds of conversations, the model measurably improves — especially on
 the topics it talks about most.
 
-This is the same principle used by DeepSeek-R1 and similar systems. aarambh-ai
+This is the same principle used by DeepSeek-R1 and similar systems. aarambh-studio
 implements it entirely in Rust, no Python, no external services.
 
 ---
@@ -92,7 +92,7 @@ User asks a question
         │
         ▼
 ┌───────────────────────────────────────────┐
-│  Safety check (aarambh-ai-safety)         │
+│  Safety check (aarambh-studio-safety)         │
 │  Block / redact / pass through            │
 └──────────────────┬────────────────────────┘
                    │
@@ -310,7 +310,7 @@ not the prompt tokens. LoRA adapters are used — not the full model.
 ```
 Replay fine-tune on Tiny (CPU):
   32 entries × 1 epoch ≈ 120 seconds
-  Runs synchronously through `aarambh-ai selflearn replay`
+  Runs synchronously through `aarambh-studio selflearn replay`
   Uses the same LoRA adapter and optimizer state as online learning
 ```
 
@@ -331,7 +331,7 @@ above is the stable configuration shape for future config-file loading.
 
 ```bash
 # Command line override
-aarambh-ai infer --self-learn cpu    # or gpu / disabled
+aarambh-studio infer --self-learn cpu    # or gpu / disabled
 ```
 
 ### Comparison Table
@@ -404,7 +404,7 @@ of conversations, not just the most recent ones.
 ## 9. Crate Structure
 
 ```
-crates/aarambh-ai-selflearn/
+crates/aarambh-studio-selflearn/
 ├── Cargo.toml
 └── src/
     ├── lib.rs           ← pub use all public types
@@ -416,18 +416,18 @@ crates/aarambh-ai-selflearn/
     └── metrics.rs       ← LearningMetrics, record(), topic_trend(), print_summary()
 ```
 
-**Layer position:** Layer 5 (same as `aarambh-ai-inference` and `aarambh-ai-safety`).
+**Layer position:** Layer 5 (same as `aarambh-studio-inference` and `aarambh-studio-safety`).
 
 **Depends on:**
-- `aarambh-ai-core` (config types, error type)
-- `aarambh-ai-tokenizer` (BPE tokenizer and special token IDs)
-- `aarambh-ai-model` / `aarambh-ai-weights` (base and frozen reference model loading)
-- `aarambh-ai-inference` (generation config, sampling, thinking controller)
-- `aarambh-ai-finetune` (LoRA model, GRPO helpers, verifier trait, SFT examples)
-- `aarambh-ai-train` (AdamW, loss, clipping, gradient maps)
+- `aarambh-studio-core` (config types, error type)
+- `aarambh-studio-tokenizer` (BPE tokenizer and special token IDs)
+- `aarambh-studio-model` / `aarambh-studio-weights` (base and frozen reference model loading)
+- `aarambh-studio-inference` (generation config, sampling, thinking controller)
+- `aarambh-studio-finetune` (LoRA model, GRPO helpers, verifier trait, SFT examples)
+- `aarambh-studio-train` (AdamW, loss, clipping, gradient maps)
 
 **Does NOT depend on:**
-- `aarambh-ai-safety` (safety is applied at the binary level, not inside selflearn)
+- `aarambh-studio-safety` (safety is applied at the binary level, not inside selflearn)
 
 ---
 
@@ -504,7 +504,7 @@ rewrite_max_tokens   = 32
 
 ```bash
 # CPU mode (i3)
-aarambh-ai infer \
+aarambh-studio infer \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_sft.safetensors \
   --tokenizer checkpoints/tokenizer.json \
@@ -514,7 +514,7 @@ aarambh-ai infer \
   --prompt "Explain what a closure is in Rust."
 
 # GPU mode (Kaggle)
-aarambh-ai infer \
+aarambh-studio infer \
   --config configs/small.toml \
   --model checkpoints/small_sft.safetensors \
   --tokenizer checkpoints/tokenizer.json \
@@ -524,7 +524,7 @@ aarambh-ai infer \
   --stream
 
 # Disable (standard inference)
-aarambh-ai infer \
+aarambh-studio infer \
   --config configs/tiny_shakespeare.toml \
   --model checkpoints/tiny_sft.safetensors \
   --self-learn disabled
@@ -534,7 +534,7 @@ aarambh-ai infer \
 
 ```bash
 # CPU mode: flush accumulated gradients and take an optimizer step
-aarambh-ai selflearn flush-gradients \
+aarambh-studio selflearn flush-gradients \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_sft.safetensors \
   --tokenizer checkpoints/tokenizer.json \
@@ -542,7 +542,7 @@ aarambh-ai selflearn flush-gradients \
   --self-learn-state-dir adapters/selflearn
 
 # Trigger a replay fine-tune immediately (without waiting for N steps)
-aarambh-ai selflearn replay \
+aarambh-studio selflearn replay \
   --config configs/tiny_shakespeare.toml \
   --base checkpoints/tiny_sft.safetensors \
   --tokenizer checkpoints/tokenizer.json \
@@ -550,7 +550,7 @@ aarambh-ai selflearn replay \
   --self-learn-state-dir adapters/selflearn
 
 # Print improvement statistics
-aarambh-ai selflearn stats \
+aarambh-studio selflearn stats \
   --replay-path data/replay.jsonl \
   --self-learn-state-dir adapters/selflearn
 
@@ -562,7 +562,7 @@ aarambh-ai selflearn stats \
 # Creative:   ↓ -0.02  ← not talked about much yet
 
 # Clear everything (start fresh)
-aarambh-ai selflearn reset \
+aarambh-studio selflearn reset \
   --replay-path data/replay.jsonl \
   --self-learn-state-dir adapters/selflearn \
   --yes
@@ -582,7 +582,7 @@ up in the background (CPU mode).
 
 Replay buffer starts to have enough entries for diverse batches. The model's
 answers on topics it has discussed frequently start to get slightly more polished.
-Score trends become visible with `aarambh-ai selflearn stats`.
+Score trends become visible with `aarambh-studio selflearn stats`.
 
 ### Turn 200–500 (first flush on CPU)
 
@@ -615,7 +615,7 @@ filters the worst errors, but some incorrect entries will be stored.
 
 **No external ground truth for open-ended tasks.** On math or code tasks where exact correctness
 can be checked, you can plug in a `MathVerifier` or `CodeVerifier` (from
-`aarambh-ai-finetune`) for the GRPO scoring step. This gives much more reliable scores.
+`aarambh-studio-finetune`) for the GRPO scoring step. This gives much more reliable scores.
 For open-ended chat, we skip GRPO and rely purely on the Replay Buffer (SFT). 
 Self-critique is best for filtering the replay buffer on open-ended tasks where
 no ground truth is available.
@@ -628,7 +628,7 @@ larger.
 **CPU mode is slow to improve.** Deferred gradient accumulation means the
 model only updates every 500 turns. If you use the model for short sessions,
 it may never get enough turns to reach the flush threshold. Call
-`aarambh-ai selflearn flush-gradients` manually at the end of each session.
+`aarambh-studio selflearn flush-gradients` manually at the end of each session.
 
 **Replay buffer topic coverage depends on usage.** If you only ever ask the model
 math questions, it will improve at math and degrade slightly at everything else

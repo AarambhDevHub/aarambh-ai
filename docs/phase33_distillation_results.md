@@ -35,8 +35,8 @@ differ.
 Build an MTP smoke checkpoint, then run every Phase 33 mode:
 
 ```sh
-cargo build --release -p aarambh-ai
-target/release/aarambh-ai train --config configs/mtp_smoke.toml
+cargo build --release -p aarambh-studio
+target/release/aarambh-studio train --config configs/mtp_smoke.toml
 scripts/phase33_smoke.sh
 ```
 
@@ -62,7 +62,7 @@ Run a Medium student against a larger local teacher by supplying the matching
 teacher architecture config and checkpoint:
 
 ```sh
-target/release/aarambh-ai distill train \
+target/release/aarambh-studio distill train \
   --config configs/medium_distill.toml \
   --student checkpoints/wikitext103_medium_mtp/best/model.safetensors \
   --tokenizer checkpoints/wikitext103_medium/tokenizer.json \

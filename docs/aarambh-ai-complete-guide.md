@@ -1,8 +1,8 @@
-# Aarambh-AI: The Complete Beginner's Guide
+# Aarambh Studio: The Complete Beginner's Guide
 
 ### Everything we built, in plain human language
 
-This document explains, step by step, everything inside **Aarambh-AI** — the from-scratch decoder-only large language model built in Rust using Candle. It covers the completed **v1.0.0** and **v2.0.0** roadmaps through Phase 28. Think of this as a story: each phase builds on top of the one before it, like constructing a building floor by floor.
+This document explains, step by step, everything inside **Aarambh Studio** — the from-scratch decoder-only large language model built in Rust using Candle. It covers the completed **v1.0.0** and **v2.0.0** roadmaps through Phase 28. Think of this as a story: each phase builds on top of the one before it, like constructing a building floor by floor.
 
 No prior AI knowledge assumed. Every section has:
 - A **plain-English definition**
@@ -361,9 +361,9 @@ Without an inference engine, a trained model is just a pile of numbers sitting i
 
 **Example:**
 ```
-$ aarambh-ai chat
+$ aarambh-studio chat
 > What is the capital of France?
-Aarambh-AI: The capital of France is Paris.
+Aarambh Studio: The capital of France is Paris.
 ```
 
 **Diagram:**
@@ -1064,7 +1064,7 @@ DPO training: adjusts model to make Response-A-style outputs
 more likely for similar prompts in the future.
 ```
 
-In Aarambh-AI, `finetune dpo` trains a DoRA adapter and `finetune qdpo`
+In Aarambh Studio, `finetune dpo` trains a DoRA adapter and `finetune qdpo`
 trains the same objective over a quantized QDoRA base. Chosen and rejected
 responses are scored together in one batch. The frozen reference scores are
 computed once before training, so a second full model does not stay in memory.
@@ -1091,16 +1091,16 @@ computed once before training, so a second full model does not stay in memory.
 ```
 
 **Common beginner questions:**
-- *Q: Is DPO better than GRPO?* → Neither is universally better. Aarambh-AI uses GRPO for math/code/format tasks with deterministic correctness checks and DPO for open-ended response preferences.
+- *Q: Is DPO better than GRPO?* → Neither is universally better. Aarambh Studio uses GRPO for math/code/format tasks with deterministic correctness checks and DPO for open-ended response preferences.
 - *Q: Where do the preference pairs come from?* → Can be human-labeled, or generated/scored automatically depending on the task.
-- *Q: What is QDPO here?* → It is normal DPO training with Aarambh-AI's QDoRA quantized policy base, not a different preference objective.
+- *Q: What is QDPO here?* → It is normal DPO training with Aarambh Studio's QDoRA quantized policy base, not a different preference objective.
 
 ---
 
 ## Phase 25: Speculative Decoding
 
 **Definition:** A technique where a cheap proposal source guesses several
-tokens ahead and the main model verifies them together. Aarambh-AI supports
+tokens ahead and the main model verifies them together. Aarambh Studio supports
 either a separate small draft checkpoint or MTP auxiliary heads inside the
 target checkpoint.
 
@@ -1243,7 +1243,7 @@ POST /v1/chat/completions
   "messages": [{"role": "user", "content": "Hello!"}]
 }
 
-Aarambh-AI's server receives this exact same format,
+Aarambh Studio's server receives this exact same format,
 processes it with its own model, and replies in the
 exact same response format the tool expects.
 → The client receives a familiar chat.completion response.
@@ -1258,13 +1258,13 @@ exact same response format the tool expects.
              │
              ▼
   ┌───────────────────────┐
-  │  Aarambh-AI Inference  │
+  │  Aarambh Studio Inference  │
   │  Server (OpenAI-       │
   │  compatible API layer) │
   └───────────────────────┘
              │
              ▼
-     Runs Aarambh-AI model
+     Runs Aarambh Studio model
              │
              ▼
    Response in OpenAI's exact format
@@ -1274,9 +1274,9 @@ exact same response format the tool expects.
 ```
 
 **Common beginner questions:**
-- *Q: Does this mean Aarambh-AI IS OpenAI's model?* → No — it just mimics the *API shape/format* so existing tools work seamlessly; the underlying model is entirely Aarambh-AI's own.
+- *Q: Does this mean Aarambh Studio IS OpenAI's model?* → No — it just mimics the *API shape/format* so existing tools work seamlessly; the underlying model is entirely Aarambh Studio's own.
 - *Q: Is streaming still checked by safety?* → Yes. A rolling cross-token scanner delays only the unstable suffix, redacts PII before release, and stops toxic output with `content_filter`.
-- *Q: Can I expose it on my network without a key?* → No. Loopback works without authentication, but non-loopback binds require `AARAMBH_AI_API_KEY`.
+- *Q: Can I expose it on my network without a key?* → No. Loopback works without authentication, but non-loopback binds require `AARAMBH_STUDIO_STUDIO_API_KEY`.
 - *Q: Why is this near the end?* → Because it is the runtime delivery layer; the final Phase 28 then hardens and releases the complete source tree.
 
 ---
@@ -1301,9 +1301,9 @@ the release is distributed through GitHub source rather than crates.io.
 **Example:**
 ```sh
 git checkout v2.0.0
-cargo build --release -p aarambh-ai --locked
-target/release/aarambh-ai --version
-# aarambh-ai 2.0.0
+cargo build --release -p aarambh-studio --locked
+target/release/aarambh-studio --version
+# aarambh-studio 2.0.0
 ```
 
 **Release boundary:** GitHub source archives only. No pretrained checkpoints,
@@ -1364,8 +1364,8 @@ Because it isn't just shrinking a file — it changes the actual number format u
 It's designed to become part of the same brain — the vision encoder turns images into a shared mathematical "language" that the same language model can process alongside text, rather than being two separate, disconnected systems.
 
 **Q: Why do speed optimizations (Flash Attention, speculative decoding, custom kernels) matter so much for this specific project?**
-Because Aarambh-AI is built and run largely on modest, non-datacenter hardware (an i3 laptop, Kaggle's free GPU tiers) — every bit of efficiency gained through these optimizations directly translates into being able to train and run bigger, more capable models on limited resources.
+Because Aarambh Studio is built and run largely on modest, non-datacenter hardware (an i3 laptop, Kaggle's free GPU tiers) — every bit of efficiency gained through these optimizations directly translates into being able to train and run bigger, more capable models on limited resources.
 
 ---
 
-*This guide covers Aarambh-AI's completed v1.0.0 and v2.0.0 roadmaps through Phase 28 — built from scratch in Rust using Candle.*
+*This guide covers Aarambh Studio's completed v1.0.0 and v2.0.0 roadmaps through Phase 28 — built from scratch in Rust using Candle.*

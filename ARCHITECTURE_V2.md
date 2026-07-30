@@ -1,4 +1,4 @@
-# ARCHITECTURE_V2.md — aarambh-ai v2.0
+# ARCHITECTURE_V2.md — aarambh-studio v2.0
 
 > Companion to `ARCHITECTURE.md`. This document covers **only what v2.0
 > adds or changes** — sections here are numbered to continue directly from
@@ -61,7 +61,7 @@ Three new crates. Everything else is extended in place — no crate is
 removed or renamed.
 
 ```
-aarambh-ai/
+aarambh-studio/
 ├── Cargo.toml                        ← [workspace] manifest, shared dependencies
 ├── ARCHITECTURE.md / ARCHITECTURE_V2.md
 ├── ROADMAP.md / ROADMAP_V2.md
@@ -70,7 +70,7 @@ aarambh-ai/
 ├── crates/
 │   │   ...Layers 0–5 from v1.0.0, extended (see sections 21–30 below)...
 │   │
-│   ├── aarambh-ai-eval/              ← NEW, LAYER 5: Evaluation harness
+│   ├── aarambh-studio-eval/              ← NEW, LAYER 5: Evaluation harness
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── ppl.rs                ← perplexity-on-holdout
@@ -83,7 +83,7 @@ aarambh-ai/
 │   │       │   └── vqa_subset.rs     ← added in Phase 20, vision QA task
 │   │       └── report.rs             ← Scorecard, to_markdown(), to_json()
 │   │
-│   ├── aarambh-ai-vision/            ← NEW, LAYER 3: Vision encoder + projector
+│   ├── aarambh-studio-vision/            ← NEW, LAYER 3: Vision encoder + projector
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── encoder.rs            ← ClipVisionEncoder (frozen ViT, SafeTensors)
@@ -92,7 +92,7 @@ aarambh-ai/
 │   │       ├── fusion.rs             ← interleave_image_tokens()
 │   │       └── instruct_data.rs      ← VqaExample, JSONL schema
 │   │
-│   └── aarambh-ai-serve/             ← NEW, LAYER 6: Inference server
+│   └── aarambh-studio-serve/             ← NEW, LAYER 6: Inference server
 │       └── src/
 │           ├── lib.rs
 │           ├── api.rs                ← OpenAI-compatible request/response types
@@ -100,23 +100,23 @@ aarambh-ai/
 │           ├── metrics.rs            ← lock-free server counters
 │           └── server.rs             ← routing, auth, limits, lifecycle
 │
-└── aarambh-ai/                       ← LAYER 6: CLI binary
+└── aarambh-studio/                       ← LAYER 6: CLI binary
     └── src/cmd/
         ├── ...train.rs / infer.rs / finetune.rs / quantise.rs / convert.rs / eval.rs...
-        └── serve.rs                  ← NEW: `aarambh-ai serve`
+        └── serve.rs                  ← NEW: `aarambh-studio serve`
 ```
 
 ### Extended (not new) crates in v2.0
 
 | Crate | v2.0 additions |
 |---|---|
-| `aarambh-ai-nn` | `rope_scaling.rs` (Phase 16), `moe.rs` + `dispatch.rs` (Phase 22) |
-| `aarambh-ai-model` | `rope_scaling: Option<RopeScalingConfig>` and `moe: Option<MoeConfig>` on model config |
-| `aarambh-ai-train` | `distributed.rs` (Phase 23), long-context continued-pretraining recipe, MoE aux loss |
-| `aarambh-ai-finetune` | `dora.rs` (Phase 18), `vlm_dora.rs` (Phase 20), `dpo.rs` (Phase 24) |
-| `aarambh-ai-inference` | `speculative.rs` (Phase 25), `grammar.rs` + `tool_calling.rs` (Phase 26), `--image` flag |
-| `aarambh-ai-tokenizer` | `<image>` / `<image_end>` reserved special token strings, IDs, and validation |
-| `aarambh-ai-selflearn` | `replay.rs` v2 schema, `vision_cache.rs`, `vision_verifier.rs`, `gating.rs` — see `SELF_LEARNING_V2.md` |
+| `aarambh-studio-nn` | `rope_scaling.rs` (Phase 16), `moe.rs` + `dispatch.rs` (Phase 22) |
+| `aarambh-studio-model` | `rope_scaling: Option<RopeScalingConfig>` and `moe: Option<MoeConfig>` on model config |
+| `aarambh-studio-train` | `distributed.rs` (Phase 23), long-context continued-pretraining recipe, MoE aux loss |
+| `aarambh-studio-finetune` | `dora.rs` (Phase 18), `vlm_dora.rs` (Phase 20), `dpo.rs` (Phase 24) |
+| `aarambh-studio-inference` | `speculative.rs` (Phase 25), `grammar.rs` + `tool_calling.rs` (Phase 26), `--image` flag |
+| `aarambh-studio-tokenizer` | `<image>` / `<image_end>` reserved special token strings, IDs, and validation |
+| `aarambh-studio-selflearn` | `replay.rs` v2 schema, `vision_cache.rs`, `vision_verifier.rs`, `gating.rs` — see `SELF_LEARNING_V2.md` |
 
 ### Updated Crate Count
 
@@ -160,8 +160,8 @@ this is enforced by a regression test (`rope_scaling_none_matches_v1_output_exac
 
 Implementation notes:
 
-- `RopeScalingConfig` is defined in `aarambh-ai-core` because `ModelConfig`
-  owns the serialized schema. `aarambh-ai-nn::rope_scaling` owns the YaRN,
+- `RopeScalingConfig` is defined in `aarambh-studio-core` because `ModelConfig`
+  owns the serialized schema. `aarambh-studio-nn::rope_scaling` owns the YaRN,
   NTK-aware, and linear frequency math.
 - `AarambhModel` no longer stores a full `[max_seq_len, max_seq_len]` causal
   mask. Causal attention is passed to kernel dispatch directly, so CUDA
@@ -170,7 +170,7 @@ Implementation notes:
 - Inference KV caches are created with `KVCache::with_capacity(max_seq_len)`
   so long-context autoregressive decoding writes into fixed cache storage
   instead of concatenating tensors on every token.
-- `aarambh-ai-train` accepts an optional `context_schedule` for progressive
+- `aarambh-studio-train` accepts an optional `context_schedule` for progressive
   loader rebuilds at 4K, 8K, and 16K while preserving model and optimizer state.
 
 **Why continued pretraining, not from scratch:** the model already knows
@@ -189,13 +189,13 @@ single, fairly blunt signal — it doesn't tell you if the model can actually
 answer a multiple-choice question, solve a word problem, or write working
 code.
 
-`aarambh-ai-eval` adds four free, public benchmark subsets on top of PPL:
+`aarambh-studio-eval` adds four free, public benchmark subsets on top of PPL:
 
 | Task | What it measures | Scoring |
 |---|---|---|
 | MMLU-lite | General knowledge, multiple choice | Next-token logprob comparison over A/B/C/D |
 | HellaSwag | Commonsense sentence completion | Logprob ranking over candidate completions |
-| GSM8K-subset | Grade-school math word problems | Exact-match, reuses `MathVerifier` from `aarambh-ai-finetune` |
+| GSM8K-subset | Grade-school math word problems | Exact-match, reuses `MathVerifier` from `aarambh-studio-finetune` |
 | HumanEval-lite | Python code generation | pass@1 via sandboxed execution, reuses `CodeVerifier` |
 
 Each task implements a shared `EvalTask` trait so new tasks (like Phase
@@ -208,7 +208,7 @@ trait EvalTask {
 }
 ```
 
-The CLI entrypoint is `aarambh-ai eval`. It loads the same TOML config,
+The CLI entrypoint is `aarambh-studio eval`. It loads the same TOML config,
 tokenizer, SafeTensors/GGUF checkpoint, device, and dtype plumbing used by
 training and inference, then writes a JSON scorecard and/or Markdown table.
 `--compare before.json after.json` is pure scorecard comparison and does not
@@ -216,7 +216,7 @@ load a model. HumanEval-lite is intentionally opt-in with `--allow-code-exec`
 because it executes generated Python tests through `CodeVerifier`.
 
 **Design principle:** every phase from 16 onward that changes model
-behaviour reports a before/after `Scorecard` (`aarambh-ai eval --compare
+behaviour reports a before/after `Scorecard` (`aarambh-studio eval --compare
 before.json after.json`). Claims about whether a change helped are measured,
 not assumed — see Phase 22 (MoE) and Phase 24 (DPO) in `ROADMAP_V2.md`,
 both of which are explicitly gated on what the scorecard shows rather than
@@ -254,7 +254,7 @@ magnitude vector per adapted layer).
 `target_modules` matching (`attn.wq/wk/wv/wo`, FFN gate/up/down), same
 adapter save/merge pattern, same `QDoRA` variant pairing a frozen INT4 base
 with trainable BF16 adapter + magnitude. It is a genuine drop-in alternative,
-not a replacement — `aarambh-ai finetune sft`, `qlora`, `dora`, and `qdora`
+not a replacement — `aarambh-studio finetune sft`, `qlora`, `dora`, and `qdora`
 all remain available, and Phase 18's milestone is an honest
 side-by-side comparison via the eval harness rather than an assumed win.
 
@@ -296,14 +296,14 @@ N "image tokens" in llm_d_model space
 Spliced into the text token sequence at the <image> special token position
    │
    ▼
-...rest of aarambh-ai's existing decoder, completely unmodified from v1...
+...rest of aarambh-studio's existing decoder, completely unmodified from v1...
 ```
 
 ### Why this stays inside the Dependency Policy
 
 CLIP weights are loaded as SafeTensors directly through `candle-core` — the
-same loading path `aarambh-ai-weights` already uses for the language model
-(`ARCHITECTURE.md` §4, `aarambh-ai-weights/src/safetensors.rs`). No
+same loading path `aarambh-studio-weights` already uses for the language model
+(`ARCHITECTURE.md` §4, `aarambh-studio-weights/src/safetensors.rs`). No
 PyTorch bindings (`tch-rs`), no ONNX Runtime, no Python FFI. The only new
 dependency is the `image` crate, used purely for local decode/resize/
 normalise — no network calls, no external service.
@@ -365,14 +365,14 @@ image tokens behaves identically to one generated after text-only context —
 the budget and mode logic don't know or care that some of the preceding
 context came from an image.
 
-Implementation status: Phase 20 adds `aarambh-ai-vision::instruct_data`,
-`aarambh-ai-finetune::vlm_dora`, `finetune vlm-dora`, `finetune vlm-qdora`,
+Implementation status: Phase 20 adds `aarambh-studio-vision::instruct_data`,
+`aarambh-studio-finetune::vlm_dora`, `finetune vlm-dora`, `finetune vlm-qdora`,
 and the `vqa` eval task. VLM checkpoints save the language adapter in the
 standard DoRA format and save the tuned projector separately as
 `projector.safetensors`, so the existing merge command and `infer --image`
 path remain unchanged.
 
-Implementation status: Phase 21 extends `aarambh-ai-selflearn` with
+Implementation status: Phase 21 extends `aarambh-studio-selflearn` with
 vision-aware replay entries, projected image-token caching, grounded VQA
 verifiers, CUDA-only hardware gating, multimodal online LoRA generation, and
 cached vision replay SFT. Text-only self-learning stays on the existing Phase
@@ -466,8 +466,8 @@ Per training step:
 (the default, and the only path on the i3 or a single-GPU Kaggle session),
 behaviour is byte-identical to v1.0.0's training loop — this is enforced by
 a regression test. The TOML `[distributed]` section is overridden by
-`AARAMBH_WORLD_SIZE`, `AARAMBH_RANK`, `AARAMBH_LOCAL_RANK`,
-`AARAMBH_DIST_RUN_ID`, and `AARAMBH_DIST_RENDEZVOUS` so Kaggle notebooks can
+`AARAMBH_STUDIO_WORLD_SIZE`, `AARAMBH_STUDIO_RANK`, `AARAMBH_STUDIO_LOCAL_RANK`,
+`AARAMBH_STUDIO_DIST_RUN_ID`, and `AARAMBH_STUDIO_DIST_RENDEZVOUS` so Kaggle notebooks can
 launch workers without generating per-rank config files.
 
 ---
@@ -638,7 +638,7 @@ modes; vision and self-learning combinations are explicitly deferred.
 
 ### Local-only, source-only
 
-`aarambh-ai-serve` uses Axum 0.8.9 to expose an OpenAI-compatible HTTP/SSE API
+`aarambh-studio-serve` uses Axum 0.8.9 to expose an OpenAI-compatible HTTP/SSE API
 (`/v1/chat/completions`, `/v1/completions`, `/v1/models`) over your own
 locally-loaded checkpoints. This is a **self-hosted, local server** — it
 does not publish weights, and `/v1/models` only ever lists checkpoints
@@ -674,19 +674,19 @@ stops admission before the worker drains active requests. The default bind is
 ## 32. Updated Dependency Layers
 
 ```
-Layer 0  aarambh-ai-core
-Layer 1  aarambh-ai-tokenizer   aarambh-ai-data
-Layer 2  aarambh-ai-nn          aarambh-ai-kernel
-Layer 3  aarambh-ai-model       aarambh-ai-weights    aarambh-ai-quant     aarambh-ai-vision
-Layer 4  aarambh-ai-train       aarambh-ai-finetune
-Layer 5  aarambh-ai-inference   aarambh-ai-safety     aarambh-ai-selflearn  aarambh-ai-eval
-Layer 6  aarambh-ai-serve       aarambh-ai (binary)
+Layer 0  aarambh-studio-core
+Layer 1  aarambh-studio-tokenizer   aarambh-studio-data
+Layer 2  aarambh-studio-nn          aarambh-studio-kernel
+Layer 3  aarambh-studio-model       aarambh-studio-weights    aarambh-studio-quant     aarambh-studio-vision
+Layer 4  aarambh-studio-train       aarambh-studio-finetune
+Layer 5  aarambh-studio-inference   aarambh-studio-safety     aarambh-studio-selflearn  aarambh-studio-eval
+Layer 6  aarambh-studio-serve       aarambh-studio (binary)
 ```
 
-`aarambh-ai-vision` sits at Layer 3 (same layer as `aarambh-ai-model`) since
+`aarambh-studio-vision` sits at Layer 3 (same layer as `aarambh-studio-model`) since
 it produces embeddings consumed by the model assembly layer, not the raw
-neural-net primitives layer. `aarambh-ai-eval` sits at Layer 5 since it
-needs a fully-assembled, fine-tunable model to evaluate. `aarambh-ai-serve`
+neural-net primitives layer. `aarambh-studio-eval` sits at Layer 5 since it
+needs a fully-assembled, fine-tunable model to evaluate. `aarambh-studio-serve`
 sits at Layer 6 alongside the CLI binary — it's a second, HTTP-shaped
 entry point into the same Layer 5 inference/safety stack the CLI uses.
 
@@ -697,9 +697,9 @@ crates in the same or lower layer, enforced by `Cargo.toml`.
 
 | Dependency | Allowed crates | Reason |
 |---|---|---|
-| `image` | `aarambh-ai-vision` | Local decode/resize/normalise only — no network calls |
-| NCCL bindings (via `candle-core` CUDA features) | `aarambh-ai-train` | Multi-GPU collective ops (§27) |
-| `axum = 0.8.9`, `tower-http = 0.7` | `aarambh-ai-serve` | Request routing, SSE, limits, CORS, tracing |
+| `image` | `aarambh-studio-vision` | Local decode/resize/normalise only — no network calls |
+| NCCL bindings (via `candle-core` CUDA features) | `aarambh-studio-train` | Multi-GPU collective ops (§27) |
+| `axum = 0.8.9`, `tower-http = 0.7` | `aarambh-studio-serve` | Request routing, SSE, limits, CORS, tracing |
 
 **Still forbidden everywhere, unchanged from v1:** PyTorch bindings
 (`tch-rs`), ONNX Runtime (`ort`), Python FFI, `llama.cpp` as a backend.

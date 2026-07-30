@@ -1,0 +1,36 @@
+[package]
+name = "aarambh-studio-train"
+version.workspace = true
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+cuda = [
+    "aarambh-studio-core/cuda",
+    "aarambh-studio-data/cuda",
+    "aarambh-studio-model/cuda",
+    "aarambh-studio-vision/cuda",
+    "aarambh-studio-weights/cuda",
+    "candle-core/nccl",
+    "candle-nn/cuda",
+]
+
+[dependencies]
+aarambh-studio-core      = { path = "../aarambh-studio-core" }
+aarambh-studio-data      = { path = "../aarambh-studio-data" }
+aarambh-studio-model     = { path = "../aarambh-studio-model" }
+aarambh-studio-tokenizer = { path = "../aarambh-studio-tokenizer" }
+aarambh-studio-vision    = { path = "../aarambh-studio-vision" }
+aarambh-studio-weights   = { path = "../aarambh-studio-weights" }
+candle-core          = { workspace = true }
+candle-nn            = { workspace = true }
+serde                = { workspace = true }
+serde_json           = { workspace = true }
+toml                 = { workspace = true }
+
+[dev-dependencies]
+aarambh-studio-core = { path = "../aarambh-studio-core" }
+candle-core     = { workspace = true }
+candle-nn       = { workspace = true }

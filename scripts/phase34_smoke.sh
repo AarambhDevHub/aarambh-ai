@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BIN=${AARAMBH_BIN:-target/release/aarambh-ai}
+BIN=${AARAMBH_STUDIO_BIN:-target/release/aarambh-studio}
 CONFIG=${QAT_CONFIG:-configs/qat_smoke.toml}
 CHECKPOINT_DIR=${QAT_CHECKPOINT_DIR:-checkpoints/qat_smoke}
 
