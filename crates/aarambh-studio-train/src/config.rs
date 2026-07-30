@@ -547,12 +547,11 @@ fn run_training_from_config_inner(
             let report = trainer.load_retrofit_checkpoint_with_moe(
                 path,
                 dtype,
-                config
-                    .moe_retrofit
-                    .as_ref()
-                    .map(|moe| aarambh_studio_weights::MoeRetrofitOptions {
+                config.moe_retrofit.as_ref().map(|moe| {
+                    aarambh_studio_weights::MoeRetrofitOptions {
                         source_top_k: moe.source_top_k,
-                    }),
+                    }
+                }),
             )?;
             if trainer.is_rank0() {
                 println!(

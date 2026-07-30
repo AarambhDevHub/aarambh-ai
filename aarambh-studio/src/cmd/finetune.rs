@@ -693,7 +693,10 @@ fn tokenizer_path(tokenizer: Option<&PathBuf>, run_config: &TrainingRunConfig) -
         .unwrap_or_else(|| run_config.train.checkpoint_dir.join("tokenizer.json"))
 }
 
-fn apply_train_overrides(train_config: &mut aarambh_studio_core::TrainConfig, args: &FinetuneRunArgs) {
+fn apply_train_overrides(
+    train_config: &mut aarambh_studio_core::TrainConfig,
+    args: &FinetuneRunArgs,
+) {
     if let Some(value) = args.batch_size {
         train_config.batch_size = value;
     }

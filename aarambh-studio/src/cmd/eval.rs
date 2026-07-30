@@ -96,8 +96,12 @@ pub fn run(args: EvalArgs) -> anyhow::Result<()> {
     let tokenizer_sha256 = tokenizer_fingerprint(&tokenizer)?;
     let mut model_config = run_config.model.clone();
     model_config.vocab_size = tokenizer.vocab_size();
-    let model =
-        aarambh_studio_weights::load_any_model_with_dtype(&model_path, &model_config, &device, dtype)?;
+    let model = aarambh_studio_weights::load_any_model_with_dtype(
+        &model_path,
+        &model_config,
+        &device,
+        dtype,
+    )?;
     let context = EvalContext::new(model, tokenizer, device, dtype);
     let thinking_mode = ThinkingMode::from_str(&args.thinking).map_err(anyhow::Error::msg)?;
     let eval_config = EvalConfig {
@@ -334,7 +338,8 @@ fn export_for_comparison(
     dtype: candle_core::DType,
     format: GgufFormat,
 ) -> anyhow::Result<()> {
-    let model = aarambh_studio_weights::load_any_model_with_dtype(source, model_config, device, dtype)?;
+    let model =
+        aarambh_studio_weights::load_any_model_with_dtype(source, model_config, device, dtype)?;
     aarambh_studio_weights::save_gguf(&model, format, output)?;
     Ok(())
 }

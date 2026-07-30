@@ -203,10 +203,16 @@ impl GroupedQueryAttention {
         let v = v.transpose(1, 2)?.contiguous()?;
 
         let out = match mask {
-            Some(mask) => {
-                aarambh_studio_kernel::dispatch::attention_forward(&q, &k, &v, Some(mask), self.scale)?
+            Some(mask) => aarambh_studio_kernel::dispatch::attention_forward(
+                &q,
+                &k,
+                &v,
+                Some(mask),
+                self.scale,
+            )?,
+            None => {
+                aarambh_studio_kernel::dispatch::attention_forward_causal(&q, &k, &v, self.scale)?
             }
-            None => aarambh_studio_kernel::dispatch::attention_forward_causal(&q, &k, &v, self.scale)?,
         };
 
         let out = out.transpose(1, 2)?;
@@ -319,9 +325,9 @@ impl GroupedQueryAttention {
                 Some(mask),
                 self.scale,
             )?,
-            None => {
-                aarambh_studio_kernel::dispatch::attention_forward_train_causal(&q, &k, &v, self.scale)?
-            }
+            None => aarambh_studio_kernel::dispatch::attention_forward_train_causal(
+                &q, &k, &v, self.scale,
+            )?,
         };
 
         let out = out.transpose(1, 2)?;
@@ -366,10 +372,16 @@ impl GroupedQueryAttention {
         let v = v.transpose(1, 2)?.contiguous()?;
 
         let out = match mask {
-            Some(mask) => {
-                aarambh_studio_kernel::dispatch::attention_forward(&q, &k, &v, Some(mask), self.scale)?
+            Some(mask) => aarambh_studio_kernel::dispatch::attention_forward(
+                &q,
+                &k,
+                &v,
+                Some(mask),
+                self.scale,
+            )?,
+            None => {
+                aarambh_studio_kernel::dispatch::attention_forward_causal(&q, &k, &v, self.scale)?
             }
-            None => aarambh_studio_kernel::dispatch::attention_forward_causal(&q, &k, &v, self.scale)?,
         };
 
         let out = out.transpose(1, 2)?;

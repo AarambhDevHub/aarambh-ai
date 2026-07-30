@@ -559,9 +559,9 @@ impl LoraAttention {
                 Some(mask),
                 self.scale,
             )?,
-            (None, true) => {
-                aarambh_studio_kernel::dispatch::attention_forward_train_causal(&q, &k, &v, self.scale)?
-            }
+            (None, true) => aarambh_studio_kernel::dispatch::attention_forward_train_causal(
+                &q, &k, &v, self.scale,
+            )?,
             (None, false) => {
                 aarambh_studio_kernel::dispatch::attention_forward_causal(&q, &k, &v, self.scale)?
             }

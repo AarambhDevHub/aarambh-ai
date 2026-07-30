@@ -4,7 +4,9 @@ use std::sync::{
     atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 
-use aarambh_studio_core::{AarambhError, QatConfig, QatTarget, QuantBits, QuantGranularity, Result};
+use aarambh_studio_core::{
+    AarambhError, QatConfig, QatTarget, QuantBits, QuantGranularity, Result,
+};
 use candle_core::{DType, Error, Tensor, TensorId};
 use candle_nn::Linear;
 

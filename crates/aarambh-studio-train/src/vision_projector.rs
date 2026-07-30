@@ -3,7 +3,9 @@ use std::time::Instant;
 
 use aarambh_studio_core::{AarambhError, ModelConfig, Result, TokenizerLike, TrainConfig};
 use aarambh_studio_model::AarambhModel;
-use aarambh_studio_tokenizer::{BpeTokenizer, ENDOFTEXT_ID, IMAGE, IMAGE_END, IMAGE_END_ID, IMAGE_ID};
+use aarambh_studio_tokenizer::{
+    BpeTokenizer, ENDOFTEXT_ID, IMAGE, IMAGE_END, IMAGE_END_ID, IMAGE_ID,
+};
 use aarambh_studio_vision::{
     ClipVisionEncoder, FrameSamplingStrategy, ImagePreprocessor, LayoutEncodingKind,
     ProjectorConfig, TemporalEncodingKind, VisionEncoderConfig, VisionPreprocessConfig,

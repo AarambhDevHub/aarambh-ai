@@ -51,7 +51,8 @@ fn main() {
         return;
     };
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by Cargo"));
-    let gpu_arch = env::var("AARAMBH_STUDIO_CUDA_ARCH").unwrap_or_else(|_| "compute_75".to_string());
+    let gpu_arch =
+        env::var("AARAMBH_STUDIO_CUDA_ARCH").unwrap_or_else(|_| "compute_75".to_string());
 
     let mut generated = Vec::with_capacity(kernels.len());
     for (env_name, module_name, kernel) in kernels {

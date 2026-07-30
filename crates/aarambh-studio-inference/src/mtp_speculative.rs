@@ -414,9 +414,11 @@ mod tests {
             norm_eps: 1e-5,
             tie_embeddings: true,
         };
-        let model =
-            aarambh_studio_model::AarambhModel::new(&config, VarBuilder::zeros(DType::F32, &device))
-                .unwrap();
+        let model = aarambh_studio_model::AarambhModel::new(
+            &config,
+            VarBuilder::zeros(DType::F32, &device),
+        )
+        .unwrap();
         InferenceEngine::new(model, tokenizer(), device).unwrap()
     }
 

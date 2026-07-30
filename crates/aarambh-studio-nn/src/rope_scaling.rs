@@ -1,4 +1,6 @@
-use aarambh_studio_core::{AarambhError, ModelConfig, Result, RopeScalingConfig, RopeScalingMethod};
+use aarambh_studio_core::{
+    AarambhError, ModelConfig, Result, RopeScalingConfig, RopeScalingMethod,
+};
 
 /// Return unscaled RoPE inverse frequencies for one attention head.
 pub fn base_inverse_frequencies(head_dim: usize, theta: f64) -> Result<Vec<f32>> {

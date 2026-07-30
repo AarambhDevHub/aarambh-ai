@@ -937,7 +937,9 @@ fn sample_vision_group(
         let completion_text = tokenizer.decode(&completion)?;
         let finish_reason = match output.finish_reason {
             FinishReason::EosToken => aarambh_studio_finetune::grpo::RolloutFinish::Eos,
-            FinishReason::ContextLimit => aarambh_studio_finetune::grpo::RolloutFinish::ContextLimit,
+            FinishReason::ContextLimit => {
+                aarambh_studio_finetune::grpo::RolloutFinish::ContextLimit
+            }
             FinishReason::MaxTokens => aarambh_studio_finetune::grpo::RolloutFinish::MaxTokens,
             FinishReason::ToolCall => aarambh_studio_finetune::grpo::RolloutFinish::MaxTokens,
             FinishReason::StopSequence => aarambh_studio_finetune::grpo::RolloutFinish::Eos,
