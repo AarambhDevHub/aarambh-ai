@@ -1,5 +1,7 @@
 # ROADMAP_V3.md — aarambh-studio v3.0
 
+> From first principles. From zero. From Rust.
+>
 > Step-by-step build plan for v3.0. Every phase ends with working, testable
 > code. Builds on the completed v2.0.0 base (Phases 0–28, all ✅). No
 > pretrained checkpoints are released as part of v3.0 — this is a

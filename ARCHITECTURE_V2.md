@@ -1,5 +1,7 @@
 # ARCHITECTURE_V2.md — aarambh-studio v2.0
 
+> From first principles. From zero. From Rust.
+>
 > Companion to `ARCHITECTURE.md`. This document covers **only what v2.0
 > adds or changes** — sections here are numbered to continue directly from
 > v1's Section 18. Anything not mentioned here (tokenizer, RMSNorm, GQA,

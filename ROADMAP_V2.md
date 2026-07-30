@@ -1,5 +1,7 @@
 # ROADMAP_V2.md — aarambh-studio v2.0
 
+> From first principles. From zero. From Rust.
+>
 > Step-by-step build plan for v2.0. Every phase ends with working, testable code.
 > Builds on the completed v1.0.0 base (Phases 0–15, all ✅). No pretrained
 > checkpoints are released as part of v2.0 — this is a source/engineering

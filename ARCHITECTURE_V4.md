@@ -1,5 +1,7 @@
 # ARCHITECTURE_V4.md — aarambh-studio v4.0
 
+> From first principles. From zero. From Rust.
+>
 > Companion to `ARCHITECTURE.md`, `ARCHITECTURE_V2.md`, and
 > `ARCHITECTURE_V3.md`. This document covers **only what v4.0 adds** on
 > top of the completed v3.0.0 architecture. Sections continue numbering

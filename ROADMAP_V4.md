@@ -1,5 +1,7 @@
 # ROADMAP_V4.md — aarambh-studio v4.0
 
+> From first principles. From zero. From Rust.
+>
 > Step-by-step build plan for v4.0 — the final planned version of
 > aarambh-studio as an application. Builds on the completed v3.0.0 base
 > (Phases 0–40, all ✅). No pretrained checkpoints are released as part

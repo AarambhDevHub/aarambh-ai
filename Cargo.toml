@@ -26,6 +26,7 @@ resolver = "2"
 version = "3.0.0"
 edition = "2024"
 rust-version = "1.89"
+description = "From first principles. From zero. From Rust."
 
 [workspace.dependencies]
 candle-core        = { version = "0.10" }

@@ -1,5 +1,7 @@
 # Aarambh Studio — Docs
 
+> From first principles. From zero. From Rust.
+
 This folder holds the learning material behind Aarambh Studio — a from-scratch decoder-only LLM built in Rust using Candle. If you've ever looked at this repo and wondered *"okay but how does any of this actually work?"*, start here.
 
 These docs aren't API references or code comments. They're written for someone coming in with **zero background in AI/ML** — a beginner who codes but has never touched a neural network before. The goal is that by the end of these guides, you understand not just *what* Aarambh Studio does, but *why* every piece exists and *how* the math underneath it actually works.

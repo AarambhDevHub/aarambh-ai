@@ -1,5 +1,7 @@
 # ROADMAP.md — aarambh-studio
 
+> From first principles. From zero. From Rust.
+>
 > Step-by-step build plan. Every phase ends with working, testable code.
 > Start Phase 0 today on your i3. No GPU required until Phase 7.
 

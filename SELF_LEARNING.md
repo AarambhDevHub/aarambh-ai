@@ -1,5 +1,7 @@
 # SELF_LEARNING.md — aarambh-studio
 
+> From first principles. From zero. From Rust.
+>
 > **aarambh-studio-selflearn** — the model learns from its own outputs.
 > No human labels required after SFT. Runs on your i3 laptop or Kaggle GPU.
 

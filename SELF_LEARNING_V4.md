@@ -1,5 +1,7 @@
 # SELF_LEARNING_V4.md — aarambh-studio v4.0
 
+> From first principles. From zero. From Rust.
+>
 > Companion to `SELF_LEARNING.md`, `SELF_LEARNING_V2.md`, and
 > `SELF_LEARNING_V3.md`. This document covers **only what v4.0 adds** —
 > how MLA, audio, sparse MoE dispatch, test-time compute scaling,

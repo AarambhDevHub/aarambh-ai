@@ -1,5 +1,7 @@
 # ARCHITECTURE_V3.md — aarambh-studio v3.0
 
+> From first principles. From zero. From Rust.
+>
 > Companion to `ARCHITECTURE.md` and `ARCHITECTURE_V2.md`. This document
 > covers **only what v3.0 adds or changes** — sections here are numbered to
 > continue directly from v2's Section 35. Anything not mentioned here

@@ -1,5 +1,7 @@
 # Changelog
 
+> From first principles. From zero. From Rust.
+
 ## [3.0.0] - 2026-07-25
 
 ### Added

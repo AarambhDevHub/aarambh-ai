@@ -1,6 +1,8 @@
 # aarambh-studio
 
-> Sanskrit: *beginning*. A ground-up language model system in Rust.
+> From first principles. From zero. From Rust.
+>
+> Sanskrit: *beginning* — a ground-up language model system in Rust.
 
 [![CI](https://github.com/AarambhDevHub/aarambh-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/AarambhDevHub/aarambh-studio/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)

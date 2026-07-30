@@ -1,5 +1,7 @@
 # ARCHITECTURE.md — aarambh-studio
 
+> From first principles. From zero. From Rust.
+>
 > A modern, from-scratch LLM in Rust using `candle`. Decoder-only transformer with
 > thinking capability, four model scales, quantisation, fine-tuning, safety guardrails,
 > custom kernels, self-learning, evaluation, vision projection, and local serving — all in one clean 17-crate workspace.

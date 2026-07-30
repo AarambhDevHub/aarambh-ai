@@ -1,5 +1,7 @@
 # SELF_LEARNING_V3.md — aarambh-studio v3.0
 
+> From first principles. From zero. From Rust.
+>
 > Companion to `SELF_LEARNING.md` and `SELF_LEARNING_V2.md`. This document
 > covers **only what v3.0 adds** — forgetting diagnostics, and how the
 > rest of v3.0's architecture (hybrid attention, fine-grained MoE, MTP,
