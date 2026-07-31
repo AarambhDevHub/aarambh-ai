@@ -2,6 +2,42 @@
 
 > From first principles. From zero. From Rust.
 
+## [4.0.0-alpha.1] - 2026-07-31
+
+### Added
+
+- **Phase 41 — Multi-Head Latent Attention (MLA):** A third attention kind
+  (`AttentionKind::LatentMLA`) joins Full and Gated DeltaNet in the
+  `HybridAttentionSchedule`, completing the attention family v3 began (linear,
+  sparse, latent-compressed). MLA layers cache a single low-rank latent vector
+  (`c_kv`, width `latent_dim`) plus a small dedicated rotary key slice
+  (`rope_head_dim`) per token, reconstructing per-head keys and values at
+  attention time through trained up-projection weights that are never cached.
+  - New `aarambh-studio-nn::mla` module (`MlaAttention`, `MlaCache`) with
+    decoupled RoPE (nope half from the latent, rope half separately cached),
+    inference/training/batched-decode/capture paths, and QAT-wrapped
+    projections (`QatTarget::Mla`).
+  - `HybridAttentionSchedule` extended with `mla_layers: Vec<usize>` and
+    `mla: Option<MlaConfig>`; `mla_layers` takes precedence over the
+    `full_attention_every_n` rule and the DSA override. A schedule with an
+    empty `mla_layers` reproduces v3.0.0 exactly.
+  - New `MlaConfig` (`latent_dim`, `nope_head_dim`, `rope_head_dim`, `n_heads`,
+    `value_head_dim`) with dimension derivation and validation.
+  - Model integration: per-layer MLA build, `HybridKvCache::Mla` allocation,
+    named-tensor export (`blocks.{i}.mla.*`), and weight lookup.
+  - Partial-checkpoint retrofit extended: `.mla.` tensors are freshly
+    initialised alongside `.deltanet.` and `.dsa.` while every shared tensor
+    loads bit-exactly (`RetrofitLoadReport.initialized_mla_tensors`).
+  - `aarambh-studio eval --kv-cache-report` prints per-layer bytes/token by
+    attention kind (no checkpoint required).
+  - New configs: `configs/mla_smoke.toml`, `configs/medium_hybrid_mla.toml`,
+    `configs/large_hybrid_mla.toml`; new scripts
+    `scripts/phase41_prepare_mla_retrofit.sh`, `scripts/phase41_smoke.sh`;
+    new doc `docs/phase41_mla.md`.
+  - For the Medium hybrid MLA config, MLA per-token cache = 528 elements vs the
+    1024-element GQA baseline — a ~1.94× reduction on retrofitted layers at
+    long context.
+
 ## [3.0.0] - 2026-07-25
 
 ### Added

@@ -29,6 +29,9 @@ pub struct RetrofitLoadReport {
     pub initialized_deltanet_tensors: usize,
     /// Number of new DSA indexer tensors left at their fresh initialization.
     pub initialized_dsa_tensors: usize,
+    /// Number of new Multi-Head Latent Attention tensors left at their fresh
+    /// initialization (v4 Phase 41).
+    pub initialized_mla_tensors: usize,
     /// Number of coarse router tensors expanded across fine-grained children.
     pub expanded_moe_router_tensors: usize,
     /// Number of coarse expert tensors sharded into fine-grained children.
@@ -164,6 +167,7 @@ pub fn load_retrofit_into_varmap_with_moe(
     let mut loaded_tensors = 0usize;
     let mut initialized_deltanet_tensors = 0usize;
     let mut initialized_dsa_tensors = 0usize;
+    let mut initialized_mla_tensors = 0usize;
     let mut expanded_moe_router_tensors = 0usize;
     let mut sharded_moe_expert_tensors = 0usize;
     let mut initialized_shared_expert_tensors = 0usize;
@@ -250,6 +254,9 @@ pub fn load_retrofit_into_varmap_with_moe(
             None if name.contains(".dsa.") => {
                 initialized_dsa_tensors += 1;
             }
+            None if name.contains(".mla.") => {
+                initialized_mla_tensors += 1;
+            }
             None if name.starts_with("mtp.") && initialize_mtp => {
                 initialized_mtp_tensors += 1;
             }
@@ -265,6 +272,7 @@ pub fn load_retrofit_into_varmap_with_moe(
         loaded_tensors,
         initialized_deltanet_tensors,
         initialized_dsa_tensors,
+        initialized_mla_tensors,
         expanded_moe_router_tensors,
         sharded_moe_expert_tensors,
         initialized_shared_expert_tensors,

@@ -977,6 +977,8 @@ mod tests {
                 conv_kernel_size: 4,
                 chunk_size: 16,
             },
+            mla_layers: Vec::new(),
+            mla: None,
         });
         let base_varmap = VarMap::new();
         let vb = VarBuilder::from_varmap(&base_varmap, DType::F32, &device);

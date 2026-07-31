@@ -186,6 +186,14 @@ beyond what each phase's Dependency Policy note allows.
 
 **Duration:** 10–14 days | **Hardware:** Kaggle (free quota)
 
+> **Status: Implemented in v4.0.0-alpha.1.** The `mla.rs` module, `MlaConfig`,
+> the three-way `HybridAttentionSchedule`, the partial-checkpoint retrofit path,
+> `--kv-cache-report`, the smoke/retrofit scripts, and the full test suite
+> (reconstruction tolerance, decoupled-RoPE split, cache-size, partial-load,
+> backward-reachability) are all in place. See `docs/phase41_mla.md` and
+> `CHANGELOG.md` §4.0.0-alpha.1. The checkbox list below is the original plan,
+> preserved for traceability.
+
 ### Goal
 A third attention kind — latent KV compression — addable to the
 `HybridAttentionSchedule` v3 §29 introduced, so a model can now mix

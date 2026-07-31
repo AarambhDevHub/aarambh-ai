@@ -1,13 +1,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use aarambh_studio_core::TokenizerLike;
+use aarambh_studio_core::{AttentionKind, TokenizerLike};
 use aarambh_studio_eval::{
     DEFAULT_SIGNIFICANCE_THRESHOLD, EvalConfig, EvalContext, ForgettingReport, ForgettingStore,
     ProbeManifest, QatRobustnessReport, Scorecard, ScorecardComparison, run_all,
     run_capability_probes, tokenizer_fingerprint,
 };
 use aarambh_studio_inference::ThinkingMode;
+use aarambh_studio_model::{KvCacheLayerReport, kv_cache_report};
 use aarambh_studio_quant::GgufFormat;
 use aarambh_studio_tokenizer::BpeTokenizer;
 use aarambh_studio_train::TrainingRunConfig;
@@ -62,6 +63,9 @@ pub struct EvalArgs {
     pub forgetting_jsonl: Option<PathBuf>,
     #[arg(long, requires = "forgetting_manifest")]
     pub require_all_probes: bool,
+    /// Print per-layer KV-cache bytes/token by attention kind and exit (v4 Phase 41).
+    #[arg(long)]
+    pub kv_cache_report: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,6 +88,9 @@ pub fn run(args: EvalArgs) -> anyhow::Result<()> {
     let run_config = TrainingRunConfig::from_toml(config_path)?;
     let run_device = run_config.device()?;
     let dtype = run_config.dtype_for_device(&run_device)?.to_candle();
+    if args.kv_cache_report {
+        return run_kv_cache_report(&run_config.model, dtype);
+    }
     let device = run_device.to_candle()?;
     let tokenizer_path = tokenizer_path(&args, &run_config);
     let model_path = match args.model.clone() {
@@ -438,6 +445,76 @@ fn write_outputs(
     }
     if out.is_none() && markdown_out.is_none() {
         println!("{markdown}");
+    }
+    Ok(())
+}
+
+fn dtype_bytes(dtype: candle_core::DType) -> usize {
+    use candle_core::DType;
+    match dtype {
+        DType::F64 => 8,
+        DType::F32 => 4,
+        DType::F16 | DType::BF16 => 2,
+        DType::U8 => 1,
+        _ => 4,
+    }
+}
+
+fn kind_name(kind: AttentionKind) -> &'static str {
+    match kind {
+        AttentionKind::Full => "full",
+        AttentionKind::Sparse => "sparse_dsa",
+        AttentionKind::GatedDeltaNet => "gated_deltanet",
+        AttentionKind::LatentMLA => "latent_mla",
+    }
+}
+
+/// Print a per-layer KV-cache bytes/token breakdown and exit (Phase 41).
+fn run_kv_cache_report(
+    cfg: &aarambh_studio_core::ModelConfig,
+    dtype: candle_core::DType,
+) -> anyhow::Result<()> {
+    let bytes = dtype_bytes(dtype);
+    let report = kv_cache_report(cfg, bytes);
+    let full_baseline: usize = 2 * cfg.n_kv_heads * cfg.head_dim() * bytes;
+    let total: usize = report.iter().map(|r| r.bytes_per_token).sum();
+
+    println!(
+        "KV-cache bytes/token (dtype={:?}, {} bytes/element, {} layers)",
+        dtype,
+        bytes,
+        report.len()
+    );
+    println!("{:<6} {:<16} {:>12}  note", "layer", "kind", "bytes/tok");
+    for KvCacheLayerReport {
+        layer,
+        kind,
+        bytes_per_token,
+        note,
+    } in &report
+    {
+        println!(
+            "{:<6} {:<16} {:>12}  {}",
+            layer,
+            kind_name(*kind),
+            bytes_per_token,
+            note
+        );
+    }
+    println!("-------------------------------------------------------------");
+    println!("total bytes/token across all layers: {total}");
+    println!(
+        "all-full baseline ({} layers): {}",
+        cfg.n_layers,
+        full_baseline * cfg.n_layers
+    );
+    if full_baseline * cfg.n_layers > 0 {
+        let ratio = total as f64 / (full_baseline * cfg.n_layers) as f64;
+        println!(
+            "hybrid/all-full ratio: {:.3} ({:.1}% of all-full cache)",
+            ratio,
+            100.0 * ratio
+        );
     }
     Ok(())
 }

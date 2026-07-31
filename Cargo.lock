@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "aarambh-studio"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-agent",
  "aarambh-studio-core",
@@ -35,7 +35,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-agent"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "aarambh-studio-inference",
@@ -46,7 +46,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-core"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "candle-core",
  "serde",
@@ -56,7 +56,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-data"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "candle-core",
@@ -67,7 +67,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-distill"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "aarambh-studio-inference",
@@ -84,7 +84,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-eval"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-agent",
  "aarambh-studio-core",
@@ -105,7 +105,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-finetune"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "aarambh-studio-kernel",
@@ -125,7 +125,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-inference"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "aarambh-studio-model",
@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-kernel"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "candle-core",
@@ -155,7 +155,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-model"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "aarambh-studio-nn",
@@ -166,7 +166,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-nn"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "aarambh-studio-kernel",
@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-quant"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "candle-core",
@@ -188,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-safety"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "aarambh-studio-inference",
@@ -199,7 +199,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-selflearn"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "aarambh-studio-eval",
@@ -220,7 +220,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-serve"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "aarambh-studio-inference",
@@ -244,7 +244,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-tokenizer"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "serde",
@@ -254,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-train"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "aarambh-studio-data",
@@ -271,7 +271,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-vision"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "candle-core",
@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "aarambh-studio-weights"
-version = "3.0.0"
+version = "4.0.0-alpha.1"
 dependencies = [
  "aarambh-studio-core",
  "aarambh-studio-model",

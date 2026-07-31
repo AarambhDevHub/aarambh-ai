@@ -1,6 +1,7 @@
 use candle_core::{DType, Result, Tensor};
 
 use crate::gated_deltanet::DeltaNetState;
+use crate::mla::MlaCache;
 
 #[derive(Debug, Clone)]
 /// KV state and compact block-index summaries for DSA attention.
@@ -109,7 +110,7 @@ impl DsaKvCache {
 }
 
 #[derive(Debug, Clone)]
-/// Per-layer cache for either full attention or Gated DeltaNet.
+/// Per-layer cache for full attention, DSA, Gated DeltaNet, or LatentMLA.
 pub enum HybridKvCache {
     /// Growing key/value cache used by a full-attention layer.
     Full(KVCache),
@@ -117,6 +118,8 @@ pub enum HybridKvCache {
     Sparse(DsaKvCache),
     /// Fixed-size recurrent state used by a Gated DeltaNet layer.
     Linear(DeltaNetState),
+    /// Compressed-latent cache used by a Multi-Head Latent Attention layer (v4 Phase 41).
+    Mla(MlaCache),
 }
 
 impl HybridKvCache {
@@ -126,6 +129,7 @@ impl HybridKvCache {
             Self::Full(cache) => cache.clear(),
             Self::Sparse(cache) => cache.clear(),
             Self::Linear(state) => state.clear(),
+            Self::Mla(cache) => cache.clear(),
         }
     }
 
@@ -135,6 +139,7 @@ impl HybridKvCache {
             Self::Full(cache) => cache.seq_len(),
             Self::Sparse(cache) => cache.seq_len(),
             Self::Linear(state) => state.seq_len(),
+            Self::Mla(cache) => cache.seq_len(),
         }
     }
 
@@ -146,6 +151,7 @@ impl HybridKvCache {
         match self {
             Self::Full(cache) => cache.truncate(new_len),
             Self::Sparse(cache) => cache.truncate(new_len),
+            Self::Mla(cache) => cache.truncate(new_len),
             Self::Linear(state) if state.seq_len() == new_len => Ok(()),
             Self::Linear(state) if new_len == 0 => {
                 state.clear();
@@ -162,7 +168,7 @@ impl HybridKvCache {
     pub fn as_full_mut(&mut self) -> Option<&mut KVCache> {
         match self {
             Self::Full(cache) => Some(cache),
-            Self::Sparse(_) | Self::Linear(_) => None,
+            Self::Sparse(_) | Self::Linear(_) | Self::Mla(_) => None,
         }
     }
 
@@ -170,7 +176,7 @@ impl HybridKvCache {
     pub fn as_sparse_mut(&mut self) -> Option<&mut DsaKvCache> {
         match self {
             Self::Sparse(cache) => Some(cache),
-            Self::Full(_) | Self::Linear(_) => None,
+            Self::Full(_) | Self::Linear(_) | Self::Mla(_) => None,
         }
     }
 
@@ -178,14 +184,14 @@ impl HybridKvCache {
     pub fn as_sparse(&self) -> Option<&DsaKvCache> {
         match self {
             Self::Sparse(cache) => Some(cache),
-            Self::Full(_) | Self::Linear(_) => None,
+            Self::Full(_) | Self::Linear(_) | Self::Mla(_) => None,
         }
     }
 
     /// Return the recurrent state when this layer uses Gated DeltaNet.
     pub fn as_linear_mut(&mut self) -> Option<&mut DeltaNetState> {
         match self {
-            Self::Full(_) | Self::Sparse(_) => None,
+            Self::Full(_) | Self::Sparse(_) | Self::Mla(_) => None,
             Self::Linear(state) => Some(state),
         }
     }
@@ -193,8 +199,24 @@ impl HybridKvCache {
     /// Return the recurrent state when this layer uses Gated DeltaNet.
     pub fn as_linear(&self) -> Option<&DeltaNetState> {
         match self {
-            Self::Full(_) | Self::Sparse(_) => None,
+            Self::Full(_) | Self::Sparse(_) | Self::Mla(_) => None,
             Self::Linear(state) => Some(state),
+        }
+    }
+
+    /// Return the compressed-latent cache when this layer uses LatentMLA.
+    pub fn as_mla_mut(&mut self) -> Option<&mut MlaCache> {
+        match self {
+            Self::Mla(cache) => Some(cache),
+            Self::Full(_) | Self::Sparse(_) | Self::Linear(_) => None,
+        }
+    }
+
+    /// Return the compressed-latent cache when this layer uses LatentMLA.
+    pub fn as_mla(&self) -> Option<&MlaCache> {
+        match self {
+            Self::Mla(cache) => Some(cache),
+            Self::Full(_) | Self::Sparse(_) | Self::Linear(_) => None,
         }
     }
 
@@ -204,6 +226,7 @@ impl HybridKvCache {
             Self::Full(cache) => cache.capacity(),
             Self::Sparse(cache) => cache.capacity(),
             Self::Linear(_) => None,
+            Self::Mla(cache) => cache.capacity(),
         }
     }
 }

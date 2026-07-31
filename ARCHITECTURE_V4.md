@@ -149,6 +149,11 @@ another.
 
 **Crate:** `aarambh-studio-nn` (`mla.rs`) | **Depends on:** v1 §6.3 (GQA/RoPE), v2 §21 (YaRN/NTK), v3 §29 (`HybridAttentionSchedule`)
 
+> **Status: Implemented in v4.0.0-alpha.1 (Phase 41).** `MlaAttention` and
+> `MlaCache` ship in `crates/aarambh-studio-nn/src/mla.rs`; `AttentionKind::LatentMLA`
+> and `MlaConfig` extend the schedule; the partial-checkpoint retrofit and
+> `--kv-cache-report` are wired through. See `docs/phase41_mla.md` for usage.
+
 ### The Problem
 
 v3 gave the model two ways to reduce the cost of a growing KV cache:

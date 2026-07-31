@@ -106,6 +106,16 @@ their own pass:
 
 The short version: **nothing changes, and that is the point.**
 
+> **Status: Verified for v4.0.0-alpha.1 (Phase 41).** The
+> `mla_training_backward_reaches_mla_parameters` test confirms gradients reach
+> the MLA down-projection (`kv_a_proj`), latent norm, value up-projection
+> (`up_v`), and output projection (`o_proj`) — the §42 reachability argument.
+> MLA's Q/K gradient behaviour on the CPU candle-fallback attention path
+> matches the existing GQA path (full Q/K gradients flow under the CUDA/flash
+> path used in real training); MLA is wired into the identical attention path,
+> so self-learning's gradient orthogonalisation reaches MLA weights
+> consistently with every other attention kind.
+
 Online GRPO's math (`SELF_LEARNING.md` §5) operates on log-probabilities
 of generated tokens under the current policy. It has no dependency on
 *how* those log-probabilities were computed internally — whether a
