@@ -18,7 +18,9 @@ with hybrid Gated DeltaNet, DeepSeek Sparse Attention,
 fine-grained MoE with shared experts, Multi-Token Prediction (MTP), on-policy
 distillation, native quantization-aware training, native video/document input,
 bounded long-horizon tool-use chains, persistent forgetting diagnostics, and
-Max thinking mode (16,384-token budget).
+Max thinking mode (16,384-token budget). **v4.0.0-alpha.1** begins the v4 arc
+with Multi-Head Latent Attention (Phase 41) — a third attention kind that
+compresses the KV cache into a single low-rank latent per token.
 
 > [!IMPORTANT]
 > This is a source and engineering project. It does not publish crates to
@@ -30,7 +32,7 @@ Max thinking mode (16,384-token budget).
 | Area | Capabilities |
 |---|---|
 | Model | RMSNorm, RoPE, GQA, SwiGLU, KV cache, tied embeddings, Tiny to Large configs |
-| Efficient architecture | YaRN/NTK/linear RoPE scaling, Gated DeltaNet, learned block-sparse DSA, fine-grained MoE, MTP |
+| Efficient architecture | YaRN/NTK/linear RoPE scaling, Gated DeltaNet, learned block-sparse DSA, Multi-Head Latent Attention (MLA), fine-grained MoE, MTP |
 | Training | BPE data pipeline, AdamW, cosine schedule, gradient accumulation/clipping, checkpoint resume, BF16 CUDA, single-node multi-GPU, on-policy distillation, native INT4/INT8 QAT |
 | Fine-tuning | SFT, LoRA, QLoRA, DoRA, QDoRA, VLM adapters, GRPO, DPO, QDPO, tool-call tuning |
 | Inference | Greedy/sampled decoding, streaming, thinking budgets, external or one-checkpoint MTP speculation, tool grammar, caller-executed chains |
@@ -119,7 +121,9 @@ See the phase-specific docs for full walkthroughs with smoke fixtures:
 | Document understanding | [docs/phase36_document.md](docs/phase36_document.md) |
 | OpenAI-compatible server | [docs/inference-server.md](docs/inference-server.md) |
 | Evaluation & forgetting diagnostics | [docs/phase38_forgetting.md](docs/phase38_forgetting.md) |
+| Multi-Head Latent Attention (MLA) | [docs/phase41_mla.md](docs/phase41_mla.md) |
 | Quantization (GPTQ, QAT, GGUF) | [docs/phase34_qat.md](docs/phase34_qat.md) |
+| MLA hybrid attention & KV-cache report | `aarambh-studio eval --kv-cache-report` + [docs/phase41_mla.md](docs/phase41_mla.md) |
 | Fine-tuning (SFT, adapters, GRPO, DPO) | `aarambh-studio finetune --help` |
 | Self-learning | [SELF_LEARNING_V3.md](SELF_LEARNING_V3.md) |
 

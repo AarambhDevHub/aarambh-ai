@@ -1155,6 +1155,8 @@ mod tests {
                     conv_kernel_size: 4,
                     chunk_size: 16,
                 },
+                mla_layers: Vec::new(),
+                mla: None,
             }),
             dsa_config: Some(DsaConfig {
                 block_size: 16,

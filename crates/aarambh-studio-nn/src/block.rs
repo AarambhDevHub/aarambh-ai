@@ -6,6 +6,7 @@ use crate::attention::GroupedQueryAttention;
 use crate::ffn::SwiGluFfn;
 use crate::gated_deltanet::GatedDeltaNetLayer;
 use crate::kvcache::HybridKvCache;
+use crate::mla::MlaAttention;
 use crate::moe::{MoeFfn, MoeForwardStats};
 use crate::norm::RMSNorm;
 use crate::rope::RopeCache;
@@ -76,6 +77,8 @@ pub enum TokenMixer {
     Sparse(DsaAttention),
     /// Fixed-state Gated DeltaNet linear attention.
     GatedDelta(GatedDeltaNetLayer),
+    /// Multi-Head Latent Attention with compressed-latent KV cache (v4 Phase 41).
+    Mla(MlaAttention),
 }
 
 impl TokenMixer {
@@ -87,34 +90,46 @@ impl TokenMixer {
         cache: Option<&mut HybridKvCache>,
         seqlen_offset: usize,
     ) -> Result<Tensor> {
-        match (self, cache) {
-            (Self::Attention(attn), Some(HybridKvCache::Full(cache))) => {
-                attn.forward(x, rope, mask, Some(cache), seqlen_offset)
+        match self {
+            Self::Attention(attn) => {
+                let cache = cache
+                    .map(|c| {
+                        c.as_full_mut().ok_or_else(|| {
+                            candle_core::Error::msg(
+                                "full-attention block received an incompatible cache",
+                            )
+                        })
+                    })
+                    .transpose()?;
+                attn.forward(x, rope, mask, cache, seqlen_offset)
             }
-            (Self::Attention(attn), None) => attn.forward(x, rope, mask, None, seqlen_offset),
-            (Self::Sparse(attn), Some(HybridKvCache::Sparse(cache))) => {
-                attn.forward(x, rope, mask, Some(cache), seqlen_offset, None)
+            Self::Sparse(attn) => {
+                let cache = cache
+                    .map(|c| {
+                        c.as_sparse_mut().ok_or_else(|| {
+                            candle_core::Error::msg("DSA block received an incompatible cache")
+                        })
+                    })
+                    .transpose()?;
+                attn.forward(x, rope, mask, cache, seqlen_offset, None)
             }
-            (Self::Sparse(attn), None) => attn.forward(x, rope, mask, None, seqlen_offset, None),
-            (Self::GatedDelta(layer), Some(HybridKvCache::Linear(state))) => {
-                layer.forward_cached(x, state)
+            Self::GatedDelta(layer) => match cache {
+                Some(HybridKvCache::Linear(state)) => layer.forward_cached(x, state),
+                None => layer.forward(x),
+                Some(_) => Err(candle_core::Error::msg(
+                    "Gated DeltaNet block received an incompatible cache",
+                )),
+            },
+            Self::Mla(attn) => {
+                let cache = cache
+                    .map(|c| {
+                        c.as_mla_mut().ok_or_else(|| {
+                            candle_core::Error::msg("MLA block received an incompatible cache")
+                        })
+                    })
+                    .transpose()?;
+                attn.forward(x, rope, mask, cache, seqlen_offset)
             }
-            (Self::GatedDelta(layer), None) => layer.forward(x),
-            (Self::Attention(_), Some(HybridKvCache::Linear(_))) => Err(candle_core::Error::msg(
-                "full-attention block received a linear cache",
-            )),
-            (Self::Attention(_), Some(HybridKvCache::Sparse(_))) => Err(candle_core::Error::msg(
-                "full-attention block received a DSA cache",
-            )),
-            (Self::Sparse(_), Some(HybridKvCache::Full(_) | HybridKvCache::Linear(_))) => Err(
-                candle_core::Error::msg("DSA block received an incompatible cache"),
-            ),
-            (Self::GatedDelta(_), Some(HybridKvCache::Full(_))) => Err(candle_core::Error::msg(
-                "Gated DeltaNet block received a full-attention cache",
-            )),
-            (Self::GatedDelta(_), Some(HybridKvCache::Sparse(_))) => Err(candle_core::Error::msg(
-                "Gated DeltaNet block received a DSA cache",
-            )),
         }
     }
 
@@ -161,12 +176,23 @@ impl TokenMixer {
                     .map(|cache| {
                         cache.as_linear_mut().ok_or_else(|| {
                             candle_core::Error::msg(
-                                "Gated DeltaNet block received a full-attention cache",
+                                "Gated DeltaNet block received an incompatible cache",
                             )
                         })
                     })
                     .collect::<Result<Vec<_>>>()?;
                 layer.forward_decode_batch(x, &mut linear)
+            }
+            Self::Mla(attn) => {
+                let mut mla = caches
+                    .iter_mut()
+                    .map(|cache| {
+                        cache.as_mla_mut().ok_or_else(|| {
+                            candle_core::Error::msg("MLA block received an incompatible cache")
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                attn.forward_decode_batch(x, rope, &mut mla, seqlen_offsets)
             }
         }
     }
@@ -182,6 +208,7 @@ impl TokenMixer {
             Self::Attention(attn) => attn.forward_train(x, rope, mask, seqlen_offset),
             Self::Sparse(attn) => attn.forward_train(x, rope, mask, seqlen_offset, None),
             Self::GatedDelta(layer) => layer.forward_train(x),
+            Self::Mla(attn) => attn.forward_train(x, rope, mask, seqlen_offset),
         }
     }
 
@@ -197,6 +224,7 @@ impl TokenMixer {
             Self::Attention(attn) => attn.forward_with_capture(x, rope, mask, layer_idx, capture),
             Self::Sparse(attn) => attn.forward_with_capture(x, rope, mask, layer_idx, capture),
             Self::GatedDelta(layer) => layer.forward_with_capture(x, layer_idx, capture),
+            Self::Mla(attn) => attn.forward_with_capture(x, rope, mask, layer_idx, capture),
         }
     }
 
@@ -205,7 +233,7 @@ impl TokenMixer {
         match self {
             Self::Attention(attn) => Some(attn),
             Self::Sparse(attn) => Some(attn.attention()),
-            Self::GatedDelta(_) => None,
+            Self::GatedDelta(_) | Self::Mla(_) => None,
         }
     }
 
@@ -213,15 +241,23 @@ impl TokenMixer {
     pub fn as_sparse(&self) -> Option<&DsaAttention> {
         match self {
             Self::Sparse(attn) => Some(attn),
-            Self::Attention(_) | Self::GatedDelta(_) => None,
+            Self::Attention(_) | Self::GatedDelta(_) | Self::Mla(_) => None,
         }
     }
 
     /// Return the Gated DeltaNet implementation, when selected.
     pub fn as_gated_delta(&self) -> Option<&GatedDeltaNetLayer> {
         match self {
-            Self::Attention(_) | Self::Sparse(_) => None,
+            Self::Attention(_) | Self::Sparse(_) | Self::Mla(_) => None,
             Self::GatedDelta(layer) => Some(layer),
+        }
+    }
+
+    /// Return the Multi-Head Latent Attention implementation, when selected.
+    pub fn as_mla(&self) -> Option<&MlaAttention> {
+        match self {
+            Self::Mla(attn) => Some(attn),
+            Self::Attention(_) | Self::Sparse(_) | Self::GatedDelta(_) => None,
         }
     }
 

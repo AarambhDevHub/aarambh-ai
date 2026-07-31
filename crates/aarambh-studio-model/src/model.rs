@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
 use aarambh_studio_core::{
-    AarambhError, AttentionKind, Configurable, Forward, ModelConfig, QatTarget, Result,
+    AarambhError, AttentionKind, Configurable, Forward, MlaConfig, ModelConfig, QatTarget, Result,
 };
 use aarambh_studio_nn::{
     DeltaNetState, DsaAttention, DsaForwardStats, DsaKvCache, DsaTeacherOutput, FeedForwardLayer,
-    GatedDeltaNetLayer, GroupedQueryAttention, HybridKvCache, KVCache, MoeFfn, MoeForwardStats,
-    MtpHead, RMSNorm, RopeCache, SharedExpertPath, SwiGluFfn, TokenMixer, TransformerBlock,
+    GatedDeltaNetLayer, GroupedQueryAttention, HybridKvCache, KVCache, MlaAttention, MlaCache,
+    MoeFfn, MoeForwardStats, MtpHead, RMSNorm, RopeCache, SharedExpertPath, SwiGluFfn, TokenMixer,
+    TransformerBlock,
 };
 use aarambh_studio_quant::{QatContext, QatLinear, QatStats};
 use candle_core::{DType, Tensor};
@@ -87,12 +88,22 @@ impl AarambhModel {
         };
 
         let embedding = TokenEmbedding::new(cfg.vocab_size, cfg.hidden_dim, vb.pp("embedding"))?;
+        let model_dtype = embedding.weight().dtype();
         let mut blocks = Vec::with_capacity(cfg.n_layers);
         let deltanet_config = cfg
             .attention_schedule
             .as_ref()
             .map(|schedule| schedule.validate(cfg.n_layers, cfg.hidden_dim, cfg.n_heads))
             .transpose()?;
+        let mla_config = cfg
+            .attention_schedule
+            .as_ref()
+            .and_then(|schedule| {
+                schedule
+                    .resolved_mla(cfg.n_layers, cfg.hidden_dim, cfg.n_heads)
+                    .ok()
+            })
+            .flatten();
 
         for layer_idx in 0..cfg.n_layers {
             let block_vb = vb.pp("blocks").pp(layer_idx);
@@ -146,6 +157,15 @@ impl AarambhModel {
                         .expect("validated hybrid config has Gated DeltaNet settings"),
                     block_vb.pp("deltanet"),
                     qat_context.clone(),
+                )?),
+                AttentionKind::LatentMLA => TokenMixer::Mla(build_mla(
+                    cfg,
+                    model_dtype,
+                    block_vb.pp("mla"),
+                    qat_context.clone(),
+                    mla_config
+                        .as_ref()
+                        .expect("validated hybrid config has MLA settings"),
                 )?),
             };
 
@@ -243,7 +263,7 @@ impl AarambhModel {
             None => Vec::new(),
         };
 
-        let dtype = embedding.weight().dtype();
+        let dtype = model_dtype;
         let rope_cache = RopeCache::from_config(cfg, dtype, vb.device())?;
 
         Ok(Self {
@@ -636,6 +656,7 @@ impl AarambhModel {
                     attn.config().block_size,
                 )),
                 TokenMixer::GatedDelta(_) => HybridKvCache::Linear(DeltaNetState::new()),
+                TokenMixer::Mla(_) => HybridKvCache::Mla(MlaCache::with_capacity(capacity)),
             })
             .collect()
     }
@@ -717,6 +738,10 @@ impl AarambhModel {
                     .mixer()
                     .as_gated_delta()
                     .and_then(|layer| layer.get_weight(&suffix[9..])),
+                _ if suffix.starts_with("mla.") => block
+                    .mixer()
+                    .as_mla()
+                    .and_then(|layer| layer.get_weight(&suffix[4..])),
                 _ => get_moe_expert_weight(block.ffn(), suffix),
             };
         }
@@ -1024,6 +1049,11 @@ fn insert_mixer_tensors(
                 );
             }
         }
+        TokenMixer::Mla(layer) => {
+            for (name, tensor) in layer.named_tensors() {
+                tensors.insert(format!("blocks.{layer_idx}.mla.{name}"), tensor.clone());
+            }
+        }
     }
 }
 
@@ -1058,6 +1088,70 @@ fn build_attention(
         cfg.n_heads,
         cfg.n_kv_heads,
         head_dim,
+    ))
+}
+
+fn build_mla(
+    cfg: &ModelConfig,
+    dtype: DType,
+    vb: VarBuilder<'_>,
+    qat: Option<QatContext>,
+    mla: &MlaConfig,
+) -> Result<MlaAttention> {
+    let h = mla.n_heads;
+    let nope = mla.nope_head_dim;
+    let rope_dim = mla.rope_head_dim;
+    let val = mla.value_head_dim;
+    let latent = mla.latent_dim;
+    let hidden = cfg.hidden_dim;
+    // MLA owns a dedicated `rope_head_dim`-wide RoPE cache for its decoupled
+    // rotary slice; the host transformer's head-dim RoPE is not reused because
+    // a compressed latent cannot carry an already-rotated key.
+    let rope = RopeCache::new(
+        cfg.max_seq_len,
+        rope_dim,
+        cfg.rope_theta,
+        dtype,
+        vb.device(),
+    )?;
+    Ok(MlaAttention::new(
+        qat_linear(
+            linear_no_bias(hidden, h * (nope + rope_dim), vb.pp("q_proj"))?,
+            QatTarget::Mla,
+            &qat,
+        ),
+        qat_linear(
+            linear_no_bias(hidden, latent, vb.pp("kv_a_proj"))?,
+            QatTarget::Mla,
+            &qat,
+        ),
+        RMSNorm::new(
+            vb.pp("kv_a_norm")
+                .get_with_hints(latent, "weight", Init::Const(1.0))?,
+            cfg.norm_eps as f32,
+        ),
+        qat_linear(
+            linear_no_bias(latent, h * nope, vb.pp("up_k"))?,
+            QatTarget::Mla,
+            &qat,
+        ),
+        qat_linear(
+            linear_no_bias(latent, h * val, vb.pp("up_v"))?,
+            QatTarget::Mla,
+            &qat,
+        ),
+        qat_linear(
+            linear_no_bias(hidden, rope_dim, vb.pp("k_rope_proj"))?,
+            QatTarget::Mla,
+            &qat,
+        ),
+        qat_linear(
+            linear_no_bias(h * val, hidden, vb.pp("o_proj"))?,
+            QatTarget::Mla,
+            &qat,
+        ),
+        mla.clone(),
+        rope,
     ))
 }
 
@@ -1213,4 +1307,61 @@ impl Forward for AarambhModel {
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
         AarambhModel::forward(self, xs)
     }
+}
+
+/// Per-layer KV-cache footprint summary, used by `--kv-cache-report` (v4 Phase 41).
+#[derive(Debug, Clone)]
+pub struct KvCacheLayerReport {
+    /// Zero-based layer index.
+    pub layer: usize,
+    /// Attention kind active for this layer.
+    pub kind: AttentionKind,
+    /// Bytes cached per generated token at this layer.
+    pub bytes_per_token: usize,
+    /// Human-readable note explaining the footprint (e.g. fixed recurrent state).
+    pub note: &'static str,
+}
+
+/// Compute the per-layer KV-cache bytes/token for a model config.
+///
+/// MLA layers cache `(latent_dim + rope_head_dim) * dtype_bytes` per token;
+/// full and DSA layers cache `2 * n_kv_heads * head_dim * dtype_bytes`; Gated
+/// DeltaNet layers use a fixed recurrent state that does not grow per token.
+pub fn kv_cache_report(cfg: &ModelConfig, dtype_bytes: usize) -> Vec<KvCacheLayerReport> {
+    let head_dim = cfg.head_dim();
+    let full_bytes = 2 * cfg.n_kv_heads * head_dim * dtype_bytes;
+    let mla = cfg
+        .attention_schedule
+        .as_ref()
+        .and_then(|schedule| {
+            schedule
+                .resolved_mla(cfg.n_layers, cfg.hidden_dim, cfg.n_heads)
+                .ok()
+        })
+        .flatten();
+    (0..cfg.n_layers)
+        .map(|layer| {
+            let kind = cfg.attention_kind_for_layer(layer);
+            let (bytes_per_token, note) = match kind {
+                AttentionKind::Full => (full_bytes, "2 * n_kv_heads * head_dim per token"),
+                AttentionKind::Sparse => (full_bytes, "full KV + compact DSA block index"),
+                AttentionKind::GatedDeltaNet => (0, "fixed recurrent state (not per-token)"),
+                AttentionKind::LatentMLA => {
+                    let mla = mla
+                        .as_ref()
+                        .expect("MLA layer requires resolved MLA config");
+                    (
+                        mla.cache_width() * dtype_bytes,
+                        "latent_dim + rope_head_dim per token (compressed)",
+                    )
+                }
+            };
+            KvCacheLayerReport {
+                layer,
+                kind,
+                bytes_per_token,
+                note,
+            }
+        })
+        .collect()
 }

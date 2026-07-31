@@ -221,6 +221,8 @@ pub enum AttentionKind {
     Sparse,
     /// Fixed-state Gated DeltaNet linear attention.
     GatedDeltaNet,
+    /// Multi-Head Latent Attention with compressed-latent KV cache (v4 Phase 41).
+    LatentMLA,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -330,6 +332,8 @@ pub enum QatTarget {
     DsaIndexer,
     /// Multi-token prediction refinement projections.
     Mtp,
+    /// Multi-Head Latent Attention down/up and rope projections (v4 Phase 41).
+    Mla,
     /// The language-model output projection.
     LmHead,
 }
@@ -358,6 +362,7 @@ impl Default for QatConfig {
                 QatTarget::DeltaNet,
                 QatTarget::DsaIndexer,
                 QatTarget::Mtp,
+                QatTarget::Mla,
             ]
             .into_iter()
             .collect(),
@@ -515,12 +520,126 @@ impl GatedDeltaNetConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
-/// Per-layer schedule for hybrid full and Gated DeltaNet attention.
+/// Multi-Head Latent Attention settings (v4 Phase 41).
+///
+/// MLA compresses the per-token KV cache into a single low-rank latent vector
+/// (`latent_dim`), reconstructing per-head keys and values at attention time
+/// through small up-projection weights that are trained but never cached. A
+/// small dedicated rotary slice (`rope_head_dim`) is cached alongside the
+/// latent so position can be re-introduced without rotating the compressed
+/// latent. See `ARCHITECTURE_V4.md` §55 for the full mechanism.
+pub struct MlaConfig {
+    /// Width of the compressed latent cached per token (the down-projection output).
+    pub latent_dim: usize,
+    /// Per-head width of the non-rotary ("nope") query/key slice.
+    ///
+    /// Zero derives `host_head_dim - rope_head_dim` against the host transformer.
+    pub nope_head_dim: usize,
+    /// Per-head width of the rotary-encoded query/key slice. Must be even.
+    pub rope_head_dim: usize,
+    /// Number of MLA query heads. Zero derives the host transformer head count.
+    pub n_heads: usize,
+    /// Per-head width of the reconstructed value. Zero derives `nope_head_dim`.
+    pub value_head_dim: usize,
+}
+
+impl Default for MlaConfig {
+    fn default() -> Self {
+        Self {
+            latent_dim: 512,
+            nope_head_dim: 0,
+            rope_head_dim: 16,
+            n_heads: 0,
+            value_head_dim: 0,
+        }
+    }
+}
+
+impl MlaConfig {
+    /// Resolve automatic dimensions against a transformer model.
+    pub fn resolve(&self, hidden_dim: usize, transformer_heads: usize) -> Result<Self> {
+        let n_heads = if self.n_heads == 0 {
+            transformer_heads
+        } else {
+            self.n_heads
+        };
+        let rope_head_dim = self.rope_head_dim;
+        let nope_head_dim = if self.nope_head_dim == 0 {
+            let host_head_dim = hidden_dim / transformer_heads;
+            host_head_dim.saturating_sub(rope_head_dim).max(8)
+        } else {
+            self.nope_head_dim
+        };
+        let value_head_dim = if self.value_head_dim == 0 {
+            nope_head_dim
+        } else {
+            self.value_head_dim
+        };
+        let resolved = Self {
+            latent_dim: self.latent_dim,
+            nope_head_dim,
+            rope_head_dim,
+            n_heads,
+            value_head_dim,
+        };
+        resolved.validate()?;
+        Ok(resolved)
+    }
+
+    /// Validate resolved MLA dimensions.
+    pub fn validate(&self) -> Result<()> {
+        if self.latent_dim == 0 {
+            return Err(AarambhError::Config(
+                "mla.latent_dim must be non-zero".into(),
+            ));
+        }
+        if self.n_heads == 0 {
+            return Err(AarambhError::Config(
+                "mla.n_heads must resolve to a non-zero value".into(),
+            ));
+        }
+        if self.nope_head_dim == 0 {
+            return Err(AarambhError::Config(
+                "mla.nope_head_dim must resolve to a non-zero value".into(),
+            ));
+        }
+        if self.rope_head_dim == 0 || !self.rope_head_dim.is_multiple_of(2) {
+            return Err(AarambhError::Config(
+                "mla.rope_head_dim must be a positive even number".into(),
+            ));
+        }
+        if self.value_head_dim == 0 {
+            return Err(AarambhError::Config(
+                "mla.value_head_dim must resolve to a non-zero value".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Return the per-token cache width (latent + rotary slice) in elements.
+    pub fn cache_width(&self) -> usize {
+        self.latent_dim + self.rope_head_dim
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+/// Per-layer schedule for hybrid full, Gated DeltaNet, and LatentMLA attention.
 pub struct HybridAttentionSchedule {
     /// Keep every Nth zero-based layer as full attention; other layers use Gated DeltaNet.
     pub full_attention_every_n: usize,
     /// Gated DeltaNet shape and execution settings.
     pub gated_deltanet: GatedDeltaNetConfig,
+    /// Zero-based layer indices upgraded to Multi-Head Latent Attention (v4 Phase 41).
+    ///
+    /// Empty by default, which reproduces v3.0.0 exactly. A layer listed here
+    /// takes precedence over both the `full_attention_every_n` rule and the
+    /// DSA full-attention override.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mla_layers: Vec<usize>,
+    /// Shared Multi-Head Latent Attention settings used by every `mla_layers` entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mla: Option<MlaConfig>,
 }
 
 impl Default for HybridAttentionSchedule {
@@ -528,13 +647,28 @@ impl Default for HybridAttentionSchedule {
         Self {
             full_attention_every_n: 4,
             gated_deltanet: GatedDeltaNetConfig::default(),
+            mla_layers: Vec::new(),
+            mla: None,
         }
     }
 }
 
 impl HybridAttentionSchedule {
+    /// Return whether `layer_idx` is selected for Multi-Head Latent Attention.
+    pub fn is_mla_layer(&self, layer_idx: usize) -> bool {
+        self.mla_layers.contains(&layer_idx)
+    }
+
     /// Return the token mixer selected for `layer_idx`.
+    ///
+    /// `LatentMLA` layers (from `mla_layers`) take precedence over the
+    /// `full_attention_every_n` rule, so the DSA override applied by
+    /// [`ModelConfig::attention_kind_for_layer`](crate::ModelConfig::attention_kind_for_layer)
+    /// never replaces an MLA slot.
     pub fn kind_for_layer(&self, layer_idx: usize) -> AttentionKind {
+        if self.is_mla_layer(layer_idx) {
+            return AttentionKind::LatentMLA;
+        }
         if self.full_attention_every_n > 0 && layer_idx.is_multiple_of(self.full_attention_every_n)
         {
             AttentionKind::Full
@@ -555,14 +689,43 @@ impl HybridAttentionSchedule {
                 "attention_schedule.full_attention_every_n must be non-zero".into(),
             ));
         }
-        if n_layers < 2
-            || !(0..n_layers).any(|idx| self.kind_for_layer(idx) == AttentionKind::GatedDeltaNet)
-        {
+        let has_gated_delta =
+            (0..n_layers).any(|idx| self.kind_for_layer(idx) == AttentionKind::GatedDeltaNet);
+        let has_mla = (0..n_layers).any(|idx| self.kind_for_layer(idx) == AttentionKind::LatentMLA);
+        if n_layers < 2 || (!has_gated_delta && !has_mla) {
             return Err(AarambhError::Config(
-                "attention_schedule must select at least one Gated DeltaNet layer".into(),
+                "attention_schedule must select at least one Gated DeltaNet or LatentMLA layer"
+                    .into(),
+            ));
+        }
+        if has_mla && self.mla.is_none() {
+            return Err(AarambhError::Config(
+                "attention_schedule.mla must be set when mla_layers is non-empty".into(),
             ));
         }
         self.gated_deltanet.resolve(hidden_dim, transformer_heads)
+    }
+
+    /// Resolve the shared MLA configuration when the schedule selects MLA layers.
+    ///
+    /// Returns `Ok(None)` when no layer uses LatentMLA, so a v3 schedule with
+    /// an empty `mla_layers` reproduces v3.0.0 exactly.
+    pub fn resolved_mla(
+        &self,
+        n_layers: usize,
+        hidden_dim: usize,
+        transformer_heads: usize,
+    ) -> Result<Option<MlaConfig>> {
+        let has_mla = (0..n_layers).any(|idx| self.kind_for_layer(idx) == AttentionKind::LatentMLA);
+        if !has_mla {
+            return Ok(None);
+        }
+        let mla = self.mla.as_ref().ok_or_else(|| {
+            AarambhError::Config(
+                "attention_schedule.mla is required when mla_layers is non-empty".into(),
+            )
+        })?;
+        mla.resolve(hidden_dim, transformer_heads).map(Some)
     }
 }
 
@@ -889,6 +1052,87 @@ mod tests {
             AttentionKind::GatedDeltaNet
         );
         assert_eq!(cfg.attention_kind_for_layer(4), AttentionKind::Sparse);
+    }
+
+    #[test]
+    fn schedule_with_zero_mla_layers_matches_v3_exactly() {
+        // A default v3 schedule (empty mla_layers, no mla config) reproduces
+        // v3.0.0 kind_for_layer exactly: Full every Nth layer, GatedDeltaNet
+        // elsewhere, and resolved_mla returns None.
+        let schedule = HybridAttentionSchedule::default();
+        for layer in 0..8 {
+            let kind = schedule.kind_for_layer(layer);
+            if layer.is_multiple_of(schedule.full_attention_every_n) {
+                assert_eq!(kind, AttentionKind::Full, "layer {layer}");
+            } else {
+                assert_eq!(kind, AttentionKind::GatedDeltaNet, "layer {layer}");
+            }
+        }
+        assert!(schedule.resolved_mla(8, 384, 6).unwrap().is_none());
+    }
+
+    #[test]
+    fn mla_layers_take_precedence_over_every_n_and_dsa_override() {
+        // MLA slots must win over both the full_attention_every_n rule and the
+        // DSA full-attention override applied by ModelConfig.
+        let schedule = HybridAttentionSchedule {
+            mla_layers: vec![0, 4],
+            mla: Some(MlaConfig {
+                latent_dim: 64,
+                rope_head_dim: 16,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(schedule.kind_for_layer(0), AttentionKind::LatentMLA);
+        assert_eq!(schedule.kind_for_layer(1), AttentionKind::GatedDeltaNet);
+        assert_eq!(schedule.kind_for_layer(4), AttentionKind::LatentMLA);
+
+        let mut cfg = ModelConfig::tiny();
+        cfg.attention_schedule = Some(schedule);
+        cfg.dsa_config = Some(DsaConfig::default());
+        // MLA slot is not replaced by Sparse even though dsa_config is set.
+        assert_eq!(cfg.attention_kind_for_layer(0), AttentionKind::LatentMLA);
+        assert_eq!(cfg.attention_kind_for_layer(4), AttentionKind::LatentMLA);
+        // resolved_mla returns a resolved config (n_heads derived from the host).
+        let mla = cfg
+            .attention_schedule
+            .as_ref()
+            .unwrap()
+            .resolved_mla(cfg.n_layers, cfg.hidden_dim, cfg.n_heads)
+            .unwrap()
+            .unwrap();
+        assert_eq!(mla.n_heads, cfg.n_heads);
+        assert_eq!(mla.rope_head_dim, 16);
+        assert!(mla.cache_width() < 2 * cfg.n_kv_heads * cfg.head_dim());
+    }
+
+    #[test]
+    fn mla_config_resolves_derived_dimensions() {
+        // host: hidden=128, heads=2 -> head_dim=64.
+        let mla = MlaConfig {
+            latent_dim: 64,
+            rope_head_dim: 16,
+            ..Default::default()
+        }
+        .resolve(128, 2)
+        .unwrap();
+        assert_eq!(mla.n_heads, 2);
+        assert_eq!(mla.nope_head_dim, 48); // 64 - 16
+        assert_eq!(mla.value_head_dim, 48); // derives nope_head_dim
+        assert_eq!(mla.cache_width(), 80); // 64 + 16
+    }
+
+    #[test]
+    fn mla_config_rejects_odd_rope_head_dim() {
+        let err = MlaConfig {
+            latent_dim: 64,
+            rope_head_dim: 15,
+            ..Default::default()
+        }
+        .resolve(128, 2)
+        .unwrap_err();
+        assert!(err.to_string().contains("rope_head_dim"), "{}", err);
     }
 }
 

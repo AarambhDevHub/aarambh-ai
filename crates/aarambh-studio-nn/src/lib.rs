@@ -13,6 +13,8 @@ pub mod ffn;
 pub mod gated_deltanet;
 /// Training/inference KV cache helper.
 pub mod kvcache;
+/// Multi-Head Latent Attention layer and compressed-latent cache (v4 Phase 41).
+pub mod mla;
 /// Mixture-of-Experts feed-forward layer.
 pub mod moe;
 /// Multi-token prediction auxiliary head.
@@ -32,6 +34,7 @@ pub use dispatch::dense_weighted_dispatch;
 pub use ffn::SwiGluFfn;
 pub use gated_deltanet::{DeltaNetForm, DeltaNetState, GatedDeltaNetLayer};
 pub use kvcache::{DsaKvCache, HybridKvCache, KVCache};
+pub use mla::{MlaAttention, MlaCache};
 pub use moe::{
     GatingOutput, MoeFfn, MoeForwardStats, SharedExpertPath, load_balancing_loss_from_stats,
     top_k_gating,
