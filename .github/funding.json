@@ -1,0 +1,110 @@
+{
+    "$schema": "https://fundingjson.org/schema/v1.1.0.json",
+    "version": "v1.1.0",
+
+    "entity": {
+        "type": "individual",
+        "role": "owner",
+        "name": "Darshan Vichhi",
+        "email": "darshanvichhi111@gmail.com",
+        "phone": "",
+        "description": "I'm Darshan Vichhi, a systems engineer and Rust developer focused on high-performance, low-latency systems built as close to the hardware as possible. Under the Aarambh Dev Hub brand, I build from-scratch, source-available AI/ML and systems infrastructure in Rust and Go -- including a decoder-only LLM (Aarambh AI), an animation engine (Animato), and free educational material teaching how these systems work internally -- and share the process through YouTube tutorials, open-source releases, and a ~500-member Discord community.",
+        "webpageUrl": {
+            "url": "https://github.com/AarambhDevHub",
+            "wellKnown": ""
+        }
+    },
+
+    "projects": [
+        {
+            "guid": "aarambh-studio",
+            "name": "Aarambh AI",
+            "description": "A decoder-only large language model built entirely from scratch in Rust using the Candle framework -- no Python, no PyTorch. Now at v3.0.0 (Phases 29-40 complete), it implements Gated DeltaNet hybrid attention, DeepSeek Sparse Attention, fine-grained MoE with a shared expert, multi-token prediction, on-policy distillation, native quantization-aware training, native video/document understanding, long-horizon tool-use chains, and multiple thinking modes. Released as source-only, with zero pretrained model artifacts distributed.",
+            "webpageUrl": {
+                "url": "https://github.com/AarambhDevHub/aarambh-studio",
+                "wellKnown": ""
+            },
+            "repositoryUrl": {
+                "url": "https://github.com/AarambhDevHub/aarambh-studio",
+                "wellKnown": ""
+            },
+            "licenses": ["spdx:Apache-2.0"],
+            "tags": ["rust", "llm", "machine-learning", "deep-learning", "from-scratch", "candle"]
+        },
+        {
+            "guid": "animato",
+            "name": "Animato",
+            "description": "A renderer-agnostic Rust animation library -- tweens, springs, timelines, motion paths, and GPU compute -- that works across Leptos, Yew, Dioxus, Bevy, and WASM. Now at v1.7.0 with 16 crates published to crates.io plus an npm package, including a declarative macro DSL (animato-macro) with 23 built-in presets and compile-time validation. Successor to the archived Spanda library.",
+            "webpageUrl": {
+                "url": "https://github.com/AarambhDevHub/animato",
+                "wellKnown": ""
+            },
+            "repositoryUrl": {
+                "url": "https://github.com/AarambhDevHub/animato",
+                "wellKnown": ""
+            },
+            "licenses": ["spdx:MIT"],
+            "tags": ["rust", "animation", "graphics", "developer-tools", "gamedev"]
+        },
+        {
+            "guid": "llm-from-scratch",
+            "name": "LLM from Scratch",
+            "description": "A 37-chapter public course explaining how large language models work internally, from tokenization and embeddings through attention, training loops, quantization, distributed training, LoRA, DPO, GRPO, distillation, RAG, tool use, AI agents, and safety. Includes a small runnable decoder-only Transformer in PyTorch with tests, plus guides for building datasets from Hugging Face, Kaggle, and Common Crawl. Explicitly framed as educational material, not a production LLM framework.",
+            "webpageUrl": {
+                "url": "https://github.com/AarambhDevHub/llm-from-scratch",
+                "wellKnown": ""
+            },
+            "repositoryUrl": {
+                "url": "https://github.com/AarambhDevHub/llm-from-scratch",
+                "wellKnown": ""
+            },
+            "licenses": ["spdx:MIT"],
+            "tags": ["education", "llm", "machine-learning", "pytorch", "course"]
+        }
+    ],
+
+    "funding": {
+        "channels": [
+            {
+                "guid": "github-sponsors",
+                "type": "payment-provider",
+                "address": "https://github.com/sponsors/aarambh-darshan",
+                "description": "Recurring or one-time sponsorship via GitHub Sponsors."
+            },
+            {
+                "guid": "buymeacoffee",
+                "type": "payment-provider",
+                "address": "https://buymeacoffee.com/aarambhdevhub",
+                "description": "One-time or membership support via Buy Me a Coffee."
+            },
+            {
+                "guid": "razorpay",
+                "type": "payment-provider",
+                "address": "https://razorpay.me/@aarambhdevhub",
+                "description": "Direct payment link, primarily for India-based supporters."
+            }
+        ],
+        "plans": [
+            {
+                "guid": "development-workstation",
+                "status": "active",
+                "name": "Development workstation (one-time)",
+                "description": "A development machine capable of building the Rust codebases (Aarambh AI, Animato) and running local model training/fine-tuning experiments. My current machine (an entry-level laptop, no dedicated GPU) cannot reliably handle either. Based on current India pricing for a Ryzen 7 7700X / RTX 4070 Super / 32GB DDR5 / 1TB NVMe prebuilt desktop (~INR 135,700) plus a monitor and peripherals (~INR 10,000), since I'd be moving from a laptop-only setup.",
+                "amount": 145000,
+                "currency": "INR",
+                "frequency": "one-time",
+                "channels": ["github-sponsors", "razorpay"]
+            },
+            {
+                "guid": "training-compute",
+                "status": "active",
+                "name": "Training compute & infrastructure",
+                "description": "Covers cloud GPU rental for training/fine-tuning runs beyond free Kaggle T4/P100 limits -- roughly 100 GPU-hours/month on an on-demand A100 (~$2/GPU-hour on providers like Lambda/AWS, ~INR 19,000) -- plus a small VPS for a public inference demo and documentation hosting (~INR 3,000/month).",
+                "amount": 22000,
+                "currency": "INR",
+                "frequency": "monthly",
+                "channels": ["github-sponsors", "buymeacoffee"]
+            }
+        ]
+    }
+}
