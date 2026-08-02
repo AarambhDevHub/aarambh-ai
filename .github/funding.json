@@ -43,7 +43,7 @@
                 "url": "https://github.com/AarambhDevHub/animato",
                 "wellKnown": "https://github.com/AarambhDevHub/animato/blob/main/.well-known/funding-manifest-urls"
             },
-            "licenses": ["spdx:MIT"],
+            "licenses": ["spdx:Apache-2.0", "spdx:MIT"],
             "tags": ["rust", "animation", "graphics", "developer-tools", "gamedev"]
         },
         {
@@ -58,7 +58,7 @@
                 "url": "https://github.com/AarambhDevHub/llm-from-scratch",
                 "wellKnown": "https://github.com/AarambhDevHub/llm-from-scratch/blob/main/.well-known/funding-manifest-urls"
             },
-            "licenses": ["spdx:MIT"],
+            "licenses": ["spdx:Apache-2.0"],
             "tags": ["education", "llm", "machine-learning", "pytorch", "course"]
         }
     ],
