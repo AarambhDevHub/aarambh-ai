@@ -37,11 +37,11 @@
             "description": "A renderer-agnostic Rust animation library -- tweens, springs, timelines, motion paths, and GPU compute -- that works across Leptos, Yew, Dioxus, Bevy, and WASM. Now at v1.7.0 with 16 crates published to crates.io plus an npm package, including a declarative macro DSL (animato-macro) with 23 built-in presets and compile-time validation. Successor to the archived Spanda library.",
             "webpageUrl": {
                 "url": "https://github.com/AarambhDevHub/animato",
-                "wellKnown": ""
+                "wellKnown": "https://github.com/AarambhDevHub/animato/blob/main/.well-known/funding-manifest-urls"
             },
             "repositoryUrl": {
                 "url": "https://github.com/AarambhDevHub/animato",
-                "wellKnown": ""
+                "wellKnown": "https://github.com/AarambhDevHub/animato/blob/main/.well-known/funding-manifest-urls"
             },
             "licenses": ["spdx:MIT"],
             "tags": ["rust", "animation", "graphics", "developer-tools", "gamedev"]
@@ -52,11 +52,11 @@
             "description": "A 37-chapter public course explaining how large language models work internally, from tokenization and embeddings through attention, training loops, quantization, distributed training, LoRA, DPO, GRPO, distillation, RAG, tool use, AI agents, and safety. Includes a small runnable decoder-only Transformer in PyTorch with tests, plus guides for building datasets from Hugging Face, Kaggle, and Common Crawl. Explicitly framed as educational material, not a production LLM framework.",
             "webpageUrl": {
                 "url": "https://github.com/AarambhDevHub/llm-from-scratch",
-                "wellKnown": ""
+                "wellKnown": "https://github.com/AarambhDevHub/llm-from-scratch/blob/main/.well-known/funding-manifest-urls"
             },
             "repositoryUrl": {
                 "url": "https://github.com/AarambhDevHub/llm-from-scratch",
-                "wellKnown": ""
+                "wellKnown": "https://github.com/AarambhDevHub/llm-from-scratch/blob/main/.well-known/funding-manifest-urls"
             },
             "licenses": ["spdx:MIT"],
             "tags": ["education", "llm", "machine-learning", "pytorch", "course"]
